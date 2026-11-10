@@ -2,7 +2,6 @@ package io.xac.systemd.spec;
 
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -51,29 +50,41 @@ public final class PathLinkGuard {
      * 校验层（status / logs / destroy / apply 共用）用它，保证危险目标在改动前就被拒绝。
      */
     public static String checkShape(PathLink link, Path unitDir, Path envDir, Path packageDir) {
+        // 目标按真实父路径解析（最后一段走 lstat）；其余四个路径也按真实路径解析，
+        // 再同时比较词法形式与解析形式——解析失败时词法相等同样必须拒绝。
         Path source = link.source.toAbsolutePath().normalize();
+        Path sourceReal = resolveReal(link.source);
         Path target = resolveTarget(link.target);
+        Path targetLexical = link.target.toAbsolutePath().normalize();
         Path unit = unitDir.toAbsolutePath().normalize();
+        Path unitReal = resolveReal(unitDir);
+        Path env = envDir.toAbsolutePath().normalize();
+        Path envReal = resolveReal(envDir);
+        Path pkg = packageDir.toAbsolutePath().normalize();
+        Path pkgReal = resolveReal(packageDir);
 
         for (Path protectedDir : absoluteProtected()) {
             if (isRoot(protectedDir)) {
-                if (target.equals(protectedDir)) {
-                    return "目标是被保护的系统目录: " + target;
+                if (target.equals(protectedDir) || targetLexical.equals(protectedDir)) {
+                    return "目标是被保护的系统目录: " + targetLexical;
                 }
-            } else if (target.equals(protectedDir) || target.startsWith(protectedDir)) {
-                return "目标是被保护的系统目录: " + target;
+            } else if (target.equals(protectedDir) || target.startsWith(protectedDir)
+                    || targetLexical.equals(protectedDir) || targetLexical.startsWith(protectedDir)) {
+                return "目标是被保护的系统目录: " + targetLexical;
             }
         }
-        if (target.equals(source)) {
-            return "目标不能与源相同: " + target;
+        if (target.equals(source) || target.equals(sourceReal)
+                || targetLexical.equals(source) || targetLexical.equals(sourceReal)) {
+            return "目标不能与源相同: " + targetLexical;
         }
-        if (isAncestorOrSame(target, unit)
-                || isAncestorOrSame(target, envDir)
-                || isAncestorOrSame(target, packageDir)) {
-            return "目标不能是 unit 目录、env 目录或包目录本身或其上级: " + target;
+        if (isAncestorOrSameAny(target, targetLexical, unit, unitReal)
+                || isAncestorOrSameAny(target, targetLexical, env, envReal)
+                || isAncestorOrSameAny(target, targetLexical, pkg, pkgReal)) {
+            return "目标不能是 unit 目录、env 目录或包目录本身或其上级: " + targetLexical;
         }
-        if (target.startsWith(unit)) {
-            return "目标不能位于 unit 目录下: " + target;
+        if (target.startsWith(unit) || target.startsWith(unitReal)
+                || targetLexical.startsWith(unit) || targetLexical.startsWith(unitReal)) {
+            return "目标不能位于 unit 目录下: " + targetLexical;
         }
         return null;
     }
@@ -98,6 +109,12 @@ public final class PathLinkGuard {
             return absolute.normalize();
         }
         return parent.resolve(fileName.toString());
+    }
+
+    /** 用于 source / unitDir / envDir / packageDir：尽量解析成真实路径，失败时退回词法形式。 */
+    static Path resolveReal(Path path) {
+        Path resolved = resolveExisting(path.toAbsolutePath());
+        return resolved == null ? path.toAbsolutePath().normalize() : resolved;
     }
 
     private static Path resolveExisting(Path path) {
@@ -152,9 +169,12 @@ public final class PathLinkGuard {
         return result;
     }
 
-    private static boolean isAncestorOrSame(Path target, Path dir) {
-        return dir.toAbsolutePath().normalize().startsWith(target);
+    /** 目标（词法或真实形式）是 dir（词法或真实形式）本身或其上级。 */
+    private static boolean isAncestorOrSameAny(Path t1, Path t2, Path d1, Path d2) {
+        return d1.startsWith(t1) || d1.startsWith(t2)
+                || d2.startsWith(t1) || d2.startsWith(t2);
     }
+
     private PathLinkGuard() {
     }
 }

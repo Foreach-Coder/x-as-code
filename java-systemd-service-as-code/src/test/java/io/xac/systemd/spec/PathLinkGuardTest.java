@@ -34,13 +34,17 @@ class PathLinkGuardTest {
         return PathLinkGuard.checkShape(link, unitDir(), envDir(), packageDir());
     }
 
+    private static PathLink link(Path source, Path target) {
+        return new PathLink(source + ":" + target, source, target);
+    }
+
     @Test
     void rejectsTargetResolvedThroughSymlinkedAncestor() throws IOException {
         Assumptions.assumeTrue(supportsSymlinks(root));
         Path link = root.resolve("link");
         Files.createSymbolicLink(link, root.getRoot());
 
-        String problem = check(PathLink.of(root.resolve("src"), link.resolve("etc")));
+        String problem = check(link(root.resolve("src"), link.resolve("etc")));
 
         assertNotNull(problem);
         assertTrue(problem.contains("被保护"), problem);
@@ -52,7 +56,7 @@ class PathLinkGuardTest {
         Path link = root.resolve("link");
         Files.createSymbolicLink(link, root.getRoot());
 
-        String problem = check(PathLink.of(root.resolve("src"), link.resolve("..").resolve("etc")));
+        String problem = check(link(root.resolve("src"), link.resolve("..").resolve("etc")));
 
         assertNotNull(problem);
         assertTrue(problem.contains("被保护"), problem);
@@ -65,14 +69,14 @@ class PathLinkGuardTest {
         Files.createSymbolicLink(link, root.getRoot());
 
         // 移动链接本身不会动到它指向的目录，因此这里应当放行。
-        assertNull(check(PathLink.of(root.resolve("src"), link)));
+        assertNull(check(link(root.resolve("src"), link)));
     }
 
     @Test
     void rejectsTargetUnderUnitDir() {
         Path target = unitDir().resolve("demo.service");
 
-        String problem = check(PathLink.of(root.resolve("src"), target));
+        String problem = check(link(root.resolve("src"), target));
 
         assertNotNull(problem);
         assertTrue(problem.contains("unit 目录"), problem);
@@ -80,10 +84,45 @@ class PathLinkGuardTest {
 
     @Test
     void rejectsTargetUnderProtectedDir() {
-        String problem = check(PathLink.of(root.resolve("src"), Paths.get("/etc/passwd")));
+        String problem = check(link(root.resolve("src"), Paths.get("/etc/passwd")));
 
         assertNotNull(problem);
         assertTrue(problem.contains("被保护"), problem);
+    }
+
+    @Test
+    void rejectsTargetEqualToPackageDirReachedThroughSymlinkedParent() throws IOException {
+        Assumptions.assumeTrue(supportsSymlinks(root));
+        Files.createDirectories(root.resolve("real").resolve("pkg"));
+        Path link = root.resolve("link");
+        Files.createSymbolicLink(link, root.resolve("real"));
+        Path pkgThroughLink = link.resolve("pkg");
+
+        // 包目录经符号链接到达；目标解析后正是真实的包目录，旧实现只解析目标会漏掉。
+        String problem = PathLinkGuard.checkShape(
+                link(pkgThroughLink.resolve("data"), pkgThroughLink),
+                unitDir(), envDir(), pkgThroughLink);
+
+        assertNotNull(problem);
+        assertTrue(problem.contains("包目录"), problem);
+    }
+
+    @Test
+    void rejectsTargetThatIsRealParentOfSymlinkedPackageDir() throws IOException {
+        Assumptions.assumeTrue(supportsSymlinks(root));
+        Files.createDirectories(root.resolve("real").resolve("pkg"));
+        Path link = root.resolve("link");
+        Files.createSymbolicLink(link, root.resolve("real"));
+        Path pkgThroughLink = link.resolve("pkg");
+        Path realParent = root.resolve("real");
+
+        // 词法上看 target（real）不是 pkgThroughLink 的上级；真实路径上它是。
+        String problem = PathLinkGuard.checkShape(
+                link(pkgThroughLink.resolve("data"), realParent),
+                unitDir(), envDir(), pkgThroughLink);
+
+        assertNotNull(problem);
+        assertTrue(problem.contains("上级"), problem);
     }
 
     private static boolean supportsSymlinks(Path dir) {

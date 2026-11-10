@@ -9,7 +9,7 @@ public final class PathLink {
     public final Path source;
     public final Path target;
 
-    private PathLink(String raw, Path source, Path target) {
+    PathLink(String raw, Path source, Path target) {
         this.raw = raw;
         this.source = source;
         this.target = target;
@@ -35,10 +35,5 @@ public final class PathLink {
     /** 没有包目录上下文时，source 相对当前工作目录解析。 */
     public static PathLink parse(String raw) {
         return parse(raw, Paths.get("").toAbsolutePath().normalize());
-    }
-
-    /** 供测试与内部逻辑直接构造，绕过字符串解析。 */
-    static PathLink of(Path source, Path target) {
-        return new PathLink(source + ":" + target, source, target);
     }
 }
