@@ -11,6 +11,11 @@ public final class UnitRenderer {
     public static final String HEADER = "# Managed by xac. Do not edit.";
 
     public String render(ServiceSpec spec, SystemdTarget target) {
+        // 防线：即使将来新增字段忘了加校验，也不允许换行进入 unit 的物理行。
+        requireSingleLine("workdir", spec.workdir == null ? null : spec.workdir.toString());
+        requireSingleLine("runtime.java", spec.java);
+        requireSingleLine("artifact.jar", spec.jar == null ? null : spec.jar.toString());
+
         List<List<String>> sections = new ArrayList<List<String>>();
 
         List<String> unit = new ArrayList<String>();
@@ -156,6 +161,12 @@ public final class UnitRenderer {
             return escaped;
         }
         return "\"" + escaped.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+    }
+
+    private static void requireSingleLine(String field, String value) {
+        if (value != null && (value.indexOf('\n') >= 0 || value.indexOf('\r') >= 0)) {
+            throw new IllegalArgumentException(field + " 不能包含换行");
+        }
     }
 
     private static String workingDirectory(ServiceSpec spec) {

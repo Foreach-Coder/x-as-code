@@ -4,8 +4,10 @@ import io.xac.systemd.spec.Lifecycle;
 import io.xac.systemd.spec.ServiceSpec;
 import io.xac.systemd.spec.ValidationRunner;
 import io.xac.systemd.spec.Violation;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -116,6 +118,51 @@ class ValidatorsTest {
         List<Violation> out = ValidationRunner.run(base().properties(properties).build());
         assertEquals(1, out.size(), messages(out).toString());
         assertEquals("properties.foo: 不能包含换行", out.get(0).toString());
+    }
+
+    @Test
+    void rejectsNewlineInJar() {
+        ServiceSpec spec;
+        try {
+            spec = base().jar("a\nb.jar").build();
+        } catch (InvalidPathException e) {
+            // Windows 的 Path 不允许换行，这一注入面在该平台不存在。
+            Assumptions.abort("平台不接受含换行的路径: " + e.getInput());
+            return;
+        }
+        List<Violation> out = ValidationRunner.run(spec);
+        assertEquals(1, out.size(), messages(out).toString());
+        assertEquals("artifact.jar: 不能包含换行", out.get(0).toString());
+    }
+
+    @Test
+    void rejectsNewlineInJava() {
+        List<Violation> out = ValidationRunner.run(base().java("/usr/bin/ja\nva").build());
+        assertEquals(1, out.size(), messages(out).toString());
+        assertEquals("runtime.java: 不能包含换行", out.get(0).toString());
+    }
+
+    @Test
+    void rejectsNewlineInWorkdir() {
+        ServiceSpec spec;
+        try {
+            spec = base().workdir("work\ndir").build();
+        } catch (InvalidPathException e) {
+            Assumptions.abort("平台不接受含换行的路径: " + e.getInput());
+            return;
+        }
+        List<Violation> out = ValidationRunner.run(spec);
+        assertEquals(1, out.size(), messages(out).toString());
+        assertEquals("workdir: 不能包含换行", out.get(0).toString());
+    }
+
+    @Test
+    void rejectsNewlineInPropertyKey() {
+        Map<String, String> properties = new LinkedHashMap<String, String>();
+        properties.put("a\nb", "v");
+        List<Violation> out = ValidationRunner.run(base().properties(properties).build());
+        assertEquals(1, out.size(), messages(out).toString());
+        assertEquals("properties: 不能包含换行", out.get(0).toString());
     }
 
     @Test

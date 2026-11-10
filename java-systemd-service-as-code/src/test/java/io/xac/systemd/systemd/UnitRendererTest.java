@@ -2,8 +2,10 @@ package io.xac.systemd.systemd;
 
 import io.xac.systemd.spec.Lifecycle;
 import io.xac.systemd.spec.ServiceSpec;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -13,6 +15,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class UnitRendererTest {
 
@@ -162,6 +166,64 @@ class UnitRendererTest {
         assertEquals(renderer.render(spec, TARGET), renderer.render(spec, TARGET));
         assertEquals(UnitNaming.unitName(spec), "demo.service");
         assertEquals(Paths.get("/opt/xac/demo.env"), UnitNaming.envPath(spec, TARGET));
+    }
+
+    @Test
+    void rejectsNewlineInWorkdir() {
+        ServiceSpec spec;
+        try {
+            spec = ServiceSpec.builder(PKG)
+                    .name("demo")
+                    .jar("app.jar")
+                    .java("/usr/bin/java")
+                    .opts(opts())
+                    .workdir("a\nb")
+                    .lifecycle(new Lifecycle(null, null, null, null))
+                    .build();
+        } catch (InvalidPathException e) {
+            Assumptions.abort("平台不接受含换行的路径: " + e.getInput());
+            return;
+        }
+
+        IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                () -> new UnitRenderer().render(spec, TARGET));
+        assertTrue(failure.getMessage().contains("workdir"), failure.getMessage());
+    }
+
+    @Test
+    void rejectsNewlineInJava() {
+        ServiceSpec spec = ServiceSpec.builder(PKG)
+                .name("demo")
+                .jar("app.jar")
+                .java("/usr/bin/ja\nva")
+                .opts(opts())
+                .lifecycle(new Lifecycle(null, null, null, null))
+                .build();
+
+        IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                () -> new UnitRenderer().render(spec, TARGET));
+        assertTrue(failure.getMessage().contains("runtime.java"), failure.getMessage());
+    }
+
+    @Test
+    void rejectsNewlineInJar() {
+        ServiceSpec spec;
+        try {
+            spec = ServiceSpec.builder(PKG)
+                    .name("demo")
+                    .jar("a\nb.jar")
+                    .java("/usr/bin/java")
+                    .opts(opts())
+                    .lifecycle(new Lifecycle(null, null, null, null))
+                    .build();
+        } catch (InvalidPathException e) {
+            Assumptions.abort("平台不接受含换行的路径: " + e.getInput());
+            return;
+        }
+
+        IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                () -> new UnitRenderer().render(spec, TARGET));
+        assertTrue(failure.getMessage().contains("artifact.jar"), failure.getMessage());
     }
 
     private static String lineOf(String text, String prefix) {
