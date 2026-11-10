@@ -40,3 +40,58 @@ jar 在开发机构建（`javac --release 8` / Maven），用 `docker cp` 或在
 - `systemctl is-system-running` 可能返回 `degraded`（容器里有必然失败的单元），
   断言要接受 `running | degraded`。
 - 这个镜像只用于 e2e，不随 CLI 分发。
+
+## 冒烟脚本
+
+一条命令验证 fat jar 在真实 systemd 上的 `apply / status / logs / stop / destroy` 全流程：
+
+```powershell
+# Windows（Windows PowerShell 5.1 或 PowerShell 7 均可）
+powershell -NoProfile -ExecutionPolicy Bypass -File e2e\smoke.ps1
+```
+
+```bash
+# Linux / macOS（需要 PowerShell 7 的 pwsh）
+pwsh -NoProfile -File e2e/smoke.ps1
+# 等价入口：只做转发，断言都在 smoke.ps1
+bash e2e/smoke.sh
+```
+
+脚本做的事：
+
+1. `mvn -q package` 产出 fat jar，并用 `javac --release 8` + `jar cfe` 打一个示例服务；
+2. 起一次性容器（镜像缺省 `xac-e2e:24.04`，可用环境变量 `IMAGE` 覆盖；镜像不存在时
+   按 `e2e/Dockerfile` 构建，耗时较长）；
+3. 只通过 `docker cp` 把 CLI jar、`xac.yaml`、示例 jar 放进容器（CLI 不上传产物）；
+4. 逐项断言；全部通过才打印最后一行 `SMOKE OK`，并删除容器；
+   任何断言失败都会非零退出，且保留容器方便排查（`docker exec -it xac-smoke bash`）。
+
+前置条件：`docker`、JDK（`java` / `javac` / `jar`，能编 `--release 8`）、Maven。
+
+`smoke.ps1` 自带 `--release 8` 编译检查；脚本本身用 ASCII 写成，兼容 Windows
+PowerShell 5.1 与 PowerShell 7（Windows 上仅有 5.1 的机器不需要装 7）。
+
+### e2e coverage
+
+脚本里真正钉住的行为，每条都有独立断言：
+
+- **path-links 状态机**（Windows 上 JUnit 会跳过这部分，这里是唯一执行点）：
+  1. 目标不存在 → 建软链接，指向配置里的源；
+  2. 再次 `apply` → 幂等：链接 inode 不变、不新增 `.bak`；
+  3. 目标处是真实目录 → 移到 `<target>.bak`，再建链接；
+  4. 目标处是指向别处的软链接 → 备份为 `.bak`；`.bak` 已存在时改用带时间戳的
+     `<target>.bak.yyyyMMddHHmmss`，旧备份内容与旧链接目标都保留；
+  5. `destroy` 只删指向配置源的链接：目标处被换成真实文件 / 外来软链接时原样保留。
+- **status**：apply 前报漂移（退出码 1，逐条 `drift:`，含每个 `path-links[i]`）；
+  apply 后 `(in sync)` + `auto-start: enabled`，退出码 0。
+- **apply**：`systemctl enable / restart`、写 unit（0644）与 env（0600）、
+  `EnvironmentFile` 注入 `GREETING`、`WorkingDirectory` 等于包目录、
+  `-Xmx256m` 生效（JVM 报 `XMX=268435456`）。
+- **logs**：`xac logs` 能读到 journal 里的服务输出。
+- **stop**：`systemctl stop` 后 `ActiveState=inactive`（`SuccessExitStatus=143`，不是
+  failed），且 shutdown hook 打印 `STOPPING`。
+- **destroy**：unit / env / 自己创建的链接都不在了，`LoadState=not-found`；
+  被备份的真实目录、既有 `.bak`、时间戳备份、真实文件、外来软链接全部保留。
+
+所有 `/opt/demo`、`/opt/links/*`、`/opt/elsewhere` 都只在一次性容器里创建，
+成功后随容器一起消失。
