@@ -6,7 +6,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 import io.xac.systemd.exec.CommandRunner;
 import io.xac.systemd.spec.PathLink;
@@ -63,13 +62,13 @@ public final class StatusRunner {
         }
 
         List<String> linkProblems = checkLinks(spec);
-        Map<String, String> show = SystemctlShow.show(runner, UnitNaming.unitName(spec));
+        SystemctlShow.Query show = SystemctlShow.query(runner, UnitNaming.unitName(spec));
 
         boolean wantEnabled = spec.lifecycle.autoStartOrDefault();
-        boolean enabled = "enabled".equals(show.get("UnitFileState"));
+        boolean enabled = "enabled".equals(show.values.get("UnitFileState"));
         return new StatusResult(spec.name, spec.packageDir, unitPath, Files.isRegularFile(unitPath),
-                unitInSync, envPath, envConfigured, envInstalled, envReadable, envInSync, show,
-                enabled, wantEnabled, linkProblems);
+                unitInSync, envPath, envConfigured, envInstalled, envReadable, envInSync,
+                show.values, show.ok, enabled, wantEnabled, linkProblems);
     }
 
     private EnvState readEnv(Path path, String expected) {

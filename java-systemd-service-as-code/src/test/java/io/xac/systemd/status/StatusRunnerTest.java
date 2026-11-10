@@ -40,6 +40,16 @@ class StatusRunnerTest {
             "FragmentPath=/etc/systemd/system/demo.service",
             "");
 
+    private static final String SHOW_INACTIVE = String.join("\n",
+            "LoadState=loaded",
+            "ActiveState=inactive",
+            "SubState=dead",
+            "UnitFileState=enabled",
+            "MainPID=0",
+            "ActiveEnterTimestamp=",
+            "FragmentPath=/etc/systemd/system/demo.service",
+            "");
+
     private SystemdTarget target() {
         return new SystemdTarget(root.resolve("units"), root.resolve("env"));
     }
@@ -65,6 +75,16 @@ class StatusRunnerTest {
         RecordingRunner runner = new RecordingRunner();
         runner.addResultForCommand("systemctl", new ExecResult(0, SHOW, ""));
         return runner;
+    }
+
+    private static void install(ServiceSpec spec, SystemdTarget target) throws IOException {
+        Files.createDirectories(target.unitDir);
+        Files.createDirectories(target.envDir);
+        UnitRenderer renderer = new UnitRenderer();
+        Files.write(UnitNaming.unitPath(spec, target),
+                renderer.render(spec, target).getBytes(StandardCharsets.UTF_8));
+        Files.write(UnitNaming.envPath(spec, target),
+                renderer.renderEnvFile(spec).getBytes(StandardCharsets.UTF_8));
     }
 
     @Test
@@ -166,5 +186,41 @@ class StatusRunnerTest {
         }
         assertTrue(result.format().contains("env: (无法校验：需要 root 权限)"), result.format());
         assertFalse(result.format().contains("out of sync"), result.format());
+    }
+
+    /** 设计文档 §6.3：exit 0 还要求服务在运行；inactive 必须让 status 以 1 退出。 */
+    @Test
+    void reportsInactiveServiceAsDrift() throws IOException {
+        ServiceSpec spec = spec(env());
+        SystemdTarget target = target();
+        install(spec, target);
+        RecordingRunner runner = new RecordingRunner();
+        runner.addResultForCommand("systemctl", new ExecResult(0, SHOW_INACTIVE, ""));
+
+        StatusResult result = new StatusRunner().run(spec, target, runner);
+
+        assertFalse(result.healthy(), result.format());
+        assertTrue(result.drift().contains("service: inactive (dead)"), result.drift().toString());
+        // StatusCommand 把 !healthy() 映射为退出码 1。
+        assertEquals(1, result.healthy() ? 0 : 1);
+    }
+
+    /** 查询失败不能被读成「未启用」；只报告没有观察到状态。 */
+    @Test
+    void reportsUnqueryableStateAsDrift() throws IOException {
+        ServiceSpec spec = spec(env());
+        SystemdTarget target = target();
+        install(spec, target);
+        RecordingRunner runner = new RecordingRunner();
+        runner.addResultForCommand("systemctl",
+                new ExecResult(1, "", "Failed to connect to bus: No such file or directory"));
+
+        StatusResult result = new StatusRunner().run(spec, target, runner);
+
+        assertFalse(result.healthy(), result.format());
+        assertTrue(result.drift().contains("systemd: 无法查询 demo.service 的状态"),
+                result.drift().toString());
+        assertFalse(result.drift().contains("未设置开机自启"), result.drift().toString());
+        assertTrue(result.format().contains("auto-start: unknown"), result.format());
     }
 }
