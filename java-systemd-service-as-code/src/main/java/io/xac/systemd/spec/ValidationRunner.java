@@ -7,6 +7,7 @@ import java.util.List;
 import io.xac.systemd.spec.validators.EnvValidator;
 import io.xac.systemd.spec.validators.LifecycleValidator;
 import io.xac.systemd.spec.validators.NameValidator;
+import io.xac.systemd.spec.validators.NewlineValidator;
 import io.xac.systemd.spec.validators.PathLinksValidator;
 import io.xac.systemd.spec.validators.PlaceholderValidator;
 
@@ -16,6 +17,7 @@ public final class ValidationRunner {
     private static final List<Validator> VALIDATORS = Arrays.<Validator>asList(
             new NameValidator(),
             new EnvValidator(),
+            new NewlineValidator(),
             new PathLinksValidator(),
             new PlaceholderValidator(),
             new LifecycleValidator());

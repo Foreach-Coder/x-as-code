@@ -94,6 +94,31 @@ class ValidatorsTest {
     }
 
     @Test
+    void rejectsNewlineInDescription() {
+        List<Violation> out = ValidationRunner.run(
+                base().description("第一行\n第二行").build());
+        assertEquals(1, out.size(), messages(out).toString());
+        assertEquals("description: 不能包含换行", out.get(0).toString());
+    }
+
+    @Test
+    void rejectsNewlineInOpts() {
+        List<Violation> out = ValidationRunner.run(
+                base().opts(asList("-Xmx512m", "-Dx=a\rb")).build());
+        assertEquals(1, out.size(), messages(out).toString());
+        assertEquals("runtime.opts[1]: 不能包含换行", out.get(0).toString());
+    }
+
+    @Test
+    void rejectsNewlineInProperties() {
+        Map<String, String> properties = new LinkedHashMap<String, String>();
+        properties.put("foo", "a\nb");
+        List<Violation> out = ValidationRunner.run(base().properties(properties).build());
+        assertEquals(1, out.size(), messages(out).toString());
+        assertEquals("properties.foo: 不能包含换行", out.get(0).toString());
+    }
+
+    @Test
     void rejectsBadLifecycleValues() {
         List<Violation> out = ValidationRunner.run(base()
                 .lifecycle(new Lifecycle(true, "sometimes", 0, -1))
