@@ -22,6 +22,7 @@ public final class RecordingRunner implements CommandRunner {
         byCommand.put(executable, result);
     }
 
+    /** 只记录 {@code run} 的调用；继承 stdio 的调用见 {@link #inheritIoCalls()}。 */
     public List<List<String>> calls() {
         return calls;
     }
@@ -43,6 +44,5 @@ public final class RecordingRunner implements CommandRunner {
     @Override
     public void runInheritIo(List<String> argv) {
         inheritIo.add(new ArrayList<String>(argv));
-        calls.add(new ArrayList<String>(argv));
     }
 }

@@ -11,7 +11,7 @@ import picocli.CommandLine.Model.CommandSpec;
         mixinStandardHelpOptions = true,
         version = "0.1.0",
         description = "把 Java 服务安装成 systemd unit",
-        subcommands = {ApplyCommand.class, StatusCommand.class})
+        subcommands = {ApplyCommand.class, StatusCommand.class, LogsCommand.class})
 public final class RootCommand implements Callable<Integer> {
 
     @Spec
