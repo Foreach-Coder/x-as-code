@@ -131,6 +131,9 @@ class DestroyRunnerTest {
                 new PrintStream(buffer, true, "UTF-8"));
 
         assertEquals(0, code);
+        String output = buffer.toString("UTF-8");
+        assertTrue(output.contains("同名 unit 不由 xac 管理，未停止；如仍有进程请手动处理: "
+                + UnitNaming.unitPath(spec, target())), output);
         for (java.util.List<String> call : runner.calls()) {
             assertFalse(call.contains("stop"), call.toString());
             assertFalse(call.contains("disable"), call.toString());

@@ -46,6 +46,10 @@ public final class DestroyRunner {
             }
         }
         boolean skipUnitActions = !managed;
+        if (skipUnitActions) {
+            // 无法证明归属就不 stop/disable，但必须让用户知道可能还有同名进程在跑。
+            ctx.warnings.add("同名 unit 不由 xac 管理，未停止；如仍有进程请手动处理: " + unitPath);
+        }
         if (pathExists && !regularFile) {
             out.println("警告: unit 路径不是普通文件，已跳过: " + unitPath);
         } else if (regularFile && !managed) {
