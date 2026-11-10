@@ -142,6 +142,7 @@ class UnitRendererTest {
                 .build();
 
         assertEquals(String.join("\n",
+                "# Managed by xac. Do not edit.",
                 "BAR=\"hello world\"",
                 "EMPTY=",
                 "QUOTE=\"a\\\"b\"",

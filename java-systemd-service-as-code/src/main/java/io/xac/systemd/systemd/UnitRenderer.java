@@ -128,6 +128,8 @@ public final class UnitRenderer {
 
     public String renderEnvFile(ServiceSpec spec) {
         StringBuilder out = new StringBuilder();
+        // 设计文档 §5.1：两个生成文件都以管理头开始；systemd 的 EnvironmentFile 忽略 # 注释。
+        out.append(HEADER).append('\n');
         for (Map.Entry<String, String> e : spec.env.entrySet()) {
             String value = e.getValue() == null ? "" : e.getValue();
             out.append(e.getKey()).append('=');
