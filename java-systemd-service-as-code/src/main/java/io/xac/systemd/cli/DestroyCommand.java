@@ -2,6 +2,8 @@ package io.xac.systemd.cli;
 
 import java.io.Console;
 import java.io.IOException;
+import java.io.PrintStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.concurrent.Callable;
@@ -9,7 +11,10 @@ import java.util.concurrent.Callable;
 import io.xac.systemd.apply.ApplyContext;
 import io.xac.systemd.apply.DestroyRunner;
 import io.xac.systemd.exec.ProcessRunner;
+import io.xac.systemd.spec.PathLink;
+import io.xac.systemd.spec.ServiceSpec;
 import io.xac.systemd.systemd.SystemdTarget;
+import io.xac.systemd.systemd.UnitNaming;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
@@ -35,12 +40,33 @@ public final class DestroyCommand implements Callable<Integer> {
             SpecCommands.report(loaded.violations);
             return 2;
         }
+        SystemdTarget target = SystemdTarget.defaults();
+        printPlan(loaded.spec, target, System.out);
         if (!yes && !dryRun && !confirm(loaded.spec.name)) {
             return 2;
         }
-        ApplyContext ctx = new ApplyContext(loaded.spec, SystemdTarget.defaults(),
-                new ProcessRunner(), dryRun);
+        ApplyContext ctx = new ApplyContext(loaded.spec, target, new ProcessRunner(), dryRun);
         return new DestroyRunner().run(ctx, System.out);
+    }
+
+    /** 在确认之前把删除范围与保留范围讲清楚；--yes 时也打印，便于脚本比较输出。 */
+    static void printPlan(ServiceSpec spec, SystemdTarget target, PrintStream out) throws IOException {
+        out.println("将删除:");
+        out.println("  " + UnitNaming.unitPath(spec, target));
+        out.println("  " + UnitNaming.envPath(spec, target));
+        for (String raw : spec.pathLinks) {
+            PathLink link = PathLink.parse(raw, spec.packageDir);
+            if (link == null) {
+                continue;
+            }
+            if (Files.isSymbolicLink(link.target)
+                    && Files.readSymbolicLink(link.target).equals(link.source)) {
+                out.println("  " + link.target.toAbsolutePath().normalize());
+            }
+        }
+        Path workdir = spec.workdir == null ? spec.packageDir : spec.workdir;
+        out.println("保留: 包目录 " + spec.packageDir + "、工作目录 " + workdir
+                + "、.bak 备份与日志");
     }
 
     private boolean confirm(String name) throws IOException {
