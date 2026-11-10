@@ -137,7 +137,6 @@ public final class SpecLoader {
                 (Integer) get(lifecycle, "restart-sec"),
                 (Integer) get(lifecycle, "timeout-stop-sec"));
         String workdirRaw = (String) m.get("workdir");
-        Path workdir = workdirRaw == null ? null : packageRoot.resolve(workdirRaw).normalize();
         List<String> opts = new ArrayList<String>();
         Object rawOpts = runtime.get("opts");
         if (rawOpts instanceof List) {
@@ -155,12 +154,12 @@ public final class SpecLoader {
         return ServiceSpec.builder(packageRoot)
                 .name((String) m.get("name"))
                 .description((String) m.get("description"))
-                .jar(packageRoot.resolve((String) artifact.get("jar")).normalize())
+                .jar((String) artifact.get("jar"))
                 .java((String) runtime.get("java"))
                 .opts(opts)
                 .env(Schema.stringMap(m.get("env")))
                 .properties(Schema.stringMap(m.get("properties")))
-                .workdir(workdir)
+                .workdir(workdirRaw)
                 .pathLinks(pathLinks)
                 .lifecycle(lc)
                 .build();

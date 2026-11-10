@@ -12,12 +12,12 @@ public final class ServiceSpec {
         private final Path packageDir;
         private String name;
         private String description;
-        private Path jar;
+        private String jar;
         private String java;
         private List<String> opts;
         private Map<String, String> env;
         private Map<String, String> properties;
-        private Path workdir;
+        private String workdir;
         private List<String> pathLinks;
         private Lifecycle lifecycle = new Lifecycle(null, null, null, null);
 
@@ -29,7 +29,7 @@ public final class ServiceSpec {
 
         public Builder description(String description) { this.description = description; return this; }
 
-        public Builder jar(Path jar) { this.jar = jar; return this; }
+        public Builder jar(String jar) { this.jar = jar; return this; }
 
         public Builder java(String java) { this.java = java; return this; }
 
@@ -39,7 +39,7 @@ public final class ServiceSpec {
 
         public Builder properties(Map<String, String> properties) { this.properties = properties; return this; }
 
-        public Builder workdir(Path workdir) { this.workdir = workdir; return this; }
+        public Builder workdir(String workdir) { this.workdir = workdir; return this; }
 
         public Builder pathLinks(List<String> pathLinks) { this.pathLinks = pathLinks; return this; }
 
@@ -65,7 +65,8 @@ public final class ServiceSpec {
     private ServiceSpec(Builder b) {
         this.name = b.name;
         this.description = b.description;
-        this.jar = b.jar;
+        Path root = b.packageDir.toAbsolutePath().normalize();
+        this.jar = b.jar == null ? null : root.resolve(b.jar).normalize();
         this.java = b.java;
         this.opts = b.opts == null ? new ArrayList<String>() : b.opts;
         this.env = b.env == null
@@ -74,10 +75,10 @@ public final class ServiceSpec {
         this.properties = b.properties == null
                 ? new LinkedHashMap<String, String>()
                 : new LinkedHashMap<String, String>(b.properties);
-        this.workdir = b.workdir;
+        this.workdir = b.workdir == null ? null : root.resolve(b.workdir).normalize();
         this.pathLinks = b.pathLinks == null ? new ArrayList<String>() : b.pathLinks;
         this.lifecycle = b.lifecycle;
-        this.packageDir = b.packageDir;
+        this.packageDir = root;
     }
 
     public static Builder builder(Path packageDir) {

@@ -121,7 +121,7 @@ public final class Schema {
                             }
                             String key = (String) e.getKey();
                             String childPath = path.isEmpty() ? key : path + "." + key;
-                            if (e.getValue() != null && !(e.getValue() instanceof String)) {
+                            if (!(e.getValue() instanceof String)) {
                                 out.add(new Violation(childPath, "应为字符串"));
                             }
                         }

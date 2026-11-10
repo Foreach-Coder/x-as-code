@@ -100,4 +100,27 @@ class SpecLoaderTest {
         assertNull(result.spec);
         assertTrue(result.violations.toString().contains("A"), result.violations.toString());
     }
+
+    @Test
+    void reportsDuplicateEnvKeyPath() throws IOException {
+        write(minimal() + "env:\n  A: one\n  A: two\n");
+        SpecLoader.Result result = SpecLoader.load(pkg);
+        assertNull(result.spec);
+        assertEquals("env.A: 重复字段", result.violations.get(0).toString());
+    }
+
+    @Test
+    void rejectsNullEnvValue() throws IOException {
+        write(minimal() + "env:\n  SECRET:\n");
+        SpecLoader.Result result = SpecLoader.load(pkg);
+        assertNull(result.spec);
+        assertEquals("env.SECRET: 应为字符串", result.violations.get(0).toString());
+    }
+
+    @Test
+    void builderResolvesJarAndWorkdirAgainstPackageDir() {
+        ServiceSpec spec = ServiceSpec.builder(pkg).jar("app.jar").workdir("run").build();
+        assertEquals(pkg.resolve("app.jar").toAbsolutePath().normalize(), spec.jar);
+        assertEquals(pkg.resolve("run").toAbsolutePath().normalize(), spec.workdir);
+    }
 }
