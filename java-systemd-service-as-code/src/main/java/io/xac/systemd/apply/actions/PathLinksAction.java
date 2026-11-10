@@ -12,6 +12,7 @@ import io.xac.systemd.apply.Action;
 import io.xac.systemd.apply.ActionFailure;
 import io.xac.systemd.apply.ApplyContext;
 import io.xac.systemd.spec.PathLink;
+import io.xac.systemd.spec.PathLinkGuard;
 
 public final class PathLinksAction implements Action {
 
@@ -22,10 +23,16 @@ public final class PathLinksAction implements Action {
 
     @Override
     public void run(ApplyContext ctx) {
-        for (String raw : ctx.spec.pathLinks) {
+        for (int i = 0; i < ctx.spec.pathLinks.size(); i++) {
+            String raw = ctx.spec.pathLinks.get(i);
             PathLink link = PathLink.parse(raw, ctx.spec.packageDir);
             if (link == null) {
                 throw new ActionFailure("非法的 path-links 项: " + raw);
+            }
+            String problem = PathLinkGuard.check(link, ctx.target.unitDir, ctx.target.envDir,
+                    ctx.spec.packageDir);
+            if (problem != null) {
+                throw new ActionFailure("path-links[" + i + "]: " + problem);
             }
             try {
                 ensureLink(link);

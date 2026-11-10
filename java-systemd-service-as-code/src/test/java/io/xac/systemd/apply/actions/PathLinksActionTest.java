@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -28,7 +29,11 @@ class PathLinksActionTest {
     Path root;
 
     private ApplyContext context(String linkSpec) {
-        ServiceSpec spec = ServiceSpec.builder(root)
+        return context(root, linkSpec);
+    }
+
+    private ApplyContext context(Path packageDir, String linkSpec) {
+        ServiceSpec spec = ServiceSpec.builder(packageDir)
                 .name("demo")
                 .jar("app.jar")
                 .java("/usr/bin/java")
@@ -99,5 +104,46 @@ class PathLinksActionTest {
         ActionFailure failure = assertThrows(ActionFailure.class,
                 () -> new PathLinksAction().run(context(source + ":" + target)));
         assertTrue(failure.getMessage().contains("父目录"), failure.getMessage());
+    }
+
+    // 护栏在创建链接之前触发，因此这些用例不需要软链接支持。
+
+    @Test
+    void refusesProtectedTarget() throws IOException {
+        Files.createDirectories(root.resolve("payload"));
+
+        ActionFailure failure = assertThrows(ActionFailure.class,
+                () -> new PathLinksAction().run(context("payload:/etc")));
+
+        assertTrue(failure.getMessage().contains("path-links[0]"), failure.getMessage());
+        assertTrue(failure.getMessage().contains("被保护的系统目录"), failure.getMessage());
+    }
+
+    @Test
+    void refusesTargetEqualToSource() {
+        // 以当前目录为包目录，让 source 与 target 的绝对化落在同一盘符（Windows）。
+        Path cwd = Paths.get("").toAbsolutePath().normalize();
+        ActionFailure failure = assertThrows(ActionFailure.class,
+                () -> new PathLinksAction().run(
+                        context(cwd, "/tmp/xac-same:/tmp/xac-same")));
+
+        assertTrue(failure.getMessage().contains("目标不能与源相同"), failure.getMessage());
+    }
+
+    @Test
+    void failsWhenSourceDoesNotExist() {
+        ActionFailure failure = assertThrows(ActionFailure.class,
+                () -> new PathLinksAction().run(context("missing:/opt/xac-action-target")));
+
+        assertTrue(failure.getMessage().contains("源目录不存在"), failure.getMessage());
+    }
+
+    @Test
+    void refusesTargetThatIsAncestorOfPackageDir() {
+        ActionFailure failure = assertThrows(ActionFailure.class,
+                () -> new PathLinksAction().run(
+                        context(Paths.get("/opt/demo"), "cfg:/opt")));
+
+        assertTrue(failure.getMessage().contains("或其上级"), failure.getMessage());
     }
 }
