@@ -330,14 +330,14 @@ lifecycle:
 
     Wait-ForActiveState -Expected 'active' -TimeoutSeconds 30
 
-    $Journal = Wait-ForJournalText -Needle 'READY jvm=' -TimeoutSeconds 30
-    Assert-Contain $Journal 'READY jvm=' 'journal: service started'
-    $Journal = Wait-ForJournalText -Needle 'GREETING=hello world' -TimeoutSeconds 20
-    Assert-Contain $Journal 'GREETING=hello world' 'journal: EnvironmentFile reached the JVM'
-    $Journal = Wait-ForJournalText -Needle 'CWD=/opt/demo' -TimeoutSeconds 20
-    Assert-Contain $Journal 'CWD=/opt/demo' 'journal: WorkingDirectory is the package dir'
-    $Journal = Wait-ForJournalText -Needle 'XMX=268435456' -TimeoutSeconds 20
-    Assert-Contain $Journal 'XMX=268435456' 'journal: -Xmx256m reached the JVM (max heap 268435456)'
+    # Wait-ForJournalText returns only after the needle appears (it throws on
+    # timeout), so the wait itself is the assertion; re-checking the same text
+    # with Assert-Contain would be redundant.  XMX is the JVM-reported value,
+    # not the -Xmx spelling, so it stays the waited needle.
+    Wait-ForJournalText -Needle 'READY jvm=' -TimeoutSeconds 30 | Out-Null
+    Wait-ForJournalText -Needle 'GREETING=hello world' -TimeoutSeconds 20 | Out-Null
+    Wait-ForJournalText -Needle 'CWD=/opt/demo' -TimeoutSeconds 20 | Out-Null
+    Wait-ForJournalText -Needle 'XMX=268435456' -TimeoutSeconds 20 | Out-Null
 
     $UnitFileState = Invoke-Container @('systemctl', 'show', 'demo.service', '--property=UnitFileState')
     Assert-ExitCode $UnitFileState 0 'systemctl show UnitFileState'
@@ -443,14 +443,20 @@ lifecycle:
     Write-Step 'destroy outcome'
     Assert-ContainerPath '/etc/systemd/system/demo.service' '-e' $false 'no unit file left'
     Assert-ContainerPath '/etc/xac/demo.env' '-e' $false 'no env file left'
-    Assert-ContainerPath '/etc/systemd/system/multi-user.target.wants/demo.service' '-e' $false 'enable symlink removed from multi-user.target.wants'
+    # The unit file is already gone, so the wants link would be dangling;
+    # `test -e` follows the link and is true only if the target exists, which
+    # makes it vacuous here.  `test -L` is the load-bearing check: the link
+    # itself must be gone whether or not it dangles.
+    Assert-ContainerPath '/etc/systemd/system/multi-user.target.wants/demo.service' '-e' $false 'wants symlink target no longer resolves'
+    Assert-ContainerPath '/etc/systemd/system/multi-user.target.wants/demo.service' '-L' $false 'enable symlink itself removed from multi-user.target.wants'
 
     $LoadState = Invoke-Container @('systemctl', 'show', 'demo.service', '--property=LoadState')
     Assert-ExitCode $LoadState 0 'systemctl show LoadState'
     Assert-Contain $LoadState.Output 'not-found' 'systemd no longer knows demo.service'
 
-    $Pgrep = Invoke-Container @('pgrep', '-f', '/opt/demo/app.jar')
-    Assert-ExitCode $Pgrep 1 'pgrep -f /opt/demo/app.jar exits 1 (no match)'
+    # Escape the dot so the pattern cannot match paths such as appXjar.
+    $Pgrep = Invoke-Container @('pgrep', '-f', '/opt/demo/app\.jar')
+    Assert-ExitCode $Pgrep 1 'pgrep -f /opt/demo/app\.jar exits 1 (no match)'
     Assert-Equal $Pgrep.Output.Trim() '' 'no process is running /opt/demo/app.jar'
 
     Assert-ContainerPath '/opt/links/a/app.jar' '-L' $false 'a: managed link removed'
