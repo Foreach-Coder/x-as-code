@@ -31,7 +31,7 @@ try {
 
 $E2eDir = $PSScriptRoot
 $ProjectDir = Split-Path -Parent $E2eDir
-$JarPath = Join-Path $ProjectDir 'target\java-systemd-service-cli-0.1.0-SNAPSHOT.jar'
+$JarPath = Join-Path $ProjectDir (Join-Path 'target' 'java-systemd-service-cli-0.1.0-SNAPSHOT.jar')
 $WorkDir = Join-Path ([System.IO.Path]::GetTempPath()) ('xac-smoke-' + [guid]::NewGuid().ToString('N'))
 $ContainerStarted = $false
 $ExitCode = 0
@@ -101,14 +101,6 @@ function Assert-NotContain {
     param([string]$Text, [string]$Needle, [string]$What)
     if ($Text.IndexOf($Needle, [System.StringComparison]::Ordinal) -ge 0) {
         throw ("assertion failed: $What -- unexpected [$Needle] in output:`n" + $Text)
-    }
-    Write-Host "  ok  $What"
-}
-
-function Assert-Match {
-    param([string]$Text, [string]$Pattern, [string]$What)
-    if (-not [regex]::IsMatch($Text, $Pattern)) {
-        throw ("assertion failed: $What -- pattern [$Pattern] not found in output:`n" + $Text)
     }
     Write-Host "  ok  $What"
 }
@@ -224,7 +216,7 @@ try {
     New-Item -ItemType Directory -Path $ClassesDir -Force | Out-Null
     $DemoJar = Join-Path $WorkDir 'demo.jar'
     $AppJar = Join-Path $WorkDir 'app.jar'
-    $Javac = Invoke-Native 'javac' @('-d', $ClassesDir, '--release', '8', (Join-Path $E2eDir 'sample\Demo.java'))
+    $Javac = Invoke-Native 'javac' @('-d', $ClassesDir, '--release', '8', (Join-Path $E2eDir (Join-Path 'sample' 'Demo.java')))
     Assert-ExitCode $Javac 0 'javac --release 8 e2e/sample/Demo.java'
     $JarTool = Invoke-Native 'jar' @('cfe', $DemoJar, 'Demo', '-C', $ClassesDir, '.')
     Assert-ExitCode $JarTool 0 'jar cfe demo.jar Demo'
@@ -323,23 +315,35 @@ lifecycle:
     Write-Step 'apply'
     $Apply = Invoke-Container @('java', '-jar', '/opt/xac.jar', 'apply', '/opt/demo')
     Assert-ExitCode $Apply 0 'apply exits 0'
-    Assert-Contain $Apply.Output 'path-links' 'apply: path-links action ran'
-    Assert-Contain $Apply.Output '/etc/xac/demo.env' 'apply: wrote the env file'
-    Assert-Contain $Apply.Output '/etc/systemd/system/demo.service' 'apply: wrote the unit file'
-    Assert-Contain $Apply.Output 'systemctl enable demo.service' 'apply: enabled auto-start'
-    Assert-Contain $Apply.Output 'systemctl restart demo.service' 'apply: restarted the service'
+    Assert-Contain $Apply.Output 'path-links' 'apply planned: path-links action'
+    Assert-Contain $Apply.Output '/etc/xac/demo.env' 'apply planned: env file path'
+    Assert-Contain $Apply.Output '/etc/systemd/system/demo.service' 'apply planned: unit file path'
+    Assert-Contain $Apply.Output 'systemctl enable demo.service' 'apply planned: systemctl enable'
+    Assert-Contain $Apply.Output 'systemctl restart demo.service' 'apply planned: systemctl restart'
+
+    $UnitMode = Invoke-Container @('stat', '-c', '%a', '/etc/systemd/system/demo.service')
+    Assert-ExitCode $UnitMode 0 'stat -c %a unit file'
+    Assert-Equal $UnitMode.Output.Trim() '644' 'apply: unit file mode is 0644'
+    $EnvMode = Invoke-Container @('stat', '-c', '%a', '/etc/xac/demo.env')
+    Assert-ExitCode $EnvMode 0 'stat -c %a env file'
+    Assert-Equal $EnvMode.Output.Trim() '600' 'apply: env file mode is 0600'
 
     Wait-ForActiveState -Expected 'active' -TimeoutSeconds 30
 
-    $Journal = Invoke-Container @('journalctl', '-u', 'demo.service', '--no-pager', '-n', '200')
-    Assert-ExitCode $Journal 0 'journalctl -u demo.service'
-    Assert-Contain $Journal.Output 'READY jvm=' 'journal: service started'
-    Assert-Contain $Journal.Output 'GREETING=hello world' 'journal: EnvironmentFile reached the JVM'
-    Assert-Contain $Journal.Output 'CWD=/opt/demo' 'journal: WorkingDirectory is the package dir'
-    Assert-Contain $Journal.Output 'XMX=268435456' 'journal: -Xmx256m reached the JVM (max heap 268435456)'
+    $Journal = Wait-ForJournalText -Needle 'READY jvm=' -TimeoutSeconds 30
+    Assert-Contain $Journal 'READY jvm=' 'journal: service started'
+    $Journal = Wait-ForJournalText -Needle 'GREETING=hello world' -TimeoutSeconds 20
+    Assert-Contain $Journal 'GREETING=hello world' 'journal: EnvironmentFile reached the JVM'
+    $Journal = Wait-ForJournalText -Needle 'CWD=/opt/demo' -TimeoutSeconds 20
+    Assert-Contain $Journal 'CWD=/opt/demo' 'journal: WorkingDirectory is the package dir'
+    $Journal = Wait-ForJournalText -Needle 'XMX=268435456' -TimeoutSeconds 20
+    Assert-Contain $Journal 'XMX=268435456' 'journal: -Xmx256m reached the JVM (max heap 268435456)'
 
     $UnitFileState = Invoke-Container @('systemctl', 'show', 'demo.service', '--property=UnitFileState')
+    Assert-ExitCode $UnitFileState 0 'systemctl show UnitFileState'
     Assert-Contain $UnitFileState.Output 'enabled' 'systemctl: UnitFileState=enabled'
+    Assert-ContainerPath '/etc/systemd/system/multi-user.target.wants/demo.service' '-L' $true 'apply: enable created the wants symlink'
+    Assert-Equal (Get-ContainerLinkTarget '/etc/systemd/system/multi-user.target.wants/demo.service') '/etc/systemd/system/demo.service' 'apply: wants symlink points at the unit'
 
     Write-Step 'status after apply: in sync'
     $StatusAfter = Invoke-Container @('java', '-jar', '/opt/xac.jar', 'status', '/opt/demo')
@@ -387,12 +391,16 @@ lifecycle:
 
     # ------------------------------------------------------------------
     Write-Step 'path-links case 2: re-apply is idempotent'
-    $InodeBefore = (Invoke-Container @('stat', '-c', '%i', '/opt/links/a/app.jar')).Output.Trim()
+    $InodeBeforeResult = Invoke-Container @('stat', '-c', '%i', '/opt/links/a/app.jar')
+    Assert-ExitCode $InodeBeforeResult 0 'stat -c %i a before re-apply'
+    $InodeBefore = $InodeBeforeResult.Output.Trim()
     $ListingBBefore = (Get-ContainerListing '/opt/links/b') -join '|'
     $ListingCBefore = (Get-ContainerListing '/opt/links/c') -join '|'
     $ApplyAgain = Invoke-Container @('java', '-jar', '/opt/xac.jar', 'apply', '/opt/demo')
     Assert-ExitCode $ApplyAgain 0 're-apply exits 0'
-    $InodeAfter = (Invoke-Container @('stat', '-c', '%i', '/opt/links/a/app.jar')).Output.Trim()
+    $InodeAfterResult = Invoke-Container @('stat', '-c', '%i', '/opt/links/a/app.jar')
+    Assert-ExitCode $InodeAfterResult 0 'stat -c %i a after re-apply'
+    $InodeAfter = $InodeAfterResult.Output.Trim()
     Assert-Equal $InodeAfter $InodeBefore 'a: link inode unchanged (not recreated)'
     Assert-Equal (Get-ContainerLinkTarget '/opt/links/a/app.jar') '/opt/demo/app.jar' 'a: link target unchanged'
     Assert-Equal ((Get-ContainerListing '/opt/links/a') -join '|') 'app.jar' 'a: still no .bak'
@@ -425,19 +433,25 @@ lifecycle:
     Write-Step 'destroy'
     $Destroy = Invoke-Container @('java', '-jar', '/opt/xac.jar', 'destroy', '/opt/demo', '--yes')
     Assert-ExitCode $Destroy 0 'destroy exits 0'
-    Assert-Contain $Destroy.Output 'systemctl stop demo.service' 'destroy: stopped the service'
-    Assert-Contain $Destroy.Output 'systemctl disable demo.service' 'destroy: disabled auto-start'
-    Assert-Contain $Destroy.Output '/etc/systemd/system/demo.service' 'destroy: removed the unit file'
-    Assert-Contain $Destroy.Output '/etc/xac/demo.env' 'destroy: removed the env file'
-    Assert-Contain $Destroy.Output 'path-links' 'destroy: removed path-links'
+    Assert-Contain $Destroy.Output 'systemctl stop demo.service' 'destroy planned: systemctl stop'
+    Assert-Contain $Destroy.Output 'systemctl disable demo.service' 'destroy planned: systemctl disable'
+    Assert-Contain $Destroy.Output '/etc/systemd/system/demo.service' 'destroy planned: unit file path'
+    Assert-Contain $Destroy.Output '/etc/xac/demo.env' 'destroy planned: env file path'
+    Assert-Contain $Destroy.Output 'path-links' 'destroy planned: path-links action'
 
     # ------------------------------------------------------------------
     Write-Step 'destroy outcome'
     Assert-ContainerPath '/etc/systemd/system/demo.service' '-e' $false 'no unit file left'
     Assert-ContainerPath '/etc/xac/demo.env' '-e' $false 'no env file left'
+    Assert-ContainerPath '/etc/systemd/system/multi-user.target.wants/demo.service' '-e' $false 'enable symlink removed from multi-user.target.wants'
 
     $LoadState = Invoke-Container @('systemctl', 'show', 'demo.service', '--property=LoadState')
+    Assert-ExitCode $LoadState 0 'systemctl show LoadState'
     Assert-Contain $LoadState.Output 'not-found' 'systemd no longer knows demo.service'
+
+    $Pgrep = Invoke-Container @('pgrep', '-f', '/opt/demo/app.jar')
+    Assert-ExitCode $Pgrep 1 'pgrep -f /opt/demo/app.jar exits 1 (no match)'
+    Assert-Equal $Pgrep.Output.Trim() '' 'no process is running /opt/demo/app.jar'
 
     Assert-ContainerPath '/opt/links/a/app.jar' '-L' $false 'a: managed link removed'
     Assert-ContainerPath '/opt/links/b/app.jar' '-L' $false 'b: managed link removed'

@@ -43,17 +43,18 @@ jar 在开发机构建（`javac --release 8` / Maven），用 `docker cp` 或在
 
 ## 冒烟脚本
 
-一条命令验证 fat jar 在真实 systemd 上的 `apply / status / logs / stop / destroy` 全流程：
+一条命令验证 fat jar 在真实 systemd 上的 `apply / status / logs / stop / destroy` 全流程。
+`smoke.ps1` 是唯一承载断言的规范脚本；`smoke.sh` 只是转发到 `pwsh` 的薄入口。
 
 ```powershell
-# Windows（Windows PowerShell 5.1 或 PowerShell 7 均可）
+# Windows（本仓库已实际执行并通过：Windows PowerShell 5.1）
 powershell -NoProfile -ExecutionPolicy Bypass -File e2e\smoke.ps1
 ```
 
 ```bash
-# Linux / macOS（需要 PowerShell 7 的 pwsh）
+# Linux / macOS 或 PowerShell 7+：按 pwsh 语义编写，本环境未实际执行
 pwsh -NoProfile -File e2e/smoke.ps1
-# 等价入口：只做转发，断言都在 smoke.ps1
+# 等价入口：只做 pwsh 转发，本环境未实际执行
 bash e2e/smoke.sh
 ```
 
@@ -68,8 +69,9 @@ bash e2e/smoke.sh
 
 前置条件：`docker`、JDK（`java` / `javac` / `jar`，能编 `--release 8`）、Maven。
 
-`smoke.ps1` 自带 `--release 8` 编译检查；脚本本身用 ASCII 写成，兼容 Windows
-PowerShell 5.1 与 PowerShell 7（Windows 上仅有 5.1 的机器不需要装 7）。
+`smoke.ps1` 自带 `--release 8` 编译检查；脚本本身用 ASCII 写成，路径统一用嵌套
+`Join-Path` 构造，不依赖 `\` 作分隔符。Windows PowerShell 5.1 已在本环境验证；
+pwsh 7+ 与 Linux/macOS 路径未在此环境实际执行。
 
 ### e2e coverage
 
@@ -84,13 +86,15 @@ PowerShell 5.1 与 PowerShell 7（Windows 上仅有 5.1 的机器不需要装 7�
   5. `destroy` 只删指向配置源的链接：目标处被换成真实文件 / 外来软链接时原样保留。
 - **status**：apply 前报漂移（退出码 1，逐条 `drift:`，含每个 `path-links[i]`）；
   apply 后 `(in sync)` + `auto-start: enabled`，退出码 0。
-- **apply**：`systemctl enable / restart`、写 unit（0644）与 env（0600）、
-  `EnvironmentFile` 注入 `GREETING`、`WorkingDirectory` 等于包目录、
-  `-Xmx256m` 生效（JVM 报 `XMX=268435456`）。
+- **apply**：`systemctl enable / restart`、写 unit（`stat -c %a` 断言 0644）与 env
+  （`stat -c %a` 断言 0600）、enable 后存在
+  `multi-user.target.wants/demo.service` 软链且指向 unit、`EnvironmentFile` 注入
+  `GREETING`、`WorkingDirectory` 等于包目录、`-Xmx256m` 生效（JVM 报 `XMX=268435456`）。
 - **logs**：`xac logs` 能读到 journal 里的服务输出。
 - **stop**：`systemctl stop` 后 `ActiveState=inactive`（`SuccessExitStatus=143`，不是
   failed），且 shutdown hook 打印 `STOPPING`。
-- **destroy**：unit / env / 自己创建的链接都不在了，`LoadState=not-found`；
+- **destroy**：unit / env / `multi-user.target.wants/demo.service` 软链 / 自己创建的
+  链接都不在了，`LoadState=not-found`，且 `pgrep -f /opt/demo/app.jar` 无残留进程；
   被备份的真实目录、既有 `.bak`、时间戳备份、真实文件、外来软链接全部保留。
 
 所有 `/opt/demo`、`/opt/links/*`、`/opt/elsewhere` 都只在一次性容器里创建，
