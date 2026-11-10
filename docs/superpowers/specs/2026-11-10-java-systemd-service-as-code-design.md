@@ -19,6 +19,8 @@
 8. **所有命令都接收"包目录"**，包目录下必须有 `xac.yaml`
 9. unit 恒定渲染 **`SuccessExitStatus=143`**（否则停服务后 unit 被标成 `failed`）
 10. 目标平台定案 **Ubuntu 24.04 / systemd 255**，移出 CentOS 7 兼容
+11. `--dry-run` 先过预检再打印（§6.2）：预检不通过按输入错误退 2
+12. `destroy` 的 `stop`/`disable`/`reload` 失败只记警告（§6.5）：destroy 的目标是文件消失
 
 ## 1. 背景与目标
 
@@ -338,7 +340,9 @@ xac apply [<package-dir>] [--dry-run]
 （`workdir: /appfile/messystemservice` 与 `./appfile:/appfile/messystemservice`）。链接先建好，
 `workdir` 那步看到路径已存在就跳过，不会先造一个真实目录再把它备份成 `.bak`。
 
-`--dry-run`：打印 7 个动作的描述后退出 0，不写文件、不执行命令。
+`--dry-run`：**先过 §6.1 的预检**，通过后打印 7 个动作的描述并退出 0，不写文件、不执行命令；
+预检失败按 §6.1 退 2（什么都没改动）。dry-run 的价值是「这些动作在这台机器上真能执行」，
+把预检跳过去，打印出来的就只是一段文本。非 root 机器上的纯预览留到后续版本。
 
 **软链接是唯一保留状态分支的地方**（这不是 diff，是正确的覆盖语义）：
 
@@ -418,12 +422,14 @@ xac destroy [<package-dir>] [--dry-run] [--yes]
 | 2 | `disable` | `systemctl disable <name>.service`；失败只记警告 |
 | 3 | `rm-unit` | 删 `/etc/systemd/system/<name>.service`（不存在则跳过） |
 | 4 | `rm-env` | 删 `/etc/xac/<name>.env`（不存在则跳过） |
-| 5 | `reload` | `systemctl daemon-reload` |
+| 5 | `reload` | `systemctl daemon-reload`；失败只记警告，不中止 |
 | 6 | `rm-links` | 删 `path-links` 里的链接，**仅当它是软链接且指向配置的源** |
 
 为什么 stop/disable 失败不中止：destroy 的语义是「让这些东西不存在」，本来就不存在时 systemctl
 会返回非 0（实测：不存在的 unit `stop` 退出 5、`disable` 退出 1）；那不是错误。文件层面的删除
-才是目标。
+才是目标。`reload` 同理：reload 只刷新 systemd 的内存态，删文件失败才是真失败；这台机器
+systemd 起不来时（`degraded`），reload 失败也挡不住「文件已经清掉」这个结果，下一次 `apply`
+必然会再 reload 一次。
 
 **不删**：包目录、workdir、`.bak` 备份、已产出的日志。
 
@@ -434,7 +440,7 @@ xac destroy [<package-dir>] [--dry-run] [--yes]
 | 码 | 含义 |
 |---|---|
 | 0 | 成功 |
-| 1 | 执行期失败（某动作失败、status 检出漂移） |
+| 1 | 执行期失败（某动作失败、status 检出漂移；destroy 的 stop/disable/reload 失败只记警告，不算） |
 | 2 | 输入错误，**什么都没改动**（包目录无 `xac.yaml`、yaml 不合法、参数错、非 root、destroy 未确认） |
 
 `2` 可以安全重试，`1` 需要人看一眼。
