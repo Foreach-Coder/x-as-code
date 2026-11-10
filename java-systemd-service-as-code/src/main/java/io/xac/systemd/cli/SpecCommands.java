@@ -24,17 +24,25 @@ final class SpecCommands {
         }
     }
 
-    /** 加载 + 静态校验 + 环境预检；任何一步失败都返回 spec == null。 */
-    static Loaded load(Path packageDir) {
+    /** 只做加载 + 静态校验；不探测 systemd 环境，普通用户即可运行（status/logs 用）。 */
+    static Loaded parse(Path packageDir) {
         SpecLoader.Result parsed = SpecLoader.load(packageDir);
         List<Violation> violations = new ArrayList<Violation>(parsed.violations);
         if (parsed.spec == null) {
             return new Loaded(null, violations);
         }
         violations.addAll(ValidationRunner.run(parsed.spec));
-        if (violations.isEmpty()) {
-            violations.addAll(Preflight.check(parsed.spec, new RealEnvironmentProbe(new ProcessRunner())));
+        return new Loaded(violations.isEmpty() ? parsed.spec : null, violations);
+    }
+
+    /** 加载 + 静态校验 + 环境预检；任何一步失败都返回 spec == null。 */
+    static Loaded load(Path packageDir) {
+        Loaded parsed = parse(packageDir);
+        if (parsed.spec == null) {
+            return parsed;
         }
+        List<Violation> violations = new ArrayList<Violation>(parsed.violations);
+        violations.addAll(Preflight.check(parsed.spec, new RealEnvironmentProbe(new ProcessRunner())));
         return new Loaded(violations.isEmpty() ? parsed.spec : null, violations);
     }
 
