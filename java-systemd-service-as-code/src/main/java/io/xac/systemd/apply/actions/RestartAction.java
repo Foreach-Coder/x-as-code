@@ -1,0 +1,27 @@
+package io.xac.systemd.apply.actions;
+
+import java.util.Arrays;
+
+import io.xac.systemd.apply.Action;
+import io.xac.systemd.apply.ActionFailure;
+import io.xac.systemd.apply.ApplyContext;
+import io.xac.systemd.exec.ExecResult;
+import io.xac.systemd.systemd.UnitNaming;
+
+public final class RestartAction implements Action {
+
+    @Override
+    public String describe(ApplyContext ctx) {
+        return "systemctl restart " + UnitNaming.unitName(ctx.spec);
+    }
+
+    @Override
+    public void run(ApplyContext ctx) {
+        ExecResult result = ctx.runner.run(
+                Arrays.asList("systemctl", "restart", UnitNaming.unitName(ctx.spec)));
+        if (!result.ok()) {
+            throw new ActionFailure("systemctl restart 失败（退出码 " + result.exitCode
+                    + "）: " + result.stderr.trim());
+        }
+    }
+}
