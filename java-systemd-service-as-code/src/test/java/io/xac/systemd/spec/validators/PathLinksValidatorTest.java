@@ -73,11 +73,11 @@ class PathLinksValidatorTest {
     }
 
     @Test
-    void rejectsMissingSource() {
-        String message = singleMessage(ValidationRunner.run(
-                spec(pkg, "cfg:/opt/xac-missing-src")));
+    void acceptsMissingSource() {
+        List<Violation> violations = ValidationRunner.run(
+                spec(pkg, "cfg:/opt/xac-missing-src"));
 
-        assertTrue(message.contains("源目录不存在"), message);
+        assertTrue(violations.isEmpty(), violations.toString());
     }
 
     @Test

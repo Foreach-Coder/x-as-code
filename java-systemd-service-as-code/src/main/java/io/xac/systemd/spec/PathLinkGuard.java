@@ -35,8 +35,20 @@ public final class PathLinkGuard {
             Paths.get("/dev"),
             Paths.get("/run"));
 
-    /** 返回一行中文错误；合法时返回 null。 */
+    /** 返回一行中文错误；合法时返回 null。动作层使用：结构 + 源目录存在。 */
     public static String check(PathLink link, Path unitDir, Path envDir, Path packageDir) {
+        String shape = checkShape(link, unitDir, envDir, packageDir);
+        if (shape != null) {
+            return shape;
+        }
+        return checkSource(link);
+    }
+
+    /**
+     * 只做结构检查，不要求源目录已经存在。
+     * 校验层（status / logs / destroy / apply 共用）用它，保证危险目标在改动前就被拒绝。
+     */
+    public static String checkShape(PathLink link, Path unitDir, Path envDir, Path packageDir) {
         Path source = link.source.toAbsolutePath().normalize();
         Path target = link.target.toAbsolutePath().normalize();
 
@@ -53,6 +65,12 @@ public final class PathLinkGuard {
                 || isAncestorOrSame(target, packageDir)) {
             return "目标不能是 unit 目录、env 目录或包目录本身或其上级: " + target;
         }
+        return null;
+    }
+
+    /** 只在 apply 前使用：源目录不存在会建出悬空链接。 */
+    public static String checkSource(PathLink link) {
+        Path source = link.source.toAbsolutePath().normalize();
         if (!Files.exists(source)) {
             return "源目录不存在: " + source;
         }

@@ -23,7 +23,7 @@ public final class PathLinksValidator implements Validator {
                 out.add(new Violation(path, "应为 源:目标，且目标是以 / 开头的绝对路径"));
                 continue;
             }
-            String problem = PathLinkGuard.check(link, target.unitDir, target.envDir,
+            String problem = PathLinkGuard.checkShape(link, target.unitDir, target.envDir,
                     spec.packageDir);
             if (problem != null) {
                 out.add(new Violation(path, problem));

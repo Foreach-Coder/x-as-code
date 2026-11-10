@@ -9,6 +9,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -88,5 +89,24 @@ class PreflightTest {
         probe.javaExecutable = false;
 
         assertTrue(Preflight.checkDestroy(probe).isEmpty());
+    }
+
+    @Test
+    void requiresPathLinkSourceToExist() throws IOException {
+        Files.createFile(pkg.resolve("app.jar"));
+        ServiceSpec spec = ServiceSpec.builder(pkg)
+                .name("demo")
+                .jar("app.jar")
+                .java("/usr/bin/java")
+                .opts(Collections.<String>emptyList())
+                .pathLinks(Collections.singletonList("missing:/opt/xac-target"))
+                .lifecycle(new Lifecycle(null, null, null, null))
+                .build();
+
+        List<Violation> out = Preflight.check(spec, new FakeProbe());
+
+        assertEquals(1, out.size(), out.toString());
+        assertEquals("path-links[0]", out.get(0).path);
+        assertTrue(out.get(0).message.contains("源目录不存在"), out.get(0).message);
     }
 }
