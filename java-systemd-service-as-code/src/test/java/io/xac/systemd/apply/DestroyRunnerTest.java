@@ -121,6 +121,47 @@ class DestroyRunnerTest {
     }
 
     @Test
+    void doesNotStopVendorUnitWithoutOwnedUnitFile() throws IOException {
+        ServiceSpec spec = spec();
+        Files.createDirectories(target().unitDir);
+        RecordingRunner runner = new RecordingRunner();
+
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        int code = new DestroyRunner().run(new ApplyContext(spec, target(), runner, false),
+                new PrintStream(buffer, true, "UTF-8"));
+
+        assertEquals(0, code);
+        for (java.util.List<String> call : runner.calls()) {
+            assertFalse(call.contains("stop"), call.toString());
+            assertFalse(call.contains("disable"), call.toString());
+        }
+        assertTrue(runner.calls().contains(Arrays.asList("systemctl", "daemon-reload")));
+    }
+
+    @Test
+    void skipsDanglingSymlinkAtUnitPath() throws IOException {
+        Assumptions.assumeTrue(supportsSymlinks(root));
+        ServiceSpec spec = spec();
+        Files.createDirectories(target().unitDir);
+        Path unit = UnitNaming.unitPath(spec, target());
+        Files.createSymbolicLink(unit, root.resolve("gone"));
+        RecordingRunner runner = new RecordingRunner();
+
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        int code = new DestroyRunner().run(new ApplyContext(spec, target(), runner, false),
+                new PrintStream(buffer, true, "UTF-8"));
+
+        assertEquals(0, code);
+        String output = buffer.toString("UTF-8");
+        assertTrue(output.contains("unit 路径不是普通文件"), output);
+        for (java.util.List<String> call : runner.calls()) {
+            assertFalse(call.contains("stop"), call.toString());
+            assertFalse(call.contains("disable"), call.toString());
+        }
+        assertTrue(Files.isSymbolicLink(unit));
+    }
+
+    @Test
     void dryRunChangesNothing() throws IOException {
         ServiceSpec spec = spec();
         install(spec);

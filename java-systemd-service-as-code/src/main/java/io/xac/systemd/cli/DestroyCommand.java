@@ -4,6 +4,7 @@ import java.io.Console;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.concurrent.Callable;
@@ -54,8 +55,9 @@ public final class DestroyCommand implements Callable<Integer> {
     static void printPlan(ServiceSpec spec, SystemdTarget target, PrintStream out) throws IOException {
         Path unitPath = UnitNaming.unitPath(spec, target);
         Path envPath = UnitNaming.envPath(spec, target);
-        boolean unitExists = Files.exists(unitPath);
-        boolean unitManaged = unitExists && ManagedUnit.hasHeader(unitPath);
+        // 与 DestroyRunner 一致：只有 unitPath 上的普通文件且带管理头，才会被 stop/disable/删除。
+        boolean unitManaged = Files.isRegularFile(unitPath, LinkOption.NOFOLLOW_LINKS)
+                && ManagedUnit.hasHeader(unitPath);
 
         out.println("将删除:");
         boolean any = false;
@@ -80,9 +82,6 @@ public final class DestroyCommand implements Callable<Integer> {
         }
         if (!any) {
             out.println("  (无)");
-        }
-        if (unitExists && !unitManaged) {
-            out.println("将保留: " + unitPath + "（不是 xac 管理的 unit）");
         }
         Path workdir = spec.workdir == null ? spec.packageDir : spec.workdir;
         out.println("保留: 包目录 " + spec.packageDir + "、工作目录 " + workdir

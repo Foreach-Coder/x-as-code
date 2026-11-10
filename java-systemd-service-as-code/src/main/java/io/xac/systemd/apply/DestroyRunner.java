@@ -3,6 +3,7 @@ package io.xac.systemd.apply;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
@@ -32,18 +33,27 @@ public final class DestroyRunner {
 
     public int run(ApplyContext ctx, PrintStream out) {
         Path unitPath = UnitNaming.unitPath(ctx.spec, ctx.target);
-        boolean foreignUnit;
-        try {
-            foreignUnit = Files.exists(unitPath) && !ManagedUnit.hasHeader(unitPath);
-        } catch (IOException e) {
-            throw new ActionFailure("读取 unit 文件失败 " + unitPath + ": " + e.getMessage(), e);
+        // 只有「unitPath 上确实存在由 xac 管理的普通文件」才证明归属；否则 systemd 可能
+        // 从 /usr/lib/systemd/system 加载了同名 unit（如 ssh），绝不能 stop/disable 它。
+        boolean pathExists = Files.exists(unitPath, LinkOption.NOFOLLOW_LINKS);
+        boolean regularFile = Files.isRegularFile(unitPath, LinkOption.NOFOLLOW_LINKS);
+        boolean managed = false;
+        if (regularFile) {
+            try {
+                managed = ManagedUnit.hasHeader(unitPath);
+            } catch (IOException e) {
+                throw new ActionFailure("读取 unit 文件失败 " + unitPath + ": " + e.getMessage(), e);
+            }
         }
-        if (foreignUnit) {
+        boolean skipUnitActions = !managed;
+        if (pathExists && !regularFile) {
+            out.println("警告: unit 路径不是普通文件，已跳过: " + unitPath);
+        } else if (regularFile && !managed) {
             // 归属判断必须发生在 stop / disable 之前，否则会先动别人的服务再只发一条警告。
             out.println("警告: 不是 xac 管理的 unit，已跳过停止/禁用/删除: " + unitPath);
         }
         for (Action action : actions()) {
-            if (foreignUnit && isUnitAction(action)) {
+            if (skipUnitActions && isUnitAction(action)) {
                 continue;
             }
             String description = action.describe(ctx);

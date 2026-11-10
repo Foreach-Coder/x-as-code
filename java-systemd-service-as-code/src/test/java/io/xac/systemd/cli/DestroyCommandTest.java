@@ -93,8 +93,7 @@ class DestroyCommandTest {
         String out = printPlan(spec, target);
 
         assertTrue(out.contains("  (无)"), out);
-        assertTrue(out.contains("将保留: " + UnitNaming.unitPath(spec, target)
-                + "（不是 xac 管理的 unit）"), out);
+        assertFalse(out.contains(UnitNaming.unitPath(spec, target).toString()), out);
     }
 
     private static void install(ServiceSpec spec, SystemdTarget target) throws IOException {
