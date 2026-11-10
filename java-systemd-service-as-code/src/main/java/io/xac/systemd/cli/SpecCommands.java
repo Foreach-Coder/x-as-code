@@ -4,6 +4,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
+import io.xac.systemd.apply.EnvironmentProbe;
 import io.xac.systemd.apply.Preflight;
 import io.xac.systemd.apply.RealEnvironmentProbe;
 import io.xac.systemd.exec.ProcessRunner;
@@ -37,12 +38,34 @@ final class SpecCommands {
 
     /** 加载 + 静态校验 + 环境预检；任何一步失败都返回 spec == null。 */
     static Loaded load(Path packageDir) {
+        return load(packageDir, new RealEnvironmentProbe(new ProcessRunner()));
+    }
+
+    static Loaded load(Path packageDir, EnvironmentProbe probe) {
         Loaded parsed = parse(packageDir);
         if (parsed.spec == null) {
             return parsed;
         }
         List<Violation> violations = new ArrayList<Violation>(parsed.violations);
-        violations.addAll(Preflight.check(parsed.spec, new RealEnvironmentProbe(new ProcessRunner())));
+        violations.addAll(Preflight.check(parsed.spec, probe));
+        return new Loaded(violations.isEmpty() ? parsed.spec : null, violations);
+    }
+
+    /**
+     * destroy 的加载路径：不要求 artifact.jar / java 仍然存在，
+     * 否则删掉产物后就无法卸载服务。
+     */
+    static Loaded loadForDestroy(Path packageDir) {
+        return loadForDestroy(packageDir, new RealEnvironmentProbe(new ProcessRunner()));
+    }
+
+    static Loaded loadForDestroy(Path packageDir, EnvironmentProbe probe) {
+        Loaded parsed = parse(packageDir);
+        if (parsed.spec == null) {
+            return parsed;
+        }
+        List<Violation> violations = new ArrayList<Violation>(parsed.violations);
+        violations.addAll(Preflight.checkDestroy(probe));
         return new Loaded(violations.isEmpty() ? parsed.spec : null, violations);
     }
 

@@ -81,4 +81,12 @@ class PreflightTest {
         assertEquals(1, out.size());
         assertTrue(out.get(0).toString().contains("runtime.java"), out.get(0).toString());
     }
+
+    @Test
+    void destroyCheckSkipsArtifactAndJava() {
+        FakeProbe probe = new FakeProbe();
+        probe.javaExecutable = false;
+
+        assertTrue(Preflight.checkDestroy(probe).isEmpty());
+    }
 }

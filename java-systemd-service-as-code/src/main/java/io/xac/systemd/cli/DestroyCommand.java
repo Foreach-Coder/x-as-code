@@ -35,7 +35,7 @@ public final class DestroyCommand implements Callable<Integer> {
     @Override
     public Integer call() throws IOException {
         Path packageDir = Paths.get(packageDirArg).toAbsolutePath().normalize();
-        SpecCommands.Loaded loaded = SpecCommands.load(packageDir);
+        SpecCommands.Loaded loaded = SpecCommands.loadForDestroy(packageDir);
         if (loaded.spec == null) {
             SpecCommands.report(loaded.violations);
             return 2;
