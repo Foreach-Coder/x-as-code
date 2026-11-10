@@ -368,7 +368,7 @@ systemctl show <name>.service \
   --property=LoadState,ActiveState,SubState,UnitFileState,MainPID,ActiveEnterTimestamp,FragmentPath
 ```
 
-（CentOS 7 的 systemd 219 均支持；**不用 `MemoryCurrent`**，219 没有。）
+（这些属性 systemd 255 均支持；**不用 `MemoryCurrent`**，status 不显示内存。）
 
 示例输出：
 
