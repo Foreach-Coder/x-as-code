@@ -10,6 +10,7 @@ import java.util.concurrent.Callable;
 
 import io.xac.systemd.apply.ApplyContext;
 import io.xac.systemd.apply.DestroyRunner;
+import io.xac.systemd.apply.actions.ManagedUnit;
 import io.xac.systemd.exec.ProcessRunner;
 import io.xac.systemd.spec.PathLink;
 import io.xac.systemd.spec.ServiceSpec;
@@ -51,9 +52,21 @@ public final class DestroyCommand implements Callable<Integer> {
 
     /** 在确认之前把删除范围与保留范围讲清楚；--yes 时也打印，便于脚本比较输出。 */
     static void printPlan(ServiceSpec spec, SystemdTarget target, PrintStream out) throws IOException {
+        Path unitPath = UnitNaming.unitPath(spec, target);
+        Path envPath = UnitNaming.envPath(spec, target);
+        boolean unitExists = Files.exists(unitPath);
+        boolean unitManaged = unitExists && ManagedUnit.hasHeader(unitPath);
+
         out.println("将删除:");
-        out.println("  " + UnitNaming.unitPath(spec, target));
-        out.println("  " + UnitNaming.envPath(spec, target));
+        boolean any = false;
+        if (unitManaged) {
+            out.println("  " + unitPath);
+            any = true;
+        }
+        if (Files.exists(envPath)) {
+            out.println("  " + envPath);
+            any = true;
+        }
         for (String raw : spec.pathLinks) {
             PathLink link = PathLink.parse(raw, spec.packageDir);
             if (link == null) {
@@ -62,7 +75,14 @@ public final class DestroyCommand implements Callable<Integer> {
             if (Files.isSymbolicLink(link.target)
                     && Files.readSymbolicLink(link.target).equals(link.source)) {
                 out.println("  " + link.target.toAbsolutePath().normalize());
+                any = true;
             }
+        }
+        if (!any) {
+            out.println("  (无)");
+        }
+        if (unitExists && !unitManaged) {
+            out.println("将保留: " + unitPath + "（不是 xac 管理的 unit）");
         }
         Path workdir = spec.workdir == null ? spec.packageDir : spec.workdir;
         out.println("保留: 包目录 " + spec.packageDir + "、工作目录 " + workdir

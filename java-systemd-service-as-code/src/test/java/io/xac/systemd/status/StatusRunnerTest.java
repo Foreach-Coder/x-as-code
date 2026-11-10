@@ -50,6 +50,16 @@ class StatusRunnerTest {
             "FragmentPath=/etc/systemd/system/demo.service",
             "");
 
+    private static final String SHOW_NO_ACTIVE = String.join("\n",
+            "LoadState=loaded",
+            "ActiveState=",
+            "SubState=dead",
+            "UnitFileState=enabled",
+            "MainPID=0",
+            "ActiveEnterTimestamp=",
+            "FragmentPath=/etc/systemd/system/demo.service",
+            "");
+
     private SystemdTarget target() {
         return new SystemdTarget(root.resolve("units"), root.resolve("env"));
     }
@@ -202,7 +212,22 @@ class StatusRunnerTest {
         assertFalse(result.healthy(), result.format());
         assertTrue(result.drift().contains("service: inactive (dead)"), result.drift().toString());
         // StatusCommand 把 !healthy() 映射为退出码 1。
-        assertEquals(1, result.healthy() ? 0 : 1);
+        assertEquals(Arrays.asList("service: inactive (dead)"), result.drift());
+    }
+
+    /** ActiveState 为空表示没有观察到运行状态，不能据此宣称服务在运行或不在运行。 */
+    @Test
+    void doesNotDriftWhenActiveStateWasNotObserved() throws IOException {
+        ServiceSpec spec = spec(env());
+        SystemdTarget target = target();
+        install(spec, target);
+        RecordingRunner runner = new RecordingRunner();
+        runner.addResultForCommand("systemctl", new ExecResult(0, SHOW_NO_ACTIVE, ""));
+
+        StatusResult result = new StatusRunner().run(spec, target, runner);
+
+        assertTrue(result.healthy(), result.format());
+        assertEquals(0, result.drift().size(), result.format());
     }
 
     /** 查询失败不能被读成「未启用」；只报告没有观察到状态。 */

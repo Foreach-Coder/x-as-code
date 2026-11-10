@@ -92,6 +92,19 @@ class PreflightTest {
     }
 
     @Test
+    void destroyCheckRequiresRootAndSystemd() {
+        FakeProbe probe = new FakeProbe();
+        probe.root = false;
+        probe.systemd = false;
+
+        List<Violation> out = Preflight.checkDestroy(probe);
+
+        assertEquals(2, out.size(), out.toString());
+        assertTrue(out.get(0).message.contains("root"), out.get(0).message);
+        assertTrue(out.get(1).message.contains("systemd"), out.get(1).message);
+    }
+
+    @Test
     void requiresPathLinkSourceToExist() throws IOException {
         Files.createFile(pkg.resolve("app.jar"));
         ServiceSpec spec = ServiceSpec.builder(pkg)

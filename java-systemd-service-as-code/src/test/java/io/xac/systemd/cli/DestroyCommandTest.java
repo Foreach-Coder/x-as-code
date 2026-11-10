@@ -4,6 +4,7 @@ import io.xac.systemd.spec.Lifecycle;
 import io.xac.systemd.spec.ServiceSpec;
 import io.xac.systemd.systemd.SystemdTarget;
 import io.xac.systemd.systemd.UnitNaming;
+import io.xac.systemd.systemd.UnitRenderer;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -59,14 +61,50 @@ class DestroyCommandTest {
 
     @Test
     void printsFilesToDeleteAndWhatSurvives() throws IOException {
+        ServiceSpec spec = spec();
         SystemdTarget target = target();
-        String out = printPlan(spec(), target);
+        install(spec, target);
+
+        String out = printPlan(spec, target);
 
         assertTrue(out.contains("将删除:"), out);
-        assertTrue(out.contains(UnitNaming.unitPath(spec(), target).toString()), out);
-        assertTrue(out.contains(UnitNaming.envPath(spec(), target).toString()), out);
+        assertTrue(out.contains(UnitNaming.unitPath(spec, target).toString()), out);
+        assertTrue(out.contains(UnitNaming.envPath(spec, target).toString()), out);
         assertTrue(out.contains("保留: 包目录 " + root.toAbsolutePath().normalize()), out);
         assertTrue(out.contains(".bak 备份与日志"), out);
+    }
+
+    @Test
+    void printsNoneWhenNothingIsInstalled() throws IOException {
+        String out = printPlan(spec(), target());
+
+        assertTrue(out.contains("将删除:"), out);
+        assertTrue(out.contains("  (无)"), out);
+    }
+
+    @Test
+    void leavesForeignUnitOutOfTheDeleteList() throws IOException {
+        ServiceSpec spec = spec();
+        SystemdTarget target = target();
+        Files.createDirectories(target.unitDir);
+        Files.write(UnitNaming.unitPath(spec, target),
+                "Description=foreign\n".getBytes(StandardCharsets.UTF_8));
+
+        String out = printPlan(spec, target);
+
+        assertTrue(out.contains("  (无)"), out);
+        assertTrue(out.contains("将保留: " + UnitNaming.unitPath(spec, target)
+                + "（不是 xac 管理的 unit）"), out);
+    }
+
+    private static void install(ServiceSpec spec, SystemdTarget target) throws IOException {
+        Files.createDirectories(target.unitDir);
+        Files.createDirectories(target.envDir);
+        UnitRenderer renderer = new UnitRenderer();
+        Files.write(UnitNaming.unitPath(spec, target),
+                renderer.render(spec, target).getBytes(StandardCharsets.UTF_8));
+        Files.write(UnitNaming.envPath(spec, target),
+                renderer.renderEnvFile(spec).getBytes(StandardCharsets.UTF_8));
     }
 
     @Test
