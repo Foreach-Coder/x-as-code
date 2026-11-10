@@ -36,4 +36,9 @@ public final class PathLink {
     public static PathLink parse(String raw) {
         return parse(raw, Paths.get("").toAbsolutePath().normalize());
     }
+
+    /** 供测试与内部逻辑直接构造，绕过字符串解析。 */
+    static PathLink of(Path source, Path target) {
+        return new PathLink(source + ":" + target, source, target);
+    }
 }
