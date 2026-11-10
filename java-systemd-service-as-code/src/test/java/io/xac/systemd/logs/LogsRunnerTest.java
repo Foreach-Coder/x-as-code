@@ -1,5 +1,6 @@
 package io.xac.systemd.logs;
 
+import io.xac.systemd.exec.CommandRunner;
 import io.xac.systemd.exec.ExecResult;
 import io.xac.systemd.exec.RecordingRunner;
 import io.xac.systemd.spec.Lifecycle;
@@ -10,6 +11,7 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -43,12 +45,33 @@ class LogsRunnerTest {
     void followsWithInheritIo() {
         RecordingRunner runner = new RecordingRunner();
 
-        new LogsRunner().run(spec(), runner, 50, true);
+        ExecResult result = new LogsRunner().run(spec(), runner, 50, true);
 
+        assertEquals(0, result.exitCode);
         assertEquals(Arrays.asList("journalctl", "-u", "demo.service", "--no-pager", "-n", "50",
                         "--follow"),
                 runner.inheritIoCalls().get(0));
         assertTrue(runner.calls().isEmpty());
+    }
+
+    @Test
+    void turnsInheritIoFailureIntoExitCodeTwo() {
+        CommandRunner failing = new CommandRunner() {
+            @Override
+            public ExecResult run(List<String> argv) {
+                return new ExecResult(0, "", "");
+            }
+
+            @Override
+            public void runInheritIo(List<String> argv) {
+                throw new IllegalStateException("无法执行 journalctl: boom");
+            }
+        };
+
+        ExecResult result = new LogsRunner().run(spec(), failing, 10, true);
+
+        assertEquals(2, result.exitCode);
+        assertTrue(result.stderr.contains("无法执行 journalctl"), result.stderr);
     }
 
     @Test
