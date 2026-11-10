@@ -95,4 +95,12 @@ class PathLinksValidatorTest {
 
         assertTrue(message.contains("或其上级"), message);
     }
+
+    @Test
+    void rejectsTargetThatIsAncestorOfSource() {
+        String message = singleMessage(ValidationRunner.run(
+                spec(Paths.get("/opt/demo"), "cfg/app:/opt/demo/cfg")));
+
+        assertTrue(message.contains("源目录的上级目录"), message);
+    }
 }

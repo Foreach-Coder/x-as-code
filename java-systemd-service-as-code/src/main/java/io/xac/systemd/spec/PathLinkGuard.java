@@ -86,6 +86,10 @@ public final class PathLinkGuard {
                 || targetLexical.startsWith(unit) || targetLexical.startsWith(unitReal)) {
             return "目标不能位于 unit 目录下: " + targetLexical;
         }
+        if (source.startsWith(target) || source.startsWith(targetLexical)
+                || sourceReal.startsWith(target) || sourceReal.startsWith(targetLexical)) {
+            return "目标不能是源目录的上级目录: " + targetLexical;
+        }
         return null;
     }
 

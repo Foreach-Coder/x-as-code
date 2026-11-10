@@ -73,6 +73,16 @@ class PathLinkGuardTest {
     }
 
     @Test
+    void rejectsTargetThatIsAncestorOfSource() {
+        Path source = root.resolve("pkg").resolve("cfg").resolve("app");
+
+        String problem = check(link(source, root.resolve("pkg").resolve("cfg")));
+
+        assertNotNull(problem);
+        assertTrue(problem.contains("源目录的上级目录"), problem);
+    }
+
+    @Test
     void rejectsTargetUnderUnitDir() {
         Path target = unitDir().resolve("demo.service");
 
