@@ -15,6 +15,8 @@ public final class StatusResult {
     public final Path envPath;
     public final boolean envConfigured;
     public final boolean envInstalled;
+    /** false 表示 env 文件存在但当前用户无权读取；无法校验不算漂移。 */
+    public final boolean envReadable;
     public final boolean envInSync;
     public final Map<String, String> show;
     public final boolean enabled;
@@ -23,8 +25,8 @@ public final class StatusResult {
 
     public StatusResult(String service, Path packageDir, Path unitPath, boolean unitInstalled,
                         boolean unitInSync, Path envPath, boolean envConfigured, boolean envInstalled,
-                        boolean envInSync, Map<String, String> show, boolean enabled,
-                        boolean wantEnabled, List<String> linkProblems) {
+                        boolean envReadable, boolean envInSync, Map<String, String> show,
+                        boolean enabled, boolean wantEnabled, List<String> linkProblems) {
         this.service = service;
         this.packageDir = packageDir;
         this.unitPath = unitPath;
@@ -33,6 +35,7 @@ public final class StatusResult {
         this.envPath = envPath;
         this.envConfigured = envConfigured;
         this.envInstalled = envInstalled;
+        this.envReadable = envReadable;
         this.envInSync = envInSync;
         this.show = show;
         this.enabled = enabled;
@@ -47,7 +50,7 @@ public final class StatusResult {
                     ? "unit 文件与配置不一致: " + unitPath
                     : "unit 未安装: " + unitPath);
         }
-        if (!envInSync) {
+        if (!envInSync && envReadable) {
             if (!envConfigured) {
                 drift.add("env 文件多余（配置中已无 env）: " + envPath);
             } else if (envInstalled) {
@@ -72,11 +75,13 @@ public final class StatusResult {
         out.append("service: ").append(service).append('\n');
         out.append("package: ").append(packageDir).append('\n');
         out.append("unit: ").append(unitPath).append(unitState()).append('\n');
-        if (envConfigured) {
+        if (!envConfigured) {
+            out.append("env: (未配置)\n");
+        } else if (!envReadable) {
+            out.append("env: (无法校验：需要 root 权限)\n");
+        } else {
             out.append("env: ").append(envPath)
                     .append(envInSync ? " (in sync)" : " (out of sync)").append('\n');
-        } else {
-            out.append("env: (未配置)\n");
         }
         out.append("active: ").append(value("ActiveState", "unknown"));
         String sub = show.get("SubState");

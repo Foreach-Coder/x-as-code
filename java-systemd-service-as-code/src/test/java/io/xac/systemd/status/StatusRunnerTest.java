@@ -12,6 +12,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -133,5 +134,37 @@ class StatusRunnerTest {
         StatusResult result = new StatusRunner().run(spec, target(), runnerWithShow());
         assertFalse(result.healthy());
         assertTrue(result.format().contains("(missing)"), result.format());
+    }
+
+    @Test
+    void treatsUnreadableEnvAsNotDrift() throws IOException {
+        ServiceSpec spec = spec(env());
+        SystemdTarget target = target();
+        Files.createDirectories(target.unitDir);
+        Files.createDirectories(target.envDir);
+        UnitRenderer renderer = new UnitRenderer();
+        Files.write(UnitNaming.unitPath(spec, target),
+                renderer.render(spec, target).getBytes(StandardCharsets.UTF_8));
+        final Path envPath = UnitNaming.envPath(spec, target);
+        Files.write(envPath, renderer.renderEnvFile(spec).getBytes(StandardCharsets.UTF_8));
+
+        StatusRunner runner = new StatusRunner(new StatusRunner.ContentReader() {
+            @Override
+            public String read(Path path) throws IOException {
+                if (path.equals(envPath)) {
+                    throw new AccessDeniedException(path.toString());
+                }
+                return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+            }
+        });
+
+        StatusResult result = runner.run(spec, target, runnerWithShow());
+
+        assertTrue(result.healthy(), result.format());
+        for (String line : result.drift()) {
+            assertFalse(line.contains("env"), result.drift().toString());
+        }
+        assertTrue(result.format().contains("env: (无法校验：需要 root 权限)"), result.format());
+        assertFalse(result.format().contains("out of sync"), result.format());
     }
 }

@@ -18,6 +18,32 @@ import io.xac.systemd.systemd.UnitRenderer;
 
 public final class StatusRunner {
 
+    /** 读取文件内容；测试注入以模拟权限不足（env 文件为 0600 root 所有）。 */
+    interface ContentReader {
+        String read(Path path) throws IOException;
+    }
+
+    private static final ContentReader FILES = new ContentReader() {
+        @Override
+        public String read(Path path) throws IOException {
+            return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+        }
+    };
+
+    private enum EnvState {
+        MATCH, DIFFER, MISSING, UNREADABLE
+    }
+
+    private final ContentReader envReader;
+
+    public StatusRunner() {
+        this(FILES);
+    }
+
+    StatusRunner(ContentReader envReader) {
+        this.envReader = envReader;
+    }
+
     public StatusResult run(ServiceSpec spec, SystemdTarget target, CommandRunner runner) {
         UnitRenderer renderer = new UnitRenderer();
         Path unitPath = UnitNaming.unitPath(spec, target);
@@ -26,9 +52,15 @@ public final class StatusRunner {
         boolean unitInSync = contentEquals(unitPath, renderer.render(spec, target));
         boolean envConfigured = !spec.env.isEmpty();
         boolean envInstalled = Files.isRegularFile(envPath);
-        boolean envInSync = envConfigured
-                ? contentEquals(envPath, renderer.renderEnvFile(spec))
-                : !Files.exists(envPath);
+        boolean envInSync;
+        boolean envReadable = true;
+        if (!envConfigured) {
+            envInSync = !Files.exists(envPath);
+        } else {
+            EnvState envState = readEnv(envPath, renderer.renderEnvFile(spec));
+            envInSync = envState == EnvState.MATCH;
+            envReadable = envState != EnvState.UNREADABLE;
+        }
 
         List<String> linkProblems = checkLinks(spec);
         Map<String, String> show = SystemctlShow.show(runner, UnitNaming.unitName(spec));
@@ -36,8 +68,19 @@ public final class StatusRunner {
         boolean wantEnabled = spec.lifecycle.autoStartOrDefault();
         boolean enabled = "enabled".equals(show.get("UnitFileState"));
         return new StatusResult(spec.name, spec.packageDir, unitPath, Files.isRegularFile(unitPath),
-                unitInSync, envPath, envConfigured, envInstalled, envInSync, show, enabled,
-                wantEnabled, linkProblems);
+                unitInSync, envPath, envConfigured, envInstalled, envReadable, envInSync, show,
+                enabled, wantEnabled, linkProblems);
+    }
+
+    private EnvState readEnv(Path path, String expected) {
+        if (!Files.isRegularFile(path)) {
+            return EnvState.MISSING;
+        }
+        try {
+            return expected.equals(envReader.read(path)) ? EnvState.MATCH : EnvState.DIFFER;
+        } catch (IOException e) {
+            return EnvState.UNREADABLE;
+        }
     }
 
     private static boolean contentEquals(Path path, String expected) {
