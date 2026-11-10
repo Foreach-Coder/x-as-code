@@ -95,6 +95,32 @@ class DestroyRunnerTest {
     }
 
     @Test
+    void skipsForeignUnitBeforeStopAndDisable() throws IOException {
+        ServiceSpec spec = spec();
+        Files.createDirectories(target().unitDir);
+        Files.createDirectories(target().envDir);
+        Path unit = UnitNaming.unitPath(spec, target());
+        Files.write(unit, "Description=foreign\n".getBytes(StandardCharsets.UTF_8));
+        Files.write(UnitNaming.envPath(spec, target()),
+                new UnitRenderer().renderEnvFile(spec).getBytes(StandardCharsets.UTF_8));
+        RecordingRunner runner = new RecordingRunner();
+
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        int code = new DestroyRunner().run(new ApplyContext(spec, target(), runner, false),
+                new PrintStream(buffer, true, "UTF-8"));
+
+        assertEquals(0, code);
+        String output = buffer.toString("UTF-8");
+        assertTrue(output.contains("不是 xac 管理的 unit"), output);
+        for (java.util.List<String> call : runner.calls()) {
+            assertFalse(call.contains("stop"), call.toString());
+            assertFalse(call.contains("disable"), call.toString());
+        }
+        assertTrue(Files.exists(unit));
+        assertFalse(Files.exists(UnitNaming.envPath(spec, target())));
+    }
+
+    @Test
     void dryRunChangesNothing() throws IOException {
         ServiceSpec spec = spec();
         install(spec);

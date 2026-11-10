@@ -55,17 +55,14 @@ class UnitFileActionTest {
     }
 
     @Test
-    void refusesUnmanagedUnit() throws IOException {
+    void acceptsBomBeforeHeader() throws IOException {
         ApplyContext ctx = context();
         Path unit = unitPath(ctx);
         Files.createDirectories(unit.getParent());
-        String content = "Description=someone else\n";
-        Files.write(unit, content.getBytes(StandardCharsets.UTF_8));
+        Files.write(unit, ("\uFEFF" + UnitRenderer.HEADER + "\nold\n").getBytes(StandardCharsets.UTF_8));
 
-        ActionFailure failure = assertThrows(ActionFailure.class, () -> new UnitFileAction().run(ctx));
+        new UnitFileAction().run(ctx);
 
-        assertTrue(failure.getMessage().contains("已存在非 xac 管理的 unit 文件，拒绝覆盖"),
-                failure.getMessage());
-        assertEquals(content, new String(Files.readAllBytes(unit), StandardCharsets.UTF_8));
+        assertEquals(ctx.unitContent, new String(Files.readAllBytes(unit), StandardCharsets.UTF_8));
     }
 }

@@ -24,7 +24,7 @@ public final class RemoveUnitAction implements Action {
                 return;
             }
             if (!ManagedUnit.hasHeader(unitPath)) {
-                ctx.warnings.add("不是 xac 管理的 unit，已跳过");
+                ctx.warnings.add("不是 xac 管理的 unit，已跳过删除: " + unitPath);
                 return;
             }
             Files.delete(unitPath);
