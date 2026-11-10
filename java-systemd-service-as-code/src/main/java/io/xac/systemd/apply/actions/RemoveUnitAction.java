@@ -20,7 +20,14 @@ public final class RemoveUnitAction implements Action {
     public void run(ApplyContext ctx) {
         Path unitPath = UnitNaming.unitPath(ctx.spec, ctx.target);
         try {
-            Files.deleteIfExists(unitPath);
+            if (!Files.exists(unitPath)) {
+                return;
+            }
+            if (!ManagedUnit.hasHeader(unitPath)) {
+                ctx.warnings.add("不是 xac 管理的 unit，已跳过");
+                return;
+            }
+            Files.delete(unitPath);
         } catch (IOException e) {
             throw new ActionFailure("删除 unit 文件失败 " + unitPath + ": " + e.getMessage(), e);
         }

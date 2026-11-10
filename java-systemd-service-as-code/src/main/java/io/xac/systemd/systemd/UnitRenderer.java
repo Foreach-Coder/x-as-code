@@ -8,7 +8,7 @@ import io.xac.systemd.spec.ServiceSpec;
 
 public final class UnitRenderer {
 
-    private static final String HEADER = "# Managed by xac. Do not edit.";
+    public static final String HEADER = "# Managed by xac. Do not edit.";
 
     public String render(ServiceSpec spec, SystemdTarget target) {
         List<List<String>> sections = new ArrayList<List<String>>();
