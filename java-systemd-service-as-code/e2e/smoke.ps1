@@ -291,12 +291,14 @@ lifecycle:
     Assert-ContainerPath '/opt/demo/app.jar' '-f' $true 'app.jar is in the package dir'
 
     # ------------------------------------------------------------------
-    Write-Step 'fixtures: real dir at target, foreign symlink at target, existing .bak'
+    Write-Step 'fixtures: a real directory and a foreign symlink block the targets'
     Assert-ExitCode (Invoke-Container @('mkdir', '/opt/links/b/app.jar')) 0 'b: real directory pre-created at target'
+    Assert-ExitCode (Invoke-Container @('sh', '-c', 'printf keep > /opt/links/b/app.jar/keep.txt')) 0 'b: content pre-created inside the real directory'
     Assert-ExitCode (Invoke-Container @('ln', '-s', '/opt/elsewhere', '/opt/links/c/app.jar')) 0 'c: foreign symlink pre-created at target'
-    Assert-ExitCode (Invoke-Container @('sh', '-c', 'printf preexisting > /opt/links/c/app.jar.bak')) 0 'c: pre-existing .bak file created'
     Assert-Equal ((Get-ContainerListing '/opt/links/b') -join '|') 'app.jar' 'b: only the real directory exists'
-    Assert-Equal ((Get-ContainerListing '/opt/links/c') -join '|') 'app.jar|app.jar.bak' 'c: foreign link plus pre-existing .bak'
+    Assert-Equal (Get-ContainerFile '/opt/links/b/app.jar/keep.txt') 'keep' 'b: directory content is untouched'
+    Assert-Equal ((Get-ContainerListing '/opt/links/c') -join '|') 'app.jar' 'c: only the foreign symlink exists'
+    Assert-Equal (Get-ContainerLinkTarget '/opt/links/c/app.jar') '/opt/elsewhere' 'c: foreign symlink points elsewhere'
 
     # ------------------------------------------------------------------
     Write-Step 'status before apply: drift must be reported'
@@ -312,9 +314,27 @@ lifecycle:
     }
 
     # ------------------------------------------------------------------
-    Write-Step 'apply'
+    Write-Step 'apply refuses blocked path-links: exit 2, nothing changed, service not started'
+    $Blocked = Invoke-Container @('java', '-jar', '/opt/xac.jar', 'apply', '/opt/demo')
+    Assert-ExitCode $Blocked 2 'apply exits 2 when a path-links target is blocked'
+    Assert-Contain $Blocked.Output 'path-links[1]' 'apply: b is reported as the blocked entry'
+    Assert-Contain $Blocked.Output 'path-links[2]' 'apply: c is reported as the blocked entry'
+    Assert-Contain $Blocked.Output '/opt/links/b/app.jar' 'apply: the b target is named in the error'
+    Assert-Equal ((Get-ContainerListing '/opt/links/b') -join '|') 'app.jar' 'b: no .bak created for the real directory'
+    Assert-Equal (Get-ContainerFile '/opt/links/b/app.jar/keep.txt') 'keep' 'b: directory content still untouched'
+    Assert-Equal ((Get-ContainerListing '/opt/links/c') -join '|') 'app.jar' 'c: no .bak created for the foreign symlink'
+    Assert-Equal (Get-ContainerLinkTarget '/opt/links/c/app.jar') '/opt/elsewhere' 'c: foreign symlink untouched'
+    Assert-ContainerPath '/etc/systemd/system/demo.service' '-e' $false 'blocked apply: unit file not written'
+    Assert-ContainerPath '/etc/xac/demo.env' '-e' $false 'blocked apply: env file not written'
+    $BlockedPgrep = Invoke-Container @('pgrep', '-f', '/opt/demo/app\.jar')
+    Assert-ExitCode $BlockedPgrep 1 'blocked apply: service process not started'
+
+    # ------------------------------------------------------------------
+    Write-Step 'remove the obstacles and apply'
+    Assert-ExitCode (Invoke-Container @('rm', '-rf', '/opt/links/b/app.jar')) 0 'b: remove the blocking directory by hand'
+    Assert-ExitCode (Invoke-Container @('rm', '-f', '/opt/links/c/app.jar')) 0 'c: remove the blocking symlink by hand'
     $Apply = Invoke-Container @('java', '-jar', '/opt/xac.jar', 'apply', '/opt/demo')
-    Assert-ExitCode $Apply 0 'apply exits 0'
+    Assert-ExitCode $Apply 0 'apply exits 0 after the obstacles are gone'
     Assert-Contain $Apply.Output 'path-links' 'apply planned: path-links action'
     Assert-Contain $Apply.Output '/etc/xac/demo.env' 'apply planned: env file path'
     Assert-Contain $Apply.Output '/etc/systemd/system/demo.service' 'apply planned: unit file path'
@@ -360,37 +380,15 @@ lifecycle:
     Assert-Contain $Logs.Output 'GREETING=hello world' 'logs: shows the service output'
 
     # ------------------------------------------------------------------
-    Write-Step 'path-links case 1: target absent -> symlink created'
-    Assert-ContainerPath '/opt/links/a/app.jar' '-L' $true 'a: symlink created at an absent target'
-    Assert-Equal (Get-ContainerLinkTarget '/opt/links/a/app.jar') '/opt/demo/app.jar' 'a: points at the configured source'
-    Assert-Equal ((Get-ContainerListing '/opt/links/a') -join '|') 'app.jar' 'a: no .bak appeared'
-
-    Write-Step 'path-links case 3: real directory at target -> moved to .bak'
-    Assert-ContainerPath '/opt/links/b/app.jar' '-L' $true 'b: symlink created at a directory target'
-    Assert-Equal (Get-ContainerLinkTarget '/opt/links/b/app.jar') '/opt/demo/app.jar' 'b: points at the configured source'
-    Assert-ContainerPath '/opt/links/b/app.jar.bak' '-d' $true 'b: real directory moved to <target>.bak'
-    Assert-Equal ((Get-ContainerListing '/opt/links/b') -join '|') 'app.jar|app.jar.bak' 'b: only link and .bak remain'
-
-    Write-Step 'path-links case 4: foreign symlink at target -> timestamped .bak'
-    Assert-ContainerPath '/opt/links/c/app.jar' '-L' $true 'c: symlink created at a foreign-symlink target'
-    Assert-Equal (Get-ContainerLinkTarget '/opt/links/c/app.jar') '/opt/demo/app.jar' 'c: points at the configured source'
-    Assert-ContainerPath '/opt/links/c/app.jar.bak' '-f' $true 'c: pre-existing .bak kept'
-    Assert-Equal (Get-ContainerFile '/opt/links/c/app.jar.bak') 'preexisting' 'c: pre-existing .bak content untouched'
-    $ListingC = Get-ContainerListing '/opt/links/c'
-    Assert-Equal ([string]$ListingC.Count) '3' 'c: link + .bak + timestamped backup'
-    $Stamped = @($ListingC | Where-Object { $_ -match '^app\.jar\.bak\.[0-9]{14}$' })
-    Assert-Equal ([string]$Stamped.Count) '1' 'c: one .bak.<yyyyMMddHHmmss> backup'
-    Assert-ContainerPath ('/opt/links/c/' + $Stamped[0]) '-L' $true 'c: timestamped backup is a symlink'
-    Assert-Equal (Get-ContainerLinkTarget ('/opt/links/c/' + $Stamped[0])) '/opt/elsewhere' 'c: backup keeps the old link target'
-
-    Write-Step 'path-links: d and e created normally'
-    Assert-ContainerPath '/opt/links/d/app.jar' '-L' $true 'd: symlink created'
-    Assert-Equal (Get-ContainerLinkTarget '/opt/links/d/app.jar') '/opt/demo/app.jar' 'd: points at the configured source'
-    Assert-ContainerPath '/opt/links/e/app.jar' '-L' $true 'e: symlink created'
-    Assert-Equal (Get-ContainerLinkTarget '/opt/links/e/app.jar') '/opt/demo/app.jar' 'e: points at the configured source'
+    Write-Step 'path-links: every target became a symlink pointing at the source'
+    foreach ($Name in @('a', 'b', 'c', 'd', 'e')) {
+        Assert-ContainerPath ('/opt/links/' + $Name + '/app.jar') '-L' $true ($Name + ': symlink created')
+        Assert-Equal (Get-ContainerLinkTarget ('/opt/links/' + $Name + '/app.jar')) '/opt/demo/app.jar' ($Name + ': points at the configured source')
+        Assert-Equal ((Get-ContainerListing ('/opt/links/' + $Name)) -join '|') 'app.jar' ($Name + ': no .bak appeared')
+    }
 
     # ------------------------------------------------------------------
-    Write-Step 'path-links case 2: re-apply is idempotent'
+    Write-Step 'path-links: re-apply is idempotent and never creates a .bak'
     $InodeBeforeResult = Invoke-Container @('stat', '-c', '%i', '/opt/links/a/app.jar')
     Assert-ExitCode $InodeBeforeResult 0 'stat -c %i a before re-apply'
     $InodeBefore = $InodeBeforeResult.Output.Trim()
@@ -404,8 +402,10 @@ lifecycle:
     Assert-Equal $InodeAfter $InodeBefore 'a: link inode unchanged (not recreated)'
     Assert-Equal (Get-ContainerLinkTarget '/opt/links/a/app.jar') '/opt/demo/app.jar' 'a: link target unchanged'
     Assert-Equal ((Get-ContainerListing '/opt/links/a') -join '|') 'app.jar' 'a: still no .bak'
+    Assert-Equal $ListingBBefore 'app.jar' 'b: only the link exists before re-apply'
+    Assert-Equal $ListingCBefore 'app.jar' 'c: only the link exists before re-apply'
     Assert-Equal ((Get-ContainerListing '/opt/links/b') -join '|') $ListingBBefore 'b: no extra .bak after re-apply'
-    Assert-Equal ((Get-ContainerListing '/opt/links/c') -join '|') $ListingCBefore 'c: no extra timestamped .bak after re-apply'
+    Assert-Equal ((Get-ContainerListing '/opt/links/c') -join '|') $ListingCBefore 'c: no extra .bak after re-apply'
 
     # ------------------------------------------------------------------
     Write-Step 'stop: SuccessExitStatus=143 and the shutdown hook'
@@ -468,12 +468,8 @@ lifecycle:
     Assert-ContainerPath '/opt/links/e/app.jar' '-L' $true 'e: foreign symlink survived destroy'
     Assert-Equal (Get-ContainerLinkTarget '/opt/links/e/app.jar') '/opt/elsewhere' 'e: foreign symlink target unchanged'
 
-    Assert-ContainerPath '/opt/links/b/app.jar.bak' '-d' $true 'b: backed-up directory survived destroy'
-    Assert-ContainerPath '/opt/links/c/app.jar.bak' '-f' $true 'c: pre-existing .bak survived destroy'
-    $ListingCAfter = Get-ContainerListing '/opt/links/c'
-    $StampedAfter = @($ListingCAfter | Where-Object { $_ -match '^app\.jar\.bak\.[0-9]{14}$' })
-    Assert-Equal ([string]$StampedAfter.Count) '1' 'c: timestamped backup survived destroy'
-    Assert-Equal (Get-ContainerLinkTarget ('/opt/links/c/' + $StampedAfter[0])) '/opt/elsewhere' 'c: timestamped backup target unchanged'
+    Assert-Equal ((Get-ContainerListing '/opt/links/b') -join '|') '' 'b: only the removed link was there, no .bak'
+    Assert-Equal ((Get-ContainerListing '/opt/links/c') -join '|') '' 'c: only the removed link was there, no .bak'
 
     Write-Host ''
     Write-Host 'SMOKE OK'

@@ -325,8 +325,9 @@ xac destroy [<package-dir>] [--dry-run] [--yes]
 15. `artifact.jar` 存在
 16. `runtime.java` 存在且可执行
 17. `path-links` 的源存在
+18. `path-links` 的目标要么不存在，要么已是指向源的软链接；其余形态一律拒绝，交给人处理
 
-第 17 条**只在 apply 检查**。`status`、`logs`、`destroy` 要能在包目录内容已经没了的时候继续工作
+第 17、18 条**只在 apply 检查**。`status`、`logs`、`destroy` 要能在包目录内容已经没了的时候继续工作
 （典型场景：先把产物删了，再拆服务）。
 
 ### 6.2 apply
@@ -341,7 +342,7 @@ xac apply [<package-dir>] [--dry-run]
 
 | # | 动作 | 落到机器上的操作 |
 |---|---|---|
-| 1 | `path-links` | 软链接（目标不存在则建；已指向正确源则跳过；真实目录/文件则备份 `.bak` 后建） |
+| 1 | `path-links` | 软链接（目标不存在则建；已指向正确源则跳过；其余形态一律拒绝，整次 apply 退 2） |
 | 2 | `workdir` | 目录不存在时 `createDirectory`（只建最后一级，父目录不存在报错） |
 | 3 | `env` | 写 `/etc/xac/<name>.env`（目录不存在则建），0600；`env` 为空则删掉遗留文件 |
 | 4 | `unit` | 写 `/etc/systemd/system/<name>.service`，0644 |
@@ -351,7 +352,7 @@ xac apply [<package-dir>] [--dry-run]
 
 `path-links` 排在 `workdir` 之前是有意的：样例里 `workdir` 与某个 link 的目标可能是同一个路径
 （`workdir: /appfile/messystemservice` 与 `./appfile:/appfile/messystemservice`）。链接先建好，
-`workdir` 那步看到路径已存在就跳过，不会先造一个真实目录再把它备份成 `.bak`。
+`workdir` 那步看到路径已存在就跳过。目标处若是别的东西，`path-links` 直接退 2，`workdir` 根本不会执行。
 
 `--dry-run`：**先过 §6.1 的预检**，通过后打印 7 个动作的描述并退出 0，不写文件、不执行命令；
 预检失败按 §6.1 退 2（什么都没改动）。dry-run 的价值是「这些动作在这台机器上真能执行」，
@@ -363,14 +364,17 @@ xac apply [<package-dir>] [--dry-run]
 |---|---|
 | 不存在 | 建链接 |
 | 已是指向正确源的软链接 | 跳过 |
-| 真实目录或文件 | 备份为 `<目标>.bak`（已存在则加时间戳）→ 建链接 |
-| 软链接但指向别处 | 同样备份为 `.bak` → 建链接（不静默覆盖别人的链接） |
+| 真实目录（空或非空）、普通文件、指向别处的软链接、悬空软链接、FIFO/socket 等 | **拒绝**：整次 apply 退 2，不移动、不删除、不覆盖任何东西，交给人处理 |
 
-**护栏先于动作**：目标落在受保护位置（§6.1 第 10 条）或与源互相包含（第 11 条）时，apply 在写任何
-文件之前就退 2。这条护栏存在的理由很具体——`./conf:/etc` 这种笔误会把整个 `/etc` 改名成 `.bak`，
-`./u:/etc/systemd/system` 会把 unit 目录端掉。护栏执行前先解析真实路径，避免用链接绕过。
+拒绝时的报错是 `目标已存在且不是指向源的软链接，请人工处理: <目标>`。实现上彻底移除了
+`<目标>.bak` 备份与 `Files.move` 用户数据的时间戳逻辑——xac 不再替用户决定旧目录/旧文件的去留。
 
-`.bak` 备份不会被 destroy 清理，需要时手工删。
+**护栏先于动作**：目标落在受保护位置（§6.1 第 10 条）、与源互相包含（第 11 条），或目标已存在
+却不是指向源的软链接（第 18 条）时，apply 在写任何文件之前就退 2。护栏存在的理由很具体——
+`./conf:/etc` 这类笔误会让系统目录成为链接目标，`./u:/etc/systemd/system` 会端掉 unit 目录；
+护栏执行前先解析真实路径，避免用链接绕过。
+
+拒绝发生在改动之前，原路径原样保留；人工处理掉障碍后重新 apply 即可。
 
 **失败语义：不自动回滚。** 停在失败的动作，输出诊断，退出码 1。已完成的部分保留——
 下次 apply 会重新覆盖一遍。
@@ -458,7 +462,7 @@ xac destroy [<package-dir>] [--dry-run] [--yes]
 这条闸门的代价要说清楚：如果 unit 文件被手工删掉了而进程还在，destroy 会退 0 但不杀进程——警告
 会写出来，但不会替你收拾。反过来，同名 vendor unit（如 `ssh`）永远不会被误停。
 
-确认提示列出**将要删除**的项和**确认保留**的项（包目录、workdir、`.bak`、日志）。
+确认提示列出**将要删除**的项和**确认保留**的项（包目录、workdir、日志）。
 
 **不要求 `artifact.jar` 与 `runtime.java` 存在**：产物先删、后拆服务是正常顺序。destroy 的预检只有
 root 与 `/run/systemd/system`。
@@ -478,7 +482,7 @@ root 与 `/run/systemd/system`。
 systemd 起不来时（`degraded`），reload 失败也挡不住「文件已经清掉」这个结果，下一次 `apply`
 必然会再 reload 一次。
 
-**不删**：包目录、workdir、`.bak` 备份、已产出的日志。
+**不删**：包目录、workdir、已产出的日志。
 
 **幂等**：什么都没装的时候跑 destroy 也返回 0。
 
@@ -592,7 +596,7 @@ docker run -d --name xac-e2e --privileged --cgroupns=host \
 - 无 `diff` / `render`
 - `apply` 无条件重启，无法避免短暂停机
 - status 不显示内存/CPU
-- `destroy` 不删包目录、workdir 与 `.bak` 备份
+- `destroy` 不删包目录与 workdir；`path-links` 不再产生任何备份，遇到既有目标直接报错交给人处理
 - `destroy` 只处理带管理头的 unit 文件；手工删掉 unit 文件后仍在跑的进程不会被停掉（只警告）
 - 符号链接形式的「管理 unit」会被 destroy 整体跳过（xac 自己从不这样写 unit）
 - `path-links` 的受保护目录策略是保守的：`/var`、`/home` 下面也不能建链接（需要时先改用其它位置）

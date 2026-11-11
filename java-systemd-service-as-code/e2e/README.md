@@ -79,10 +79,10 @@ pwsh 7+ 与 Linux/macOS 路径未在此环境实际执行。
 
 - **path-links 状态机**（Windows 上 JUnit 会跳过这部分，这里是唯一执行点）：
   1. 目标不存在 → 建软链接，指向配置里的源；
-  2. 再次 `apply` → 幂等：链接 inode 不变、不新增 `.bak`；
-  3. 目标处是真实目录 → 移到 `<target>.bak`，再建链接；
-  4. 目标处是指向别处的软链接 → 备份为 `.bak`；`.bak` 已存在时改用带时间戳的
-     `<target>.bak.yyyyMMddHHmmss`，旧备份内容与旧链接目标都保留；
+  2. 目标处是真实目录 / 外来软链接（JUnit 另外覆盖普通文件与悬空链接）→ `apply` 退 2，
+     原路径与内容原样保留，不产生任何 `.bak`，该次 apply 不启动服务；
+  3. 人工清掉障碍后 `apply` → 五条链接全部建好；
+  4. 再次 `apply` → 幂等：链接 inode 不变、不新增 `.bak`；
   5. `destroy` 只删指向配置源的链接：目标处被换成真实文件 / 外来软链接时原样保留。
 - **status**：apply 前报漂移（退出码 1，逐条 `drift:`，含每个 `path-links[i]`）；
   apply 后 `(in sync)` + `auto-start: enabled`，退出码 0。
@@ -95,8 +95,8 @@ pwsh 7+ 与 Linux/macOS 路径未在此环境实际执行。
   failed），且 shutdown hook 打印 `STOPPING`。
 - **destroy**：unit / env / `multi-user.target.wants/demo.service` 软链本身 / 自己创建的
   链接都不在了（软链用 `test -L` 断言，即使已悬空也必须消失），`LoadState=not-found`，
-  且 `pgrep -f /opt/demo/app\.jar` 无残留进程；
-  被备份的真实目录、既有 `.bak`、时间戳备份、真实文件、外来软链接全部保留。
+  且 `pgrep -f /opt/demo/app\.jar` 无残留进程；目标处被换成真实文件或外来软链接时
+  原样保留。
 
 所有 `/opt/demo`、`/opt/links/*`、`/opt/elsewhere` 都只在一次性容器里创建，
 成功后随容器一起消失。
