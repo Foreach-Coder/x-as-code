@@ -24,8 +24,10 @@
 
 - **Java 8**：`maven.compiler.release=8`。禁止 record、`var`、switch 表达式、文本块、
   `List.of`/`Map.of`、`Optional.isEmpty()`、`ProcessorHandle`/`ProcessHandle`、`Stream.toList()`。
-- 依赖只在 pom 里那四个：picocli 4.7.6、snakeyaml 2.2、JUnit 5.10.2，以及测试用的 shade 插件。
-  不新增依赖，不追大版本。
+  测试代码同样按 `--release 8` 编译。
+- 运行期依赖只有 picocli 4.7.6 与 snakeyaml 2.2；测试用 JUnit 5.10.2 与 Testcontainers
+  1.19.8（`org.testcontainers:testcontainers`、`org.testcontainers:junit-jupiter`）；
+  打包用 maven-shade-plugin，e2e 用 maven-failsafe-plugin。不新增其他依赖，不追大版本。
 - 外部命令一律 `ProcessBuilder` + `List<String>` 传 argv，**不经过 shell**，不做字符串拼接。
 - 渲染必须确定性：同样的 `xac.yaml` 产出逐字节相同的 unit 与 env 文件。
 
@@ -39,10 +41,9 @@ mvn -f java-systemd-service-as-code/pom.xml test
 mvn -f java-systemd-service-as-code/pom.xml -DskipTests package
 #   → java-systemd-service-as-code/target/java-systemd-service-cli-0.1.0-SNAPSHOT.jar
 
-# 真 systemd 冒烟（需要 Docker + 镜像 xac-e2e:24.04，见 e2e/README.md）
-cd java-systemd-service-as-code
-powershell -NoProfile -ExecutionPolicy Bypass -File e2e/smoke.ps1   # 本机只有 Windows PowerShell 时
-pwsh -NoProfile -File e2e/smoke.ps1                                 # 装了 pwsh 时
+# 真 systemd e2e（Testcontainers；需要 Docker + 镜像 xac-e2e:24.04，见 e2e/README.md）
+mvn -f java-systemd-service-as-code/pom.xml -Pe2e verify
+#   镜像缺失时先构建：cd java-systemd-service-as-code && docker build -t xac-e2e:24.04 e2e
 ```
 
 ## 安全语义（改代码前先读）

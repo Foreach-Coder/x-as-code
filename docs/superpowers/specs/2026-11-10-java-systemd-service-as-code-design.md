@@ -534,6 +534,8 @@ Formatter。v1 不实现。
 
 `RecordingRunner` 预置 systemctl 输出，临时目录当 `/etc/systemd/system` 与 `/etc/xac`。
 端到端：apply → 断言文件内容与命令序列 → status 报 in sync → destroy → 断言全部清理干净。
+这一层只跑 `ProcessBuilder` 与文件系统，**不启动 Docker**；`mvn test` 必须始终在没有
+Docker 的机器上通过。真 systemd 场景见 7.3 的 `SmokeIT`。
 
 ### 7.3 真 systemd 验证
 
@@ -542,6 +544,13 @@ systemd 255 + JRE 21 跑真实 jar**，即目标平台）。容器以
 `--privileged --cgroupns=host --tmpfs /run --tmpfs /run/lock --tmpfs /tmp` 启动、`/sbin/init` 作
 PID 1。24.04 上 `systemctl is-system-running` 返回 `running`；249 上返回 `degraded`（有单元失败），
 因此等待条件仍应接受 `running | degraded`。
+
+这两轮的事实现在由可重复的 JUnit IT 固定：`SmokeIT`（JUnit 5 + Testcontainers，源码在
+`java-systemd-service-as-code/src/test/java/io/xac/systemd/e2e/`）在一个一次性容器里跑完
+`apply / status / logs / stop / destroy`、path-links 四种护栏、重复 apply、`--dry-run`
+与 shadow guard。命令是 `mvn -f java-systemd-service-as-code/pom.xml -Pe2e verify`；
+它由 `e2e` profile 里的 failsafe 绑定到 `integration-test` / `verify`，先打 fat jar 再起容器。
+`mvn test` 不启动 Docker，也不匹配 `SmokeIT`。镜像缺失时按 `e2e/README.md` 构建。
 
 | 已验证的事实 | 结论 |
 |---|---|
@@ -564,7 +573,7 @@ PID 1。24.04 上 `systemctl is-system-running` 返回 `running`；249 上返回
 
 **未验证**：systemd 219（CentOS 7）——已按 D17 移出支持范围，不再验证。
 
-复现方式（两轮实测用的同一套）：
+复现方式（现在由 `SmokeIT` 自动执行，下面的 docker 命令是手工等价物）：
 
 ```dockerfile
 FROM ubuntu:24.04
@@ -579,7 +588,10 @@ docker run -d --name xac-e2e --privileged --cgroupns=host \
   --tmpfs /run --tmpfs /run/lock --tmpfs /tmp \
   --entrypoint /sbin/init xac-e2e:24.04
 ```
-被测 jar 在开发机用 `javac --release 8` + `jar cfe` 构建后 `docker cp` 进去，与真实部署模型一致。
+被测 jar 在开发机用 `--release 8` 编译；`SmokeIT` 从测试类 `DemoApp` 的 class 文件现场打一个
+可运行 jar，连同 CLI fat jar 与生成的 `xac.yaml` 用 `copyFileToContainer` 放进 `/opt/demo`，
+与真实部署模型一致（CLI 不上传产物）。测试还会显式把 entrypoint 覆写为 `/sbin/init` 并清空
+CMD：本机缓存的镜像元数据可能是 `ENTRYPOINT ["/bin/sh"]`，不覆写会变成 `/bin/sh /sbin/init`。
 
 ## 8. 构建与交付
 

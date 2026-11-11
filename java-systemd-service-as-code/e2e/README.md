@@ -1,102 +1,95 @@
 # e2e 环境
 
-跑真 systemd 的容器环境，用来验证 `xac apply / status / destroy` 落到机器上的真实效果。
+跑真 systemd 的容器环境，用来验证 `xac apply / status / logs / destroy` 落到机器上的真实效果。
 目标平台是 Ubuntu 24.04 + systemd 255（设计文档 D17）。
 
-## 构建
+断言全部在 `src/test/java/io/xac/systemd/e2e/SmokeIT.java` 里，用 JUnit 5 + Testcontainers
+驱动，不再有独立的 PowerShell 脚本。
+
+## 构建镜像
+
+在 `java-systemd-service-as-code/` 下执行：
 
 ```bash
-docker build -t xac-e2e:24.04 .
+docker build -t xac-e2e:24.04 e2e
 ```
 
-## 启动
+镜像里是 `systemd systemd-sysv dbus procps openjdk-21-jre-headless`，`STOPSIGNAL SIGRTMIN+3`，
+`CMD ["/sbin/init"]`。它只用于 e2e，不随 CLI 分发。
+
+## 运行
 
 ```bash
-docker run -d --name xac-e2e \
-  --privileged --cgroupns=host \
-  --tmpfs /run --tmpfs /run/lock --tmpfs /tmp \
-  --entrypoint /sbin/init \
-  xac-e2e:24.04
+# 在 java-systemd-service-as-code/ 下
+mvn -Pe2e verify
+
+# 或在仓库根
+mvn -f java-systemd-service-as-code/pom.xml -Pe2e verify
 ```
 
-`--privileged` 与 `--cgroupns=host` 是 systemd 作为 PID 1 在容器里工作的前提；
-三个 `--tmpfs` 提供 systemd 需要的可写运行目录。
+`mvn test` 只跑单元/集成测试，**不会碰 Docker**；e2e 在 `e2e` profile 里由
+`maven-failsafe-plugin` 绑定到 `integration-test` / `verify`，`SmokeIT` 带 `@Tag("e2e")`。
+`-Pe2e` 会先 `package` 出 fat jar，再启动容器跑测试。Docker 不可用时它会直接失败，
+不会静默跳过。
 
-自检：
+一次完整运行约 20 秒（容器内测试约 11 秒）。
 
-```bash
-docker exec xac-e2e systemctl is-system-running
-docker exec xac-e2e systemctl --version | head -1
-docker exec xac-e2e java -version
-```
+## 容器怎么起
+
+`SmokeIT` 用 `GenericContainer`，配置与手工复现一致：
+
+- `--privileged`、`--cgroupns=host`（systemd 作为 PID 1 的前提）；
+- `--tmpfs /run --tmpfs /run/lock --tmpfs /tmp`；
+- **显式**把 entrypoint 覆写为 `/sbin/init` 并清空 CMD。本机缓存的 `xac-e2e:24.04`
+  元数据是 `ENTRYPOINT ["/bin/sh"]`、`CMD ["-c", "sleep 3600"]`，不覆写会变成
+  `/bin/sh /sbin/init`；从本仓库 Dockerfile 重新构建的镜像也同样适用。
+
+systemd 起来后轮询 `systemctl is-system-running`，最多 60 秒，接受 `running` 或
+`degraded`（容器里 getty 之类必然失败，degraded 是正常状态）。不用
+`Wait.forLogMessage`：PID 1 的输出不是这里的启动契约。
 
 ## 被测产物怎么进去
 
-jar 在开发机构建（`javac --release 8` / Maven），用 `docker cp` 或在 `docker run` 时挂载
-进容器，与真实部署模型一致：**CLI 不上传产物**。
+测试在宿主机上：
+
+1. 从 `target/` 里按 manifest 的 `Main-Class: io.xac.systemd.cli.Main` 找到 CLI fat jar
+   （跳过 `original-*.jar` 与 `*-shaded.jar`），复制到容器 `/opt/xac.jar`；
+2. 用测试类 `io.xac.systemd.e2e.DemoApp` 的 class 文件 + manifest 打一个可运行 jar，
+   复制到 `/opt/demo/app.jar`；
+3. 生成 `xac.yaml`，复制到 `/opt/demo/xac.yaml`。
+
+只通过 `copyFileToContainer` 放入，CLI 不上传产物，与真实部署模型一致。
+
+## 覆盖的场景
+
+`SmokeIT` 按 `@Order` 顺序共享一个容器和一个 demo 服务：
+
+1. **apply 前 status**：退出码 1，`unit (missing)`、`env (out of sync)`、逐条 `drift:`。
+2. **path-links 护栏**：目标处是真实目录 / 外来软链接 / 普通文件 / 悬空链接时
+   `apply` 退出码 2，报 `path-links[1..4]`，不写 unit/env、不启动进程、原内容不变、
+   不产生 `.bak`。
+3. **apply**：退出码 0；unit 0644、env 0600；`UnitFileState=enabled`、`ActiveState=active`、
+   wants 软链指向 unit；`${GREETING}` 不切词、`%%`→`%`、`$$`→`$`、`-Xmx256m` 生效、
+   `CWD` 等于 workdir；7 条链接指向 `/opt/demo/app.jar`；status 退出码 0 且无 drift；
+   单元名/env 名始终是 `xac.demo.*`，不会出现 `demo.service`。
+4. **--dry-run**：unit/env 的 inode 与 mtime、服务 PID 都不变，只打印 `would ...`。
+5. **重复 apply**：链接 inode 不变、无 `.bak`，但服务确实被 restart（PID 变化）。
+6. **logs**：能读到 `READY pid=`，`logs -n 5` 不超过 5 行（`--no-pager` 不挂起）。
+7. **stop / start / status**：`stop` 后 `inactive`、`Result=success`、journal 有 `STOPPING`；
+   此时 status 退出码 1；`start` 后恢复；改 env 文件后 status 退出码 1；重新 apply 后 0。
+8. **destroy --yes**：停服、删 unit/env/wants、`LoadState=not-found`、进程消失、
+   自己建的链接被删除；目标处换成真实文件与外来软链接时原样保留。
+9. **shadow guard**：`/usr/lib/systemd/system/xac.shadow.service` 存在时，对 `name: shadow`
+   的 apply 退出码 2，消息里出现 FragmentPath，且不写 `/etc/systemd/system/xac.shadow.service`
+   与 env。
 
 ## 注意
 
-- `systemctl is-system-running` 可能返回 `degraded`（容器里有必然失败的单元），
-  断言要接受 `running | degraded`。
-- 这个镜像只用于 e2e，不随 CLI 分发。
-
-## 冒烟脚本
-
-一条命令验证 fat jar 在真实 systemd 上的 `apply / status / logs / stop / destroy` 全流程。
-`smoke.ps1` 是唯一承载断言的规范脚本；`smoke.sh` 只是转发到 `pwsh` 的薄入口。
-
-```powershell
-# Windows（本仓库已实际执行并通过：Windows PowerShell 5.1）
-powershell -NoProfile -ExecutionPolicy Bypass -File e2e\smoke.ps1
-```
-
-```bash
-# Linux / macOS 或 PowerShell 7+：按 pwsh 语义编写，本环境未实际执行
-pwsh -NoProfile -File e2e/smoke.ps1
-# 等价入口：只做 pwsh 转发，本环境未实际执行
-bash e2e/smoke.sh
-```
-
-脚本做的事：
-
-1. `mvn -q package` 产出 fat jar，并用 `javac --release 8` + `jar cfe` 打一个示例服务；
-2. 起一次性容器（镜像缺省 `xac-e2e:24.04`，可用环境变量 `IMAGE` 覆盖；镜像不存在时
-   按 `e2e/Dockerfile` 构建，耗时较长）；
-3. 只通过 `docker cp` 把 CLI jar、`xac.yaml`、示例 jar 放进容器（CLI 不上传产物）；
-4. 逐项断言；全部通过才打印最后一行 `SMOKE OK`，并删除容器；
-   任何断言失败都会非零退出，且保留容器方便排查（`docker exec -it xac-smoke bash`）。
-
-前置条件：`docker`、JDK（`java` / `javac` / `jar`，能编 `--release 8`）、Maven。
-
-`smoke.ps1` 自带 `--release 8` 编译检查；脚本本身用 ASCII 写成，路径统一用嵌套
-`Join-Path` 构造，不依赖 `\` 作分隔符。Windows PowerShell 5.1 已在本环境验证；
-pwsh 7+ 与 Linux/macOS 路径未在此环境实际执行。
-
-### e2e coverage
-
-脚本里真正钉住的行为，每条都有独立断言：
-
-- **path-links 状态机**（Windows 上 JUnit 会跳过这部分，这里是唯一执行点）：
-  1. 目标不存在 → 建软链接，指向配置里的源；
-  2. 目标处是真实目录 / 外来软链接（JUnit 另外覆盖普通文件与悬空链接）→ `apply` 退 2，
-     原路径与内容原样保留，不产生任何 `.bak`，该次 apply 不启动服务；
-  3. 人工清掉障碍后 `apply` → 五条链接全部建好；
-  4. 再次 `apply` → 幂等：链接 inode 不变、不新增 `.bak`；
-  5. `destroy` 只删指向配置源的链接：目标处被换成真实文件 / 外来软链接时原样保留。
-- **status**：apply 前报漂移（退出码 1，逐条 `drift:`，含每个 `path-links[i]`）；
-  apply 后 `(in sync)` + `auto-start: enabled`，退出码 0。
-- **apply**：`systemctl enable / restart`、写 unit（`stat -c %a` 断言 0644）与 env
-  （`stat -c %a` 断言 0600）、enable 后存在
-  `multi-user.target.wants/xac.demo.service` 软链且指向 unit、`EnvironmentFile` 注入
-  `GREETING`、`WorkingDirectory` 等于包目录、`-Xmx256m` 生效（JVM 报 `XMX=268435456`）。
-- **logs**：`xac logs` 能读到 journal 里的服务输出。
-- **stop**：`systemctl stop` 后 `ActiveState=inactive`（`SuccessExitStatus=143`，不是
-  failed），且 shutdown hook 打印 `STOPPING`。
-- **destroy**：unit / env / `multi-user.target.wants/xac.demo.service` 软链本身 / 自己创建的
-  链接都不在了（软链用 `test -L` 断言，即使已悬空也必须消失），`LoadState=not-found`，
-  且 `pgrep -f /opt/demo/app\.jar` 无残留进程；目标处被换成真实文件或外来软链接时
-  原样保留。
-
-所有 `/opt/demo`、`/opt/links/*`、`/opt/elsewhere` 都只在一次性容器里创建，
-成功后随容器一起消失。
+- 容器 locale 是 `C`，CLI 的 `System.out` 按 ASCII 编码，中文错误信息会变成 `?`。
+  因此断言中文消息时只匹配稳定的 ASCII 片段（如路径、`unit:`、`path-links[i]`），
+  这不是放松检查：路径和退出码仍然逐项断言。
+- Testcontainers 1.19.8 内置的 docker-java 在未指定 API 版本时会退回 1.32，Docker 29
+  已把最低 API 提到 1.44，连接会被拒。`SmokeIT` 先问本机 `docker version` 的服务端
+  API 版本并设置系统属性 `api.version`，兼容新旧 Docker；没有 docker CLI 时保持默认。
+- 所有 `/opt/demo`、`/opt/links/*`、`/opt/elsewhere` 都只在一次性容器里创建，
+  成功后随容器一起消失。
