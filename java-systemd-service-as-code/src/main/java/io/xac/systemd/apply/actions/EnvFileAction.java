@@ -24,6 +24,10 @@ public final class EnvFileAction implements Action {
     public void run(ApplyContext ctx) {
         Path envPath = UnitNaming.envPath(ctx.spec, ctx.target);
         try {
+            if (ManagedUnit.existsAndIsForeign(envPath)) {
+                throw new ActionFailure(
+                        "已存在非 xac 管理的 env 文件，拒绝覆盖或删除: " + envPath);
+            }
             if (ctx.spec.env.isEmpty()) {
                 Files.deleteIfExists(envPath);
                 return;

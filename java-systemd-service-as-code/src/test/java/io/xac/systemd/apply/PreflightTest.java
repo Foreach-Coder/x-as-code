@@ -1,8 +1,10 @@
 package io.xac.systemd.apply;
 
+import io.xac.systemd.exec.RecordingRunner;
 import io.xac.systemd.spec.Lifecycle;
 import io.xac.systemd.spec.ServiceSpec;
 import io.xac.systemd.spec.Violation;
+import io.xac.systemd.systemd.SystemdTarget;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -33,6 +35,15 @@ class PreflightTest {
                 .build();
     }
 
+    private SystemdTarget target() {
+        return new SystemdTarget(pkg.resolve("units"), pkg.resolve("env"));
+    }
+
+    /** 预检现在要查同名 unit；测试里用一个「查询成功但无内容」的 runner 与临时目标目录。 */
+    private List<Violation> preflight(ServiceSpec spec, EnvironmentProbe probe) {
+        return Preflight.check(spec, probe, new RecordingRunner(), target());
+    }
+
     private static final class FakeProbe implements EnvironmentProbe {
         boolean root = true;
         boolean systemd = true;
@@ -54,12 +65,12 @@ class PreflightTest {
     @Test
     void passesWhenEverythingIsFine() throws IOException {
         Files.createFile(pkg.resolve("app.jar"));
-        assertTrue(Preflight.check(spec("app.jar"), new FakeProbe()).isEmpty());
+        assertTrue(preflight(spec("app.jar"), new FakeProbe()).isEmpty());
     }
 
     @Test
     void requiresJarToExist() {
-        List<Violation> out = Preflight.check(spec("app.jar"), new FakeProbe());
+        List<Violation> out = preflight(spec("app.jar"), new FakeProbe());
         assertEquals(1, out.size());
         assertTrue(out.get(0).toString().contains("artifact.jar"), out.get(0).toString());
     }
@@ -70,7 +81,7 @@ class PreflightTest {
         FakeProbe probe = new FakeProbe();
         probe.root = false;
         probe.systemd = false;
-        List<Violation> out = Preflight.check(spec("app.jar"), probe);
+        List<Violation> out = preflight(spec("app.jar"), probe);
         assertEquals(2, out.size(), out.toString());
         assertTrue(out.get(0).toString().contains("root"));
         assertTrue(out.get(1).toString().contains("systemd"));
@@ -81,7 +92,7 @@ class PreflightTest {
         Files.createFile(pkg.resolve("app.jar"));
         FakeProbe probe = new FakeProbe();
         probe.javaExecutable = false;
-        List<Violation> out = Preflight.check(spec("app.jar"), probe);
+        List<Violation> out = preflight(spec("app.jar"), probe);
         assertEquals(1, out.size());
         assertTrue(out.get(0).toString().contains("runtime.java"), out.get(0).toString());
     }
@@ -119,7 +130,7 @@ class PreflightTest {
                 .lifecycle(new Lifecycle(null, null, null, null))
                 .build();
 
-        List<Violation> out = Preflight.check(spec, new FakeProbe());
+        List<Violation> out = preflight(spec, new FakeProbe());
 
         assertEquals(1, out.size(), out.toString());
         assertEquals("path-links[0]", out.get(0).path);
@@ -161,7 +172,7 @@ class PreflightTest {
     private List<Violation> check(Path target) throws IOException {
         Files.createFile(pkg.resolve("app.jar"));
         Path source = Files.createDirectories(pkg.resolve("payload"));
-        return Preflight.check(specWithLink(source, target), new FakeProbe());
+        return preflight(specWithLink(source, target), new FakeProbe());
     }
 
     @Test

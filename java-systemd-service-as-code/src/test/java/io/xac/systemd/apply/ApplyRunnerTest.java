@@ -6,6 +6,7 @@ import io.xac.systemd.spec.Lifecycle;
 import io.xac.systemd.spec.ServiceSpec;
 import io.xac.systemd.systemd.SystemdTarget;
 import io.xac.systemd.systemd.UnitNaming;
+import io.xac.systemd.systemd.UnitRenderer;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -98,7 +99,7 @@ class ApplyRunnerTest {
     void deletesEnvFileWhenEnvIsEmpty() throws IOException {
         Files.createDirectories(target().envDir);
         Path envFile = target().envDir.resolve("demo.env");
-        Files.write(envFile, "OLD=1\n".getBytes(StandardCharsets.UTF_8));
+        Files.write(envFile, (UnitRenderer.HEADER + "\nOLD=1\n").getBytes(StandardCharsets.UTF_8));
 
         ApplyContext ctx = new ApplyContext(spec(true, Collections.<String, String>emptyMap()),
                 target(), new RecordingRunner(), false);

@@ -7,11 +7,13 @@ import java.util.List;
 import io.xac.systemd.apply.EnvironmentProbe;
 import io.xac.systemd.apply.Preflight;
 import io.xac.systemd.apply.RealEnvironmentProbe;
+import io.xac.systemd.exec.CommandRunner;
 import io.xac.systemd.exec.ProcessRunner;
 import io.xac.systemd.spec.ServiceSpec;
 import io.xac.systemd.spec.SpecLoader;
 import io.xac.systemd.spec.ValidationRunner;
 import io.xac.systemd.spec.Violation;
+import io.xac.systemd.systemd.SystemdTarget;
 
 final class SpecCommands {
 
@@ -36,18 +38,18 @@ final class SpecCommands {
         return new Loaded(violations.isEmpty() ? parsed.spec : null, violations);
     }
 
-    /** 加载 + 静态校验 + 环境预检；任何一步失败都返回 spec == null。 */
-    static Loaded load(Path packageDir) {
-        return load(packageDir, new RealEnvironmentProbe(new ProcessRunner()));
-    }
-
-    static Loaded load(Path packageDir, EnvironmentProbe probe) {
+    /**
+     * 加载 + 静态校验 + 环境预检；任何一步失败都返回 spec == null。
+     * runner 与 target 必须和后续动作使用同一份，预检查询与写入不能各造一个。
+     */
+    static Loaded load(Path packageDir, EnvironmentProbe probe,
+            CommandRunner runner, SystemdTarget target) {
         Loaded parsed = parse(packageDir);
         if (parsed.spec == null) {
             return parsed;
         }
         List<Violation> violations = new ArrayList<Violation>(parsed.violations);
-        violations.addAll(Preflight.check(parsed.spec, probe));
+        violations.addAll(Preflight.check(parsed.spec, probe, runner, target));
         return new Loaded(violations.isEmpty() ? parsed.spec : null, violations);
     }
 

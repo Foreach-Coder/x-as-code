@@ -19,6 +19,10 @@ public final class RemoveEnvAction implements Action {
     @Override
     public void run(ApplyContext ctx) {
         Path envPath = UnitNaming.envPath(ctx.spec, ctx.target);
+        if (ManagedUnit.existsAndIsForeign(envPath)) {
+            ctx.warnings.add("已存在非 xac 管理的 env 文件，拒绝删除，已跳过: " + envPath);
+            return;
+        }
         try {
             Files.deleteIfExists(envPath);
         } catch (IOException e) {

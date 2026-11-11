@@ -1,7 +1,9 @@
 package io.xac.systemd.cli;
 
 import io.xac.systemd.apply.EnvironmentProbe;
+import io.xac.systemd.exec.RecordingRunner;
 import io.xac.systemd.spec.Violation;
+import io.xac.systemd.systemd.SystemdTarget;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -59,6 +61,10 @@ class SpecCommandsTest {
         return false;
     }
 
+    private SystemdTarget target() {
+        return new SystemdTarget(pkg.resolve("units"), pkg.resolve("env"));
+    }
+
     private static final class FakeProbe implements EnvironmentProbe {
         @Override
         public boolean isRoot() { return true; }
@@ -87,7 +93,8 @@ class SpecCommandsTest {
     void applyLoadStillRequiresArtifactJar() throws IOException {
         writeSpec();
 
-        SpecCommands.Loaded loaded = SpecCommands.load(pkg, new FakeProbe());
+        SpecCommands.Loaded loaded = SpecCommands.load(pkg, new FakeProbe(),
+                new RecordingRunner(), target());
 
         assertNull(loaded.spec);
         assertEquals(1, loaded.violations.size(), loaded.violations.toString());
@@ -120,7 +127,8 @@ class SpecCommandsTest {
         Files.createFile(pkg.resolve("app.jar"));
         writeSpecWithMissingLinkSource();
 
-        SpecCommands.Loaded loaded = SpecCommands.load(pkg, new FakeProbe());
+        SpecCommands.Loaded loaded = SpecCommands.load(pkg, new FakeProbe(),
+                new RecordingRunner(), target());
 
         assertNull(loaded.spec);
         assertTrue(hasPath(loaded.violations, "path-links[0]"), loaded.violations.toString());
@@ -134,7 +142,8 @@ class SpecCommandsTest {
         Path target = Files.createDirectories(pkg.resolve("link"));
         writeSpecWithLink("./payload:" + target);
 
-        SpecCommands.Loaded loaded = SpecCommands.load(pkg, new FakeProbe());
+        SpecCommands.Loaded loaded = SpecCommands.load(pkg, new FakeProbe(),
+                new RecordingRunner(), target());
 
         assertNull(loaded.spec);
         assertEquals(1, loaded.violations.size(), loaded.violations.toString());

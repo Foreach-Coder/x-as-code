@@ -1,6 +1,9 @@
 package io.xac.systemd.cli;
 
 import io.xac.systemd.apply.EnvironmentProbe;
+import io.xac.systemd.exec.CommandRunner;
+import io.xac.systemd.exec.RecordingRunner;
+import io.xac.systemd.systemd.SystemdTarget;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -51,8 +54,17 @@ class ApplyCommandTest {
         Files.write(pkg.resolve("xac.yaml"), yaml.getBytes(StandardCharsets.UTF_8));
     }
 
+    private SystemdTarget target() {
+        return new SystemdTarget(pkg.resolve("units"), pkg.resolve("env"));
+    }
+
     private int apply(boolean dryRun) {
-        return ApplyCommand.run(pkg, dryRun, new FakeProbe(), new PrintStream(new ByteArrayOutputStream()));
+        return apply(dryRun, new RecordingRunner());
+    }
+
+    private int apply(boolean dryRun, CommandRunner runner) {
+        return ApplyCommand.run(pkg, dryRun, new FakeProbe(), runner, target(),
+                new PrintStream(new ByteArrayOutputStream()));
     }
 
     @Test
