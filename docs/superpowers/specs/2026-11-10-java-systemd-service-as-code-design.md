@@ -177,9 +177,10 @@ public interface UnitRenderer { String render(ServiceSpec spec); }
 
 | 文件 | 路径 | 权限 |
 |---|---|---|
-| unit | `/etc/systemd/system/<name>.service` | `0644 root:root` |
-| env  | `/etc/xac/<name>.env` | `0600 root:root` |
+| unit | `/etc/systemd/system/xac.<name>.service` | `0644 root:root` |
+| env  | `/etc/xac/xac.<name>.env` | `0600 root:root` |
 
+- 生成名统一加 `xac.` 前缀，与系统 unit / env 文件分属不同命名空间；yaml 里的 `name` 仍是服务名（不带前缀）
 - unit 放 `/etc/systemd/system`（systemd 规定管理员自建 unit 的位置）
 - env 放 `/etc/xac/`（**发行版无关**：`/etc/sysconfig` 是 RHEL 惯例、Ubuntu 上不存在；`/etc/default` 是 Debian 惯例。这个文件的唯一读者是 `EnvironmentFile=`，放在自己的命名空间里不会和系统包撞名）
 - 头部各一行 `# Managed by xac. Do not edit.`，**不带版本号与摘要**（避免假 diff）
@@ -192,7 +193,7 @@ public interface UnitRenderer { String render(ServiceSpec spec); }
 | `Description=` | `description` | 空则不写 |
 | `WorkingDirectory=` | `workdir` | 缺省 = 包目录，绝对路径 |
 | `EnvironmentFile=` | `env` | env 为空则整行不写、也不生成 env 文件 |
-| `SyslogIdentifier=` | `name` | |
+| `SyslogIdentifier=` | `name` | 值为 `xac.<name>`（前缀 + name，不含 `.service`） |
 | `ExecStart=` | 见 5.3 | |
 | `Restart=` | `lifecycle.restart` | 原样透传 systemd 取值 |
 | `RestartSec=` | `lifecycle.restart-sec` | 缺省 5 |
@@ -305,7 +306,7 @@ xac destroy [<package-dir>] [--dry-run] [--yes]
 
 5. 顶层是映射；`name`、`artifact.jar`、`runtime.java`、`runtime.opts` 齐备
 6. 无未知字段、无类型不符（报精确路径，如 `runtime.opts[3] 应为字符串`）
-7. `name` 只含字母数字 `-` `_` `.` `:`，不以 `.` 开头，不含 `/`
+7. `name` 只含字母数字 `-` `_` `.` `:`，不以 `.` 开头，不含 `/`，且不以 `xac.` 开头（不区分大小写；工具会自动加该前缀）
 8. `env` 键名合法、值不含换行、键不重复
 9. `path-links` 每项按最后一个冒号切成两段非空，目标以 `/` 开头
 10. `path-links` 的目标不得落在受保护位置：`/` 本身，`/etc`、`/usr`、`/bin`、`/sbin`、`/lib`、
@@ -326,13 +327,13 @@ xac destroy [<package-dir>] [--dry-run] [--yes]
 16. `runtime.java` 存在且可执行
 17. `path-links` 的源存在
 18. `path-links` 的目标要么不存在，要么已是指向源的软链接；其余形态一律拒绝，交给人处理
-19. 同名 unit 不是由 systemd 提供的：`systemctl show <name>.service --property=LoadState,FragmentPath`
+19. 同名 unit 不是由 systemd 提供的：`systemctl show xac.<name>.service --property=LoadState,FragmentPath`
     查一次；查询本身失败直接拒绝；`FragmentPath` 非空且不等于本次要写的 unit 路径（两边都
     `toAbsolutePath().normalize()` 后比较）即视为同名 unit 已存在，请人处理；`LoadState=not-found`
     或 `FragmentPath` 为空则放行
-20. 已存在的 unit 文件（`<unit 目录>/<name>.service`）必须是普通文件且首行是 xac 管理头，
+20. 已存在的 unit 文件（`<unit 目录>/xac.<name>.service`）必须是普通文件且首行是 xac 管理头，
     否则拒绝覆盖
-21. 已存在的 env 文件（`<env 目录>/<name>.env`）必须是普通文件且首行是 xac 管理头，
+21. 已存在的 env 文件（`<env 目录>/xac.<name>.env`）必须是普通文件且首行是 xac 管理头，
     否则拒绝覆盖；`env` 为空时的删除同样受这条约束
 
 第 19-21 条是归属与影子检查，**只在 apply（含 `--dry-run`）检查**，且发生在任何写入之前。
@@ -355,11 +356,11 @@ xac apply [<package-dir>] [--dry-run]
 |---|---|---|
 | 1 | `path-links` | 软链接（目标不存在则建；已指向正确源则跳过；其余形态一律拒绝，整次 apply 退 2） |
 | 2 | `workdir` | 目录不存在时 `createDirectory`（只建最后一级，父目录不存在报错） |
-| 3 | `env` | 写 `/etc/xac/<name>.env`（目录不存在则建），0600；`env` 为空则删掉遗留文件 |
-| 4 | `unit` | 写 `/etc/systemd/system/<name>.service`，0644 |
+| 3 | `env` | 写 `/etc/xac/xac.<name>.env`（目录不存在则建），0600；`env` 为空则删掉遗留文件 |
+| 4 | `unit` | 写 `/etc/systemd/system/xac.<name>.service`，0644 |
 | 5 | `reload` | `systemctl daemon-reload` |
-| 6 | `auto-start` | `lifecycle.auto-start: true` → `systemctl enable <name>.service`；`false` → `systemctl disable <name>.service` |
-| 7 | `restart` | `systemctl restart <name>.service`（未运行时等价于 start） |
+| 6 | `auto-start` | `lifecycle.auto-start: true` → `systemctl enable xac.<name>.service`；`false` → `systemctl disable xac.<name>.service` |
+| 7 | `restart` | `systemctl restart xac.<name>.service`（未运行时等价于 start） |
 
 `path-links` 排在 `workdir` 之前是有意的：样例里 `workdir` 与某个 link 的目标可能是同一个路径
 （`workdir: /appfile/messystemservice` 与 `./appfile:/appfile/messystemservice`）。链接先建好，
@@ -402,7 +403,7 @@ xac status [<package-dir>]
 只读，不需要 root。三次外部读取 + 若干次文件读取：
 
 ```
-systemctl show <name>.service \
+systemctl show xac.<name>.service \
   --property=LoadState,ActiveState,SubState,UnitFileState,MainPID,ActiveEnterTimestamp,FragmentPath
 ```
 
@@ -413,8 +414,8 @@ systemctl show <name>.service \
 ```
 service:     messystemservice
 package:     /appfile/messystemservice
-unit:        /etc/systemd/system/messystemservice.service   [installed, in sync]
-env:         /etc/xac/messystemservice.env                    [installed, in sync]
+unit:        /etc/systemd/system/xac.messystemservice.service   [installed, in sync]
+env:         /etc/xac/xac.messystemservice.env                  [installed, in sync]
 auto-start:  enabled      (yaml auto-start: true)
 active:      active (running) since 2026-11-09 21:03:11, PID 12345
 path-links:  ok (2/2)
@@ -428,7 +429,7 @@ drift:       none
 
 **「正在运行」怎么判**：读 `ActiveState`/`SubState`。不是 `active` 就记一条漂移（`systemctl stop`
 之后必须能看出来，否则 status 会对着一个停掉的服务报绿灯）。`systemctl show` 本身失败时记
-`systemd: 无法查询 <name>.service 的状态`；查询成功但没有 `ActiveState` 字段时不判漂移——观测不到
+`systemd: 无法查询 xac.<name>.service 的状态`；查询成功但没有 `ActiveState` 字段时不判漂移——观测不到
 不等于观测到「没在跑」。
 
 **env 不可读不算漂移**：env 文件是 0600 root，非 root 跑 status 读不到内容。这种情况打
@@ -442,8 +443,8 @@ xac logs [<package-dir>] [-n <行数>] [-f]
 ```
 
 ```
-journalctl -u <name>.service --no-pager -n <N>
-journalctl -u <name>.service --no-pager -n <N> --follow    # -f 时，走 runInheritIo 直通终端
+journalctl -u xac.<name>.service --no-pager -n <N>
+journalctl -u xac.<name>.service --no-pager -n <N> --follow    # -f 时，走 runInheritIo 直通终端
 ```
 
 - 必须带 `--no-pager`，否则会进 less 卡住
@@ -459,7 +460,7 @@ xac destroy [<package-dir>] [--dry-run] [--yes]
 需要 root。目标：让这个服务在本机上不存在。默认先打印将删除的清单并要求输入 `y` 确认；
 `--yes` 跳过（CI 用）；非交互环境又没给 `--yes` 时退出码 2。
 
-**先判归属，再动手**：只有当 `/etc/systemd/system/<name>.service` 是普通文件（lstat，不跟随链接）
+**先判归属，再动手**：只有当 `/etc/systemd/system/xac.<name>.service` 是普通文件（lstat，不跟随链接）
 且首行是管理头时，才执行 `stop`/`disable`/`rm-unit`。其余情形一律跳过这三个动作并警告，然后继续
 删 env、reload、删链接：
 
@@ -473,7 +474,7 @@ xac destroy [<package-dir>] [--dry-run] [--yes]
 这条闸门的代价要说清楚：如果 unit 文件被手工删掉了而进程还在，destroy 会退 0 但不杀进程——警告
 会写出来，但不会替你收拾。反过来，同名 vendor unit（如 `ssh`）永远不会被误停。
 
-env 文件用同一把尺子：只有 `/etc/xac/<name>.env` 是普通文件且首行是 xac 管理头时才删除，
+env 文件用同一把尺子：只有 `/etc/xac/xac.<name>.env` 是普通文件且首行是 xac 管理头时才删除，
 其余情形跳过并警告，绝不覆盖或删除别人的文件。
 
 确认提示列出**将要删除**的项和**确认保留**的项（包目录、workdir、日志）。
@@ -483,10 +484,10 @@ root 与 `/run/systemd/system`。
 
 | # | 动作 | 落到机器上的操作 |
 |---|---|---|
-| 1 | `stop` | `systemctl stop <name>.service`；失败只记警告，不中止 |
-| 2 | `disable` | `systemctl disable <name>.service`；失败只记警告 |
-| 3 | `rm-unit` | 删 `/etc/systemd/system/<name>.service`（不存在则跳过） |
-| 4 | `rm-env` | 删 `/etc/xac/<name>.env`（不存在则跳过） |
+| 1 | `stop` | `systemctl stop xac.<name>.service`；失败只记警告，不中止 |
+| 2 | `disable` | `systemctl disable xac.<name>.service`；失败只记警告 |
+| 3 | `rm-unit` | 删 `/etc/systemd/system/xac.<name>.service`（不存在则跳过） |
+| 4 | `rm-env` | 删 `/etc/xac/xac.<name>.env`（不存在则跳过） |
 | 5 | `reload` | `systemctl daemon-reload`；失败只记警告，不中止 |
 | 6 | `rm-links` | 删 `path-links` 里的链接，**仅当它是软链接且指向配置的源** |
 
@@ -545,7 +546,7 @@ PID 1。24.04 上 `systemctl is-system-running` 返回 `running`；249 上返回
 | 已验证的事实 | 结论 |
 |---|---|
 | unit 加载 | `daemon-reload` 退出 0，`LoadState=loaded` |
-| `enable` / `disable` | 建/删 `multi-user.target.wants/<name>.service`，`UnitFileState` 同步 |
+| `enable` / `disable` | 建/删 `multi-user.target.wants/xac.<name>.service`，`UnitFileState` 同步 |
 | `${VAR}` 词内展开 | 展开且**不切词**（值含空格仍是一个 argv）→ `ExecStart` 保持 argv 列表，不用 shell |
 | `%%` → `%` | 成立（`-Dpct=100%%` → 进程收到 `-Dpct=100%`，`/proc/<pid>/cmdline` 逐字节确认） |
 | 未转义 `%n` | 被替换成 unit 名且**不报错** → 渲染期必须全量转义 `%` |

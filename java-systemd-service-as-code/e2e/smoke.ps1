@@ -151,7 +151,7 @@ function Wait-ForActiveState {
     param(
         [string]$Expected,
         [int]$TimeoutSeconds,
-        [string]$Unit = 'demo.service'
+        [string]$Unit = 'xac.demo.service'
     )
     $Deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $State = ''
@@ -172,14 +172,14 @@ function Wait-ForJournalText {
     $Deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $Text = ''
     while ((Get-Date) -lt $Deadline) {
-        $Result = Invoke-Container @('journalctl', '-u', 'demo.service', '--no-pager', '-n', '200')
+        $Result = Invoke-Container @('journalctl', '-u', 'xac.demo.service', '--no-pager', '-n', '200')
         $Text = $Result.Output
         if ($Result.ExitCode -eq 0 -and $Text.IndexOf($Needle, [System.StringComparison]::Ordinal) -ge 0) {
             return $Text
         }
         Start-Sleep -Milliseconds 500
     }
-    throw "timed out waiting for [$Needle] in journal for demo.service. Output:`n$Text"
+    throw "timed out waiting for [$Needle] in journal for xac.demo.service. Output:`n$Text"
 }
 
 try {
@@ -304,8 +304,8 @@ lifecycle:
     Write-Step 'status before apply: drift must be reported'
     $StatusBefore = Invoke-Container @('java', '-jar', '/opt/xac.jar', 'status', '/opt/demo')
     Assert-ExitCode $StatusBefore 1 'status exits 1 when drift exists'
-    Assert-Contain $StatusBefore.Output 'unit: /etc/systemd/system/demo.service (missing)' 'status: unit is missing'
-    Assert-Contain $StatusBefore.Output 'env: /etc/xac/demo.env (out of sync)' 'status: env is not installed'
+    Assert-Contain $StatusBefore.Output 'unit: /etc/systemd/system/xac.demo.service (missing)' 'status: unit is missing'
+    Assert-Contain $StatusBefore.Output 'env: /etc/xac/xac.demo.env (out of sync)' 'status: env is not installed'
     Assert-Contain $StatusBefore.Output 'auto-start: disabled' 'status: auto-start is off'
     Assert-Contain $StatusBefore.Output 'drift: unit ' 'status: drift reports the unit'
     Assert-Contain $StatusBefore.Output 'drift: env ' 'status: drift reports the env file'
@@ -324,8 +324,8 @@ lifecycle:
     Assert-Equal (Get-ContainerFile '/opt/links/b/app.jar/keep.txt') 'keep' 'b: directory content still untouched'
     Assert-Equal ((Get-ContainerListing '/opt/links/c') -join '|') 'app.jar' 'c: no .bak created for the foreign symlink'
     Assert-Equal (Get-ContainerLinkTarget '/opt/links/c/app.jar') '/opt/elsewhere' 'c: foreign symlink untouched'
-    Assert-ContainerPath '/etc/systemd/system/demo.service' '-e' $false 'blocked apply: unit file not written'
-    Assert-ContainerPath '/etc/xac/demo.env' '-e' $false 'blocked apply: env file not written'
+    Assert-ContainerPath '/etc/systemd/system/xac.demo.service' '-e' $false 'blocked apply: unit file not written'
+    Assert-ContainerPath '/etc/xac/xac.demo.env' '-e' $false 'blocked apply: env file not written'
     $BlockedPgrep = Invoke-Container @('pgrep', '-f', '/opt/demo/app\.jar')
     Assert-ExitCode $BlockedPgrep 1 'blocked apply: service process not started'
 
@@ -336,15 +336,15 @@ lifecycle:
     $Apply = Invoke-Container @('java', '-jar', '/opt/xac.jar', 'apply', '/opt/demo')
     Assert-ExitCode $Apply 0 'apply exits 0 after the obstacles are gone'
     Assert-Contain $Apply.Output 'path-links' 'apply planned: path-links action'
-    Assert-Contain $Apply.Output '/etc/xac/demo.env' 'apply planned: env file path'
-    Assert-Contain $Apply.Output '/etc/systemd/system/demo.service' 'apply planned: unit file path'
-    Assert-Contain $Apply.Output 'systemctl enable demo.service' 'apply planned: systemctl enable'
-    Assert-Contain $Apply.Output 'systemctl restart demo.service' 'apply planned: systemctl restart'
+    Assert-Contain $Apply.Output '/etc/xac/xac.demo.env' 'apply planned: env file path'
+    Assert-Contain $Apply.Output '/etc/systemd/system/xac.demo.service' 'apply planned: unit file path'
+    Assert-Contain $Apply.Output 'systemctl enable xac.demo.service' 'apply planned: systemctl enable'
+    Assert-Contain $Apply.Output 'systemctl restart xac.demo.service' 'apply planned: systemctl restart'
 
-    $UnitMode = Invoke-Container @('stat', '-c', '%a', '/etc/systemd/system/demo.service')
+    $UnitMode = Invoke-Container @('stat', '-c', '%a', '/etc/systemd/system/xac.demo.service')
     Assert-ExitCode $UnitMode 0 'stat -c %a unit file'
     Assert-Equal $UnitMode.Output.Trim() '644' 'apply: unit file mode is 0644'
-    $EnvMode = Invoke-Container @('stat', '-c', '%a', '/etc/xac/demo.env')
+    $EnvMode = Invoke-Container @('stat', '-c', '%a', '/etc/xac/xac.demo.env')
     Assert-ExitCode $EnvMode 0 'stat -c %a env file'
     Assert-Equal $EnvMode.Output.Trim() '600' 'apply: env file mode is 0600'
 
@@ -359,17 +359,17 @@ lifecycle:
     Wait-ForJournalText -Needle 'CWD=/opt/demo' -TimeoutSeconds 20 | Out-Null
     Wait-ForJournalText -Needle 'XMX=268435456' -TimeoutSeconds 20 | Out-Null
 
-    $UnitFileState = Invoke-Container @('systemctl', 'show', 'demo.service', '--property=UnitFileState')
+    $UnitFileState = Invoke-Container @('systemctl', 'show', 'xac.demo.service', '--property=UnitFileState')
     Assert-ExitCode $UnitFileState 0 'systemctl show UnitFileState'
     Assert-Contain $UnitFileState.Output 'enabled' 'systemctl: UnitFileState=enabled'
-    Assert-ContainerPath '/etc/systemd/system/multi-user.target.wants/demo.service' '-L' $true 'apply: enable created the wants symlink'
-    Assert-Equal (Get-ContainerLinkTarget '/etc/systemd/system/multi-user.target.wants/demo.service') '/etc/systemd/system/demo.service' 'apply: wants symlink points at the unit'
+    Assert-ContainerPath '/etc/systemd/system/multi-user.target.wants/xac.demo.service' '-L' $true 'apply: enable created the wants symlink'
+    Assert-Equal (Get-ContainerLinkTarget '/etc/systemd/system/multi-user.target.wants/xac.demo.service') '/etc/systemd/system/xac.demo.service' 'apply: wants symlink points at the unit'
 
     Write-Step 'status after apply: in sync'
     $StatusAfter = Invoke-Container @('java', '-jar', '/opt/xac.jar', 'status', '/opt/demo')
     Assert-ExitCode $StatusAfter 0 'status exits 0 when in sync'
-    Assert-Contain $StatusAfter.Output 'unit: /etc/systemd/system/demo.service (in sync)' 'status: unit in sync'
-    Assert-Contain $StatusAfter.Output 'env: /etc/xac/demo.env (in sync)' 'status: env in sync'
+    Assert-Contain $StatusAfter.Output 'unit: /etc/systemd/system/xac.demo.service (in sync)' 'status: unit in sync'
+    Assert-Contain $StatusAfter.Output 'env: /etc/xac/xac.demo.env (in sync)' 'status: env in sync'
     Assert-Contain $StatusAfter.Output 'auto-start: enabled' 'status: auto-start enabled'
     Assert-Contain $StatusAfter.Output 'active: active (running)' 'status: service is active'
     Assert-NotContain $StatusAfter.Output 'drift:' 'status: no drift lines'
@@ -409,16 +409,16 @@ lifecycle:
 
     # ------------------------------------------------------------------
     Write-Step 'stop: SuccessExitStatus=143 and the shutdown hook'
-    Assert-ExitCode (Invoke-Container @('systemctl', 'start', 'demo.service')) 0 'systemctl start'
+    Assert-ExitCode (Invoke-Container @('systemctl', 'start', 'xac.demo.service')) 0 'systemctl start'
     Wait-ForActiveState -Expected 'active' -TimeoutSeconds 30
-    Assert-ExitCode (Invoke-Container @('systemctl', 'stop', 'demo.service')) 0 'systemctl stop'
+    Assert-ExitCode (Invoke-Container @('systemctl', 'stop', 'xac.demo.service')) 0 'systemctl stop'
     Wait-ForActiveState -Expected 'inactive' -TimeoutSeconds 30
     $JournalAfterStop = Wait-ForJournalText -Needle 'STOPPING' -TimeoutSeconds 20
     Assert-Contain $JournalAfterStop 'STOPPING' 'shutdown hook printed STOPPING'
 
     # ------------------------------------------------------------------
     Write-Step 'destroy setup: replace d with a real file, e with a foreign symlink'
-    Assert-ExitCode (Invoke-Container @('systemctl', 'start', 'demo.service')) 0 'systemctl start before destroy'
+    Assert-ExitCode (Invoke-Container @('systemctl', 'start', 'xac.demo.service')) 0 'systemctl start before destroy'
     Wait-ForActiveState -Expected 'active' -TimeoutSeconds 30
     Assert-ExitCode (Invoke-Container @('rm', '-f', '/opt/links/d/app.jar')) 0 'd: remove the managed link'
     Assert-ExitCode (Invoke-Container @('sh', '-c', 'echo keep > /opt/links/d/app.jar')) 0 'd: put a real file at the target'
@@ -433,26 +433,26 @@ lifecycle:
     Write-Step 'destroy'
     $Destroy = Invoke-Container @('java', '-jar', '/opt/xac.jar', 'destroy', '/opt/demo', '--yes')
     Assert-ExitCode $Destroy 0 'destroy exits 0'
-    Assert-Contain $Destroy.Output 'systemctl stop demo.service' 'destroy planned: systemctl stop'
-    Assert-Contain $Destroy.Output 'systemctl disable demo.service' 'destroy planned: systemctl disable'
-    Assert-Contain $Destroy.Output '/etc/systemd/system/demo.service' 'destroy planned: unit file path'
-    Assert-Contain $Destroy.Output '/etc/xac/demo.env' 'destroy planned: env file path'
+    Assert-Contain $Destroy.Output 'systemctl stop xac.demo.service' 'destroy planned: systemctl stop'
+    Assert-Contain $Destroy.Output 'systemctl disable xac.demo.service' 'destroy planned: systemctl disable'
+    Assert-Contain $Destroy.Output '/etc/systemd/system/xac.demo.service' 'destroy planned: unit file path'
+    Assert-Contain $Destroy.Output '/etc/xac/xac.demo.env' 'destroy planned: env file path'
     Assert-Contain $Destroy.Output 'path-links' 'destroy planned: path-links action'
 
     # ------------------------------------------------------------------
     Write-Step 'destroy outcome'
-    Assert-ContainerPath '/etc/systemd/system/demo.service' '-e' $false 'no unit file left'
-    Assert-ContainerPath '/etc/xac/demo.env' '-e' $false 'no env file left'
+    Assert-ContainerPath '/etc/systemd/system/xac.demo.service' '-e' $false 'no unit file left'
+    Assert-ContainerPath '/etc/xac/xac.demo.env' '-e' $false 'no env file left'
     # The unit file is already gone, so the wants link would be dangling;
     # `test -e` follows the link and is true only if the target exists, which
     # makes it vacuous here.  `test -L` is the load-bearing check: the link
     # itself must be gone whether or not it dangles.
-    Assert-ContainerPath '/etc/systemd/system/multi-user.target.wants/demo.service' '-e' $false 'wants symlink target no longer resolves'
-    Assert-ContainerPath '/etc/systemd/system/multi-user.target.wants/demo.service' '-L' $false 'enable symlink itself removed from multi-user.target.wants'
+    Assert-ContainerPath '/etc/systemd/system/multi-user.target.wants/xac.demo.service' '-e' $false 'wants symlink target no longer resolves'
+    Assert-ContainerPath '/etc/systemd/system/multi-user.target.wants/xac.demo.service' '-L' $false 'enable symlink itself removed from multi-user.target.wants'
 
-    $LoadState = Invoke-Container @('systemctl', 'show', 'demo.service', '--property=LoadState')
+    $LoadState = Invoke-Container @('systemctl', 'show', 'xac.demo.service', '--property=LoadState')
     Assert-ExitCode $LoadState 0 'systemctl show LoadState'
-    Assert-Contain $LoadState.Output 'not-found' 'systemd no longer knows demo.service'
+    Assert-Contain $LoadState.Output 'not-found' 'systemd no longer knows xac.demo.service'
 
     # Escape the dot so the pattern cannot match paths such as appXjar.
     $Pgrep = Invoke-Container @('pgrep', '-f', '/opt/demo/app\.jar')

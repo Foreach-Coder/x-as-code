@@ -15,13 +15,15 @@ systemd 的说法，但不做指令直通表——systemd 有几百条指令，�
 - 每个服务一个**包目录**，`xac.yaml` 固定放在包目录下，文件名固定为 `xac.yaml`。
 - 所有相对路径一律相对**包目录**解析，不是相对当前工作目录。
 - 服务名只来自文件里的 `name` 字段；文件名与目录名都不参与命名。
+- 生成的 unit / env 文件名统一加 `xac.` 前缀（`xac.<name>.service`、`xac.<name>.env`），
+  与系统 unit / env 分属不同命名空间；`name` 本身不要带这个前缀。
 - 编码必须是 UTF-8，顶层必须是一个映射（键值对）。
 
 ## 3. 字段总览
 
 | 字段 | 必填 | 类型 | 默认值 | 说明 |
 |------|------|------|--------|------|
-| `name` | 是 | 字符串 | — | 服务名 |
+| `name` | 是 | 字符串 | — | 服务名；生成的 unit / env 名为 `xac.<name>.service` / `xac.<name>.env` |
 | `description` | 否 | 字符串 | 空 | 一句话说明 |
 | `artifact` | 是 | 映射 | — | 见 §4.1 |
 | `runtime` | 是 | 映射 | — | 见 §4.2 |
@@ -205,7 +207,8 @@ lifecycle:
 
 1. 顶层是映射；`name`、`artifact.jar`、`runtime.java`、`runtime.opts` 齐备。
 2. 没有未知字段，也没有类型不符的字段（如 `opts` 写成字符串而非列表）。
-3. `name` 只含字母、数字、`-`、`_`、`.`、`:`，不含 `/`，不以 `.` 开头。
+3. `name` 只含字母、数字、`-`、`_`、`.`、`:`，不含 `/`，不以 `.` 开头，且不以 `xac.` 开头
+   （不区分大小写；工具会自动加该前缀）。
 4. `env` 的键名合法、值不含换行、键不重复。
 5. `path-links` 的每一项都能按最后一个冒号切成非空的两段，且目标以 `/` 开头。
 6. `path-links` 的目标不落在受保护位置，也不等于或包住包目录、unit 目录、env 文件（见 §4.6）。
@@ -294,6 +297,6 @@ lifecycle:
 以下由工具内置策略决定，不在文件里配置：
 
 - systemd 加固项与进程属性（`User=`、`PrivateTmp=` 等）
-- 日志去向与标识（统一走 journald，标识符 = `name`）
-- unit 文件的位置与命名（`/etc/systemd/system/<name>.service`）
-- 环境变量文件的位置与权限（`/etc/xac/<name>.env`，`0600`）
+- 日志去向与标识（统一走 journald，标识符 = `xac.<name>`）
+- unit 文件的位置与命名（`/etc/systemd/system/xac.<name>.service`）
+- 环境变量文件的位置与权限（`/etc/xac/xac.<name>.env`，`0600`）

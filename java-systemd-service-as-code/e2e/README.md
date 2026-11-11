@@ -88,12 +88,12 @@ pwsh 7+ 与 Linux/macOS 路径未在此环境实际执行。
   apply 后 `(in sync)` + `auto-start: enabled`，退出码 0。
 - **apply**：`systemctl enable / restart`、写 unit（`stat -c %a` 断言 0644）与 env
   （`stat -c %a` 断言 0600）、enable 后存在
-  `multi-user.target.wants/demo.service` 软链且指向 unit、`EnvironmentFile` 注入
+  `multi-user.target.wants/xac.demo.service` 软链且指向 unit、`EnvironmentFile` 注入
   `GREETING`、`WorkingDirectory` 等于包目录、`-Xmx256m` 生效（JVM 报 `XMX=268435456`）。
 - **logs**：`xac logs` 能读到 journal 里的服务输出。
 - **stop**：`systemctl stop` 后 `ActiveState=inactive`（`SuccessExitStatus=143`，不是
   failed），且 shutdown hook 打印 `STOPPING`。
-- **destroy**：unit / env / `multi-user.target.wants/demo.service` 软链本身 / 自己创建的
+- **destroy**：unit / env / `multi-user.target.wants/xac.demo.service` 软链本身 / 自己创建的
   链接都不在了（软链用 `test -L` 断言，即使已悬空也必须消失），`LoadState=not-found`，
   且 `pgrep -f /opt/demo/app\.jar` 无残留进程；目标处被换成真实文件或外来软链接时
   原样保留。
