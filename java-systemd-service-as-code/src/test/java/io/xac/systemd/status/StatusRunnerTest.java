@@ -128,7 +128,7 @@ class StatusRunnerTest {
 
         assertFalse(result.healthy());
         assertTrue(result.drift().get(0).contains("unit"), result.drift().toString());
-        assertTrue(result.drift().contains("env 文件不存在: " + UnitNaming.envPath(spec, target)),
+        assertTrue(result.drift().contains("env missing: " + UnitNaming.envPath(spec, target)),
                 result.drift().toString());
     }
 
@@ -194,7 +194,7 @@ class StatusRunnerTest {
         for (String line : result.drift()) {
             assertFalse(line.contains("env"), result.drift().toString());
         }
-        assertTrue(result.format().contains("env: (无法校验：需要 root 权限)"), result.format());
+        assertTrue(result.format().contains("env: (cannot verify: root required)"), result.format());
         assertFalse(result.format().contains("out of sync"), result.format());
     }
 
@@ -243,9 +243,9 @@ class StatusRunnerTest {
         StatusResult result = new StatusRunner().run(spec, target, runner);
 
         assertFalse(result.healthy(), result.format());
-        assertTrue(result.drift().contains("systemd: 无法查询 xac.demo.service 的状态"),
+        assertTrue(result.drift().contains("systemd: cannot query xac.demo.service"),
                 result.drift().toString());
-        assertFalse(result.drift().contains("未设置开机自启"), result.drift().toString());
+        assertFalse(result.drift().contains("auto-start disabled"), result.drift().toString());
         assertTrue(result.format().contains("auto-start: unknown"), result.format());
     }
 }

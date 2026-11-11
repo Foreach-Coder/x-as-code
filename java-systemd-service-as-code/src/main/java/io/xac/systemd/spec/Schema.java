@@ -81,28 +81,28 @@ public final class Schema {
                 break;
             case STRING:
                 if (raw != null && !(raw instanceof String)) {
-                    out.add(new Violation(path, "应为字符串"));
+                    out.add(new Violation(path, "must be a string"));
                 }
                 break;
             case BOOLEAN:
                 if (raw != null && !(raw instanceof Boolean)) {
-                    out.add(new Violation(path, "应为布尔值"));
+                    out.add(new Violation(path, "must be a boolean"));
                 }
                 break;
             case INTEGER:
                 if (raw != null && !(raw instanceof Integer)) {
-                    out.add(new Violation(path, "应为整数"));
+                    out.add(new Violation(path, "must be an integer"));
                 }
                 break;
             case STRING_LIST:
                 if (raw != null) {
                     if (!(raw instanceof List)) {
-                        out.add(new Violation(path, "应为字符串列表"));
+                        out.add(new Violation(path, "must be a list of strings"));
                     } else {
                         List<Object> items = (List<Object>) raw;
                         for (int i = 0; i < items.size(); i++) {
                             if (!(items.get(i) instanceof String)) {
-                                out.add(new Violation(path + "[" + i + "]", "应为字符串"));
+                                out.add(new Violation(path + "[" + i + "]", "must be a string"));
                             }
                         }
                     }
@@ -111,18 +111,18 @@ public final class Schema {
             case STRING_MAP:
                 if (raw != null) {
                     if (!(raw instanceof Map)) {
-                        out.add(new Violation(path, "应为映射"));
+                        out.add(new Violation(path, "must be a mapping"));
                     } else {
                         Map<Object, Object> map = (Map<Object, Object>) raw;
                         for (Map.Entry<Object, Object> e : map.entrySet()) {
                             if (!(e.getKey() instanceof String)) {
-                                out.add(new Violation(path, "键应为字符串"));
+                                out.add(new Violation(path, "keys must be strings"));
                                 continue;
                             }
                             String key = (String) e.getKey();
                             String childPath = path.isEmpty() ? key : path + "." + key;
                             if (!(e.getValue() instanceof String)) {
-                                out.add(new Violation(childPath, "应为字符串"));
+                                out.add(new Violation(childPath, "must be a string"));
                             }
                         }
                     }
@@ -138,7 +138,7 @@ public final class Schema {
         Map<Object, Object> map = null;
         if (raw != null) {
             if (!(raw instanceof Map)) {
-                out.add(new Violation(path, "应为映射"));
+                out.add(new Violation(path, "must be a mapping"));
                 return;
             }
             map = (Map<Object, Object>) raw;
@@ -147,7 +147,7 @@ public final class Schema {
             String childPath = path.isEmpty() ? child.name : path + "." + child.name;
             Object value = map == null ? null : map.get(child.name);
             if (value == null && child.required) {
-                out.add(new Violation(childPath, "缺失必填字段"));
+                out.add(new Violation(childPath, "missing required field"));
             }
             if (value != null) {
                 checkNode(child, value, childPath, out);
@@ -157,7 +157,7 @@ public final class Schema {
             for (Object key : map.keySet()) {
                 if (!(key instanceof String) || node.child((String) key) == null) {
                     String keyPath = path.isEmpty() ? String.valueOf(key) : path + "." + key;
-                    out.add(new Violation(keyPath, "未知字段"));
+                    out.add(new Violation(keyPath, "unknown field"));
                 }
             }
         }

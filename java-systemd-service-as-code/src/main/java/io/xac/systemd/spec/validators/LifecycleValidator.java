@@ -21,13 +21,13 @@ public final class LifecycleValidator implements Validator {
         Lifecycle lc = spec.lifecycle;
         if (lc.restart != null && !RESTART.contains(lc.restart)) {
             out.add(new Violation("lifecycle.restart",
-                    "取值应为 " + RESTART + " 之一"));
+                    "must be one of " + RESTART));
         }
         if (lc.restartSec != null && lc.restartSec <= 0) {
-            out.add(new Violation("lifecycle.restart-sec", "应为正整数"));
+            out.add(new Violation("lifecycle.restart-sec", "must be a positive integer"));
         }
         if (lc.timeoutStopSec != null && lc.timeoutStopSec <= 0) {
-            out.add(new Violation("lifecycle.timeout-stop-sec", "应为正整数"));
+            out.add(new Violation("lifecycle.timeout-stop-sec", "must be a positive integer"));
         }
     }
 }

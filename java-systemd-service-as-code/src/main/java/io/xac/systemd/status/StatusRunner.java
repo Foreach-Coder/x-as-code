@@ -104,10 +104,10 @@ public final class StatusRunner {
                 boolean ok = Files.isSymbolicLink(link.target)
                         && Files.readSymbolicLink(link.target).equals(link.source);
                 if (!ok) {
-                    problems.add("path-links[" + i + "] 未生效: " + link.target);
+                    problems.add("path-links[" + i + "] not active: " + link.target);
                 }
             } catch (IOException e) {
-                problems.add("path-links[" + i + "] 无法检查: " + link.target + " (" + e.getMessage() + ")");
+                problems.add("path-links[" + i + "] cannot check: " + link.target + " (" + e.getMessage() + ")");
             }
         }
         return problems;

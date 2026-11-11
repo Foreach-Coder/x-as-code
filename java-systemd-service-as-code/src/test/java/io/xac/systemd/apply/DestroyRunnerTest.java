@@ -90,7 +90,7 @@ class DestroyRunnerTest {
                 new PrintStream(buffer, true, "UTF-8"));
 
         assertEquals(0, code);
-        assertTrue(buffer.toString("UTF-8").contains("警告"), buffer.toString("UTF-8"));
+        assertTrue(buffer.toString("UTF-8").contains("warning: "), buffer.toString("UTF-8"));
         assertFalse(Files.exists(UnitNaming.unitPath(spec, target())));
     }
 
@@ -111,7 +111,7 @@ class DestroyRunnerTest {
 
         assertEquals(0, code);
         String output = buffer.toString("UTF-8");
-        assertTrue(output.contains("不是 xac 管理的 unit"), output);
+        assertTrue(output.contains("unit is not managed by xac"), output);
         for (java.util.List<String> call : runner.calls()) {
             assertFalse(call.contains("stop"), call.toString());
             assertFalse(call.contains("disable"), call.toString());
@@ -132,7 +132,8 @@ class DestroyRunnerTest {
 
         assertEquals(0, code);
         String output = buffer.toString("UTF-8");
-        assertTrue(output.contains("同名 unit 不由 xac 管理，未停止；如仍有进程请手动处理: "
+        assertTrue(output.contains("unit with same name is not managed by xac, not stopped; "
+                + "stop it manually if a process is still running: "
                 + UnitNaming.unitPath(spec, target())), output);
         for (java.util.List<String> call : runner.calls()) {
             assertFalse(call.contains("stop"), call.toString());
@@ -156,7 +157,7 @@ class DestroyRunnerTest {
 
         assertEquals(0, code);
         String output = buffer.toString("UTF-8");
-        assertTrue(output.contains("unit 路径不是普通文件"), output);
+        assertTrue(output.contains("warning: unit path is not a regular file, skipped: "), output);
         for (java.util.List<String> call : runner.calls()) {
             assertFalse(call.contains("stop"), call.toString());
             assertFalse(call.contains("disable"), call.toString());

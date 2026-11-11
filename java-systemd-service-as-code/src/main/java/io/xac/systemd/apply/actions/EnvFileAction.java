@@ -16,8 +16,8 @@ public final class EnvFileAction implements Action {
     public String describe(ApplyContext ctx) {
         Path envPath = UnitNaming.envPath(ctx.spec, ctx.target);
         return ctx.spec.env.isEmpty()
-                ? "删除 " + envPath + "（env 为空）"
-                : "写 " + envPath + " (0600)";
+                ? "remove " + envPath + " (env is empty)"
+                : "write " + envPath + " (0600)";
     }
 
     @Override
@@ -26,7 +26,7 @@ public final class EnvFileAction implements Action {
         try {
             if (ManagedUnit.existsAndIsForeign(envPath)) {
                 throw new ActionFailure(
-                        "已存在非 xac 管理的 env 文件，拒绝覆盖或删除: " + envPath);
+                        "existing env file is not managed by xac, refusing to overwrite or remove: " + envPath);
             }
             if (ctx.spec.env.isEmpty()) {
                 Files.deleteIfExists(envPath);
@@ -38,7 +38,7 @@ public final class EnvFileAction implements Action {
             }
             FileWriter.write(envPath, ctx.envContent, "rw-------");
         } catch (IOException e) {
-            throw new ActionFailure("写 env 文件失败 " + envPath + ": " + e.getMessage(), e);
+            throw new ActionFailure("failed to write env file " + envPath + ": " + e.getMessage(), e);
         }
     }
 }

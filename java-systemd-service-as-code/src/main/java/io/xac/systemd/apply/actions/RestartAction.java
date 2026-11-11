@@ -20,8 +20,8 @@ public final class RestartAction implements Action {
         ExecResult result = ctx.runner.run(
                 Arrays.asList("systemctl", "restart", UnitNaming.unitName(ctx.spec)));
         if (!result.ok()) {
-            throw new ActionFailure("systemctl restart 失败（退出码 " + result.exitCode
-                    + "）: " + result.stderr.trim());
+            throw new ActionFailure("systemctl restart failed (exit " + result.exitCode
+                    + "): " + result.stderr.trim());
         }
     }
 }

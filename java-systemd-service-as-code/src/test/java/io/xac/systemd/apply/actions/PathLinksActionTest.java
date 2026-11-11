@@ -68,7 +68,7 @@ class PathLinksActionTest {
     }
 
     private static String refuseMessage(Path target) {
-        return "目标已存在且不是指向源的软链接，请人工处理: " + target;
+        return "target exists and is not a symlink to source, handle it manually: " + target;
     }
 
     private static void assertNoBackup(Path target) throws IOException {
@@ -194,7 +194,8 @@ class PathLinksActionTest {
 
         ActionFailure failure = assertThrows(ActionFailure.class,
                 () -> new PathLinksAction().run(context(source + ":" + target)));
-        assertTrue(failure.getMessage().contains("父目录"), failure.getMessage());
+        assertTrue(failure.getMessage().contains("parent directory of target does not exist"),
+                failure.getMessage());
     }
 
     // 护栏在创建链接之前触发，因此这些用例不需要软链接支持。
@@ -207,7 +208,8 @@ class PathLinksActionTest {
                 () -> new PathLinksAction().run(context("payload:/etc")));
 
         assertTrue(failure.getMessage().contains("path-links[0]"), failure.getMessage());
-        assertTrue(failure.getMessage().contains("被保护的系统目录"), failure.getMessage());
+        assertTrue(failure.getMessage().contains("target is a protected system directory"),
+                failure.getMessage());
     }
 
     @Test
@@ -218,7 +220,8 @@ class PathLinksActionTest {
                 () -> new PathLinksAction().run(
                         context(cwd, "/tmp/xac-same:/tmp/xac-same")));
 
-        assertTrue(failure.getMessage().contains("目标不能与源相同"), failure.getMessage());
+        assertTrue(failure.getMessage().contains("target must not equal source"),
+                failure.getMessage());
     }
 
     @Test
@@ -226,7 +229,8 @@ class PathLinksActionTest {
         ActionFailure failure = assertThrows(ActionFailure.class,
                 () -> new PathLinksAction().run(context("missing:/opt/xac-action-target")));
 
-        assertTrue(failure.getMessage().contains("源目录不存在"), failure.getMessage());
+        assertTrue(failure.getMessage().contains("source directory does not exist"),
+                failure.getMessage());
     }
 
     @Test
@@ -235,6 +239,6 @@ class PathLinksActionTest {
                 () -> new PathLinksAction().run(
                         context(Paths.get("/opt/demo"), "cfg:/opt")));
 
-        assertTrue(failure.getMessage().contains("或其上级"), failure.getMessage());
+        assertTrue(failure.getMessage().contains("or a parent of them"), failure.getMessage());
     }
 }

@@ -53,22 +53,24 @@ class ValidatorsTest {
     void rejectsBadName() {
         List<Violation> out = ValidationRunner.run(base().name("../etc/passwd").build());
         assertEquals(1, out.size(), messages(out).toString());
-        assertEquals("name: 只能包含字母、数字和 _ . : -，不能以 . 开头，不能包含 /",
-                out.get(0).toString());
+        assertEquals("name: must contain only letters, digits and _ . : -, "
+                + "must not start with '.', must not contain '/'", out.get(0).toString());
     }
 
     @Test
     void rejectsNameWithXacPrefix() {
         List<Violation> out = ValidationRunner.run(base().name("xac.demo").build());
         assertEquals(1, out.size(), messages(out).toString());
-        assertEquals("name: 不要以 xac. 开头，工具会自动加该前缀", out.get(0).toString());
+        assertEquals("name: must not start with 'xac.'; the tool adds that prefix automatically",
+                out.get(0).toString());
     }
 
     @Test
     void rejectsNameWithXacPrefixCaseInsensitively() {
         List<Violation> out = ValidationRunner.run(base().name("XAC.demo").build());
         assertEquals(1, out.size(), messages(out).toString());
-        assertEquals("name: 不要以 xac. 开头，工具会自动加该前缀", out.get(0).toString());
+        assertEquals("name: must not start with 'xac.'; the tool adds that prefix automatically",
+                out.get(0).toString());
     }
 
     @Test
@@ -114,7 +116,7 @@ class ValidatorsTest {
         List<Violation> out = ValidationRunner.run(
                 base().description("第一行\n第二行").build());
         assertEquals(1, out.size(), messages(out).toString());
-        assertEquals("description: 不能包含换行", out.get(0).toString());
+        assertEquals("description: must not contain a newline", out.get(0).toString());
     }
 
     @Test
@@ -122,7 +124,7 @@ class ValidatorsTest {
         List<Violation> out = ValidationRunner.run(
                 base().opts(asList("-Xmx512m", "-Dx=a\rb")).build());
         assertEquals(1, out.size(), messages(out).toString());
-        assertEquals("runtime.opts[1]: 不能包含换行", out.get(0).toString());
+        assertEquals("runtime.opts[1]: must not contain a newline", out.get(0).toString());
     }
 
     @Test
@@ -131,7 +133,7 @@ class ValidatorsTest {
         properties.put("foo", "a\nb");
         List<Violation> out = ValidationRunner.run(base().properties(properties).build());
         assertEquals(1, out.size(), messages(out).toString());
-        assertEquals("properties.foo: 不能包含换行", out.get(0).toString());
+        assertEquals("properties.foo: must not contain a newline", out.get(0).toString());
     }
 
     @Test
@@ -146,14 +148,14 @@ class ValidatorsTest {
         }
         List<Violation> out = ValidationRunner.run(spec);
         assertEquals(1, out.size(), messages(out).toString());
-        assertEquals("artifact.jar: 不能包含换行", out.get(0).toString());
+        assertEquals("artifact.jar: must not contain a newline", out.get(0).toString());
     }
 
     @Test
     void rejectsNewlineInJava() {
         List<Violation> out = ValidationRunner.run(base().java("/usr/bin/ja\nva").build());
         assertEquals(1, out.size(), messages(out).toString());
-        assertEquals("runtime.java: 不能包含换行", out.get(0).toString());
+        assertEquals("runtime.java: must not contain a newline", out.get(0).toString());
     }
 
     @Test
@@ -167,7 +169,7 @@ class ValidatorsTest {
         }
         List<Violation> out = ValidationRunner.run(spec);
         assertEquals(1, out.size(), messages(out).toString());
-        assertEquals("workdir: 不能包含换行", out.get(0).toString());
+        assertEquals("workdir: must not contain a newline", out.get(0).toString());
     }
 
     @Test
@@ -176,7 +178,7 @@ class ValidatorsTest {
         properties.put("a\nb", "v");
         List<Violation> out = ValidationRunner.run(base().properties(properties).build());
         assertEquals(1, out.size(), messages(out).toString());
-        assertEquals("properties: 不能包含换行", out.get(0).toString());
+        assertEquals("properties: must not contain a newline", out.get(0).toString());
     }
 
     @Test

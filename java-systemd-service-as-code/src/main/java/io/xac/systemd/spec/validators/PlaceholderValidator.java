@@ -36,12 +36,12 @@ public final class PlaceholderValidator implements Validator {
             if (text.startsWith("${", i)) {
                 int end = text.indexOf('}', i + 2);
                 if (end < 0) {
-                    out.add(new Violation(path, "占位符缺少 }：" + text.substring(i)));
+                    out.add(new Violation(path, "placeholder is missing '}': " + text.substring(i)));
                     return;
                 }
                 String name = text.substring(i + 2, end);
                 if (name.isEmpty() || !spec.env.containsKey(name)) {
-                    out.add(new Violation(path, "占位符 ${" + name + "} 在 env 中不存在"));
+                    out.add(new Violation(path, "placeholder ${" + name + "} is not defined in env"));
                 }
                 i = end + 1;
                 continue;

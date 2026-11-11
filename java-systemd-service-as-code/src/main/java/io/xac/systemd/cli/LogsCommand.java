@@ -11,18 +11,18 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
-@Command(name = "logs", description = "查看服务日志（journalctl）")
+@Command(name = "logs", description = "show service logs (journalctl)")
 public final class LogsCommand implements Callable<Integer> {
 
     @Parameters(index = "0", arity = "0..1", defaultValue = ".",
-            description = "包目录，必须包含 xac.yaml（缺省当前目录）")
+            description = "package directory containing xac.yaml (default: current directory)")
     String packageDirArg;
 
     @Option(names = {"-n", "--lines"}, defaultValue = "200",
-            description = "显示最近多少行（缺省 200）")
+            description = "number of recent lines (default: 200)")
     int lines;
 
-    @Option(names = {"-f", "--follow"}, description = "持续输出新日志")
+    @Option(names = {"-f", "--follow"}, description = "follow new log lines")
     boolean follow;
 
     @Override

@@ -13,7 +13,7 @@ public final class UnitFileAction implements Action {
 
     @Override
     public String describe(ApplyContext ctx) {
-        return "写 " + UnitNaming.unitPath(ctx.spec, ctx.target) + " (0644)";
+        return "write " + UnitNaming.unitPath(ctx.spec, ctx.target) + " (0644)";
     }
 
     @Override
@@ -21,11 +21,11 @@ public final class UnitFileAction implements Action {
         Path unitPath = UnitNaming.unitPath(ctx.spec, ctx.target);
         try {
             if (ManagedUnit.existsAndIsForeign(unitPath)) {
-                throw new ActionFailure("已存在非 xac 管理的 unit 文件，拒绝覆盖: " + unitPath);
+                throw new ActionFailure("existing unit file is not managed by xac, refusing to overwrite: " + unitPath);
             }
             FileWriter.write(unitPath, ctx.unitContent, "rw-r--r--");
         } catch (IOException e) {
-            throw new ActionFailure("写 unit 文件失败 " + unitPath + ": " + e.getMessage(), e);
+            throw new ActionFailure("failed to write unit file " + unitPath + ": " + e.getMessage(), e);
         }
     }
 }

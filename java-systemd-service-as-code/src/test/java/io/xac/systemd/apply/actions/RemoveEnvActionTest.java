@@ -70,7 +70,8 @@ class RemoveEnvActionTest {
         assertEquals("SECRET=1\n",
                 new String(Files.readAllBytes(env), StandardCharsets.UTF_8));
         assertEquals(1, ctx.warnings.size(), ctx.warnings.toString());
-        assertTrue(ctx.warnings.get(0).contains("已存在非 xac 管理的 env 文件，拒绝删除，已跳过"),
+        assertTrue(ctx.warnings.get(0).contains(
+                "existing env file is not managed by xac, refusing to remove, skipped"),
                 ctx.warnings.get(0));
         assertTrue(ctx.warnings.get(0).contains(env.toString()), ctx.warnings.get(0));
     }

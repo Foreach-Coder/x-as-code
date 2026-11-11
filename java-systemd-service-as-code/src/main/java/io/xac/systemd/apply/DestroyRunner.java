@@ -42,19 +42,19 @@ public final class DestroyRunner {
             try {
                 managed = ManagedUnit.hasHeader(unitPath);
             } catch (IOException e) {
-                throw new ActionFailure("读取 unit 文件失败 " + unitPath + ": " + e.getMessage(), e);
+                throw new ActionFailure("failed to read unit file " + unitPath + ": " + e.getMessage(), e);
             }
         }
         boolean skipUnitActions = !managed;
         if (skipUnitActions) {
             // 无法证明归属就不 stop/disable，但必须让用户知道可能还有同名进程在跑。
-            ctx.warnings.add("同名 unit 不由 xac 管理，未停止；如仍有进程请手动处理: " + unitPath);
+            ctx.warnings.add("unit with same name is not managed by xac, not stopped; stop it manually if a process is still running: " + unitPath);
         }
         if (pathExists && !regularFile) {
-            out.println("警告: unit 路径不是普通文件，已跳过: " + unitPath);
+            out.println("warning: unit path is not a regular file, skipped: " + unitPath);
         } else if (regularFile && !managed) {
             // 归属判断必须发生在 stop / disable 之前，否则会先动别人的服务再只发一条警告。
-            out.println("警告: 不是 xac 管理的 unit，已跳过停止/禁用/删除: " + unitPath);
+            out.println("warning: unit is not managed by xac, skipped stop/disable/remove: " + unitPath);
         }
         for (Action action : actions()) {
             if (skipUnitActions && isUnitAction(action)) {
@@ -69,11 +69,11 @@ public final class DestroyRunner {
             try {
                 action.run(ctx);
             } catch (ActionFailure e) {
-                out.println("失败: " + e.getMessage());
+                out.println("failed: " + e.getMessage());
                 return 1;
             }
             for (String warning : ctx.warnings) {
-                out.println("警告: " + warning);
+                out.println("warning: " + warning);
             }
             ctx.warnings.clear();
         }

@@ -51,16 +51,16 @@ public final class StatusResult {
         List<String> drift = new ArrayList<String>();
         if (!unitInSync) {
             drift.add(unitInstalled
-                    ? "unit 文件与配置不一致: " + unitPath
-                    : "unit 未安装: " + unitPath);
+                    ? "unit out of sync: " + unitPath
+                    : "unit not installed: " + unitPath);
         }
         if (!envInSync && envReadable) {
             if (!envConfigured) {
-                drift.add("env 文件多余（配置中已无 env）: " + envPath);
+                drift.add("env file is extra (env is empty in config): " + envPath);
             } else if (envInstalled) {
-                drift.add("env 文件与配置不一致: " + envPath);
+                drift.add("env out of sync: " + envPath);
             } else {
-                drift.add("env 文件不存在: " + envPath);
+                drift.add("env missing: " + envPath);
             }
         }
         if (queryOk) {
@@ -76,11 +76,11 @@ public final class StatusResult {
                         + (sub == null || sub.isEmpty() ? "" : " (" + sub + ")"));
             }
             if (enabled != wantEnabled) {
-                drift.add(wantEnabled ? "未设置开机自启" : "仍处于开机自启状态");
+                drift.add(wantEnabled ? "auto-start disabled" : "auto-start enabled");
             }
         } else if (unitInstalled) {
             // 查询失败时不能把空 map 当成 disabled，只报告「没有观察到状态」。
-            drift.add("systemd: 无法查询 " + unitPath.getFileName() + " 的状态");
+            drift.add("systemd: cannot query " + unitPath.getFileName());
         }
         drift.addAll(linkProblems);
         return drift;
@@ -96,9 +96,9 @@ public final class StatusResult {
         out.append("package: ").append(packageDir).append('\n');
         out.append("unit: ").append(unitPath).append(unitState()).append('\n');
         if (!envConfigured) {
-            out.append("env: (未配置)\n");
+            out.append("env: (not configured)\n");
         } else if (!envReadable) {
-            out.append("env: (无法校验：需要 root 权限)\n");
+            out.append("env: (cannot verify: root required)\n");
         } else {
             out.append("env: ").append(envPath)
                     .append(envInSync ? " (in sync)" : " (out of sync)").append('\n');

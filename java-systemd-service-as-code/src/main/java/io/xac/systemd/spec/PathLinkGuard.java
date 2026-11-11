@@ -37,7 +37,7 @@ public final class PathLinkGuard {
             Paths.get("/dev"),
             Paths.get("/run"));
 
-    /** 返回一行中文错误；合法时返回 null。动作层使用：结构 + 源目录存在。 */
+    /** 返回一行错误信息；合法时返回 null。动作层使用：结构 + 源目录存在。 */
     public static String check(PathLink link, Path unitDir, Path envDir, Path packageDir) {
         String shape = checkShape(link, unitDir, envDir, packageDir);
         if (shape != null) {
@@ -67,29 +67,29 @@ public final class PathLinkGuard {
         for (Path protectedDir : absoluteProtected()) {
             if (isRoot(protectedDir)) {
                 if (target.equals(protectedDir) || targetLexical.equals(protectedDir)) {
-                    return "目标是被保护的系统目录: " + targetLexical;
+                    return "target is a protected system directory: " + targetLexical;
                 }
             } else if (target.equals(protectedDir) || target.startsWith(protectedDir)
                     || targetLexical.equals(protectedDir) || targetLexical.startsWith(protectedDir)) {
-                return "目标是被保护的系统目录: " + targetLexical;
+                return "target is a protected system directory: " + targetLexical;
             }
         }
         if (target.equals(source) || target.equals(sourceReal)
                 || targetLexical.equals(source) || targetLexical.equals(sourceReal)) {
-            return "目标不能与源相同: " + targetLexical;
+            return "target must not equal source: " + targetLexical;
         }
         if (isAncestorOrSameAny(target, targetLexical, unit, unitReal)
                 || isAncestorOrSameAny(target, targetLexical, env, envReal)
                 || isAncestorOrSameAny(target, targetLexical, pkg, pkgReal)) {
-            return "目标不能是 unit 目录、env 目录或包目录本身或其上级: " + targetLexical;
+            return "target must not be the unit directory, env directory or package directory, or a parent of them: " + targetLexical;
         }
         if (target.startsWith(unit) || target.startsWith(unitReal)
                 || targetLexical.startsWith(unit) || targetLexical.startsWith(unitReal)) {
-            return "目标不能位于 unit 目录下: " + targetLexical;
+            return "target must not be inside the unit directory: " + targetLexical;
         }
         if (source.startsWith(target) || source.startsWith(targetLexical)
                 || sourceReal.startsWith(target) || sourceReal.startsWith(targetLexical)) {
-            return "目标不能是源目录的上级目录: " + targetLexical;
+            return "target must not be a parent of the source directory: " + targetLexical;
         }
         return null;
     }
@@ -161,7 +161,7 @@ public final class PathLinkGuard {
     public static String checkSource(PathLink link) {
         Path source = link.source.toAbsolutePath().normalize();
         if (!Files.exists(source)) {
-            return "源目录不存在: " + source;
+            return "source directory does not exist: " + source;
         }
         return null;
     }
@@ -181,7 +181,7 @@ public final class PathLinkGuard {
     }
 
     private static String refuseTarget(Path target) {
-        return "目标已存在且不是指向源的软链接，请人工处理: " + target;
+        return "target exists and is not a symlink to source, handle it manually: " + target;
     }
 
     private static boolean pointsAtSource(PathLink link) {

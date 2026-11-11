@@ -14,7 +14,7 @@ public final class FileWriter {
     public static void write(Path path, String content, String posixPermissions) throws IOException {
         Path parent = path.getParent();
         if (parent == null || !Files.isDirectory(parent)) {
-            throw new ActionFailure("目录不存在: " + parent);
+            throw new ActionFailure("directory does not exist: " + parent);
         }
         Path tmp = Files.createTempFile(parent, ".xac-", ".tmp");
         try {

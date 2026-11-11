@@ -15,7 +15,7 @@ public final class ProcessRunner implements CommandRunner {
         try {
             process = builder.start();
         } catch (IOException e) {
-            return new ExecResult(127, "", "无法执行 " + argv.get(0) + ": " + e.getMessage());
+            return new ExecResult(127, "", "cannot execute " + argv.get(0) + ": " + e.getMessage());
         }
 
         ByteArrayOutputStream stdout = new ByteArrayOutputStream();
@@ -30,7 +30,7 @@ public final class ProcessRunner implements CommandRunner {
             return new ExecResult(exitCode, utf8(stdout), utf8(stderr));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return new ExecResult(130, "", "被中断: " + argv.get(0));
+            return new ExecResult(130, "", "interrupted: " + argv.get(0));
         }
     }
 
@@ -41,7 +41,7 @@ public final class ProcessRunner implements CommandRunner {
         try {
             builder.start().waitFor();
         } catch (IOException e) {
-            throw new IllegalStateException("无法执行 " + argv.get(0) + ": " + e.getMessage(), e);
+            throw new IllegalStateException("cannot execute " + argv.get(0) + ": " + e.getMessage(), e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }

@@ -64,7 +64,7 @@ class RemoveUnitActionTest {
         new RemoveUnitAction().run(ctx);
 
         assertTrue(Files.exists(unit));
-        assertEquals(Collections.singletonList("不是 xac 管理的 unit，已跳过删除: " + unit),
+        assertEquals(Collections.singletonList("unit is not managed by xac, skipped removal: " + unit),
                 ctx.warnings);
     }
 

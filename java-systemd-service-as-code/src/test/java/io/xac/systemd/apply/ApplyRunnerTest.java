@@ -155,7 +155,7 @@ class ApplyRunnerTest {
         int code = new ApplyRunner().run(ctx, new PrintStream(buffer, true, "UTF-8"));
 
         assertEquals(1, code, buffer.toString("UTF-8"));
-        assertTrue(buffer.toString("UTF-8").contains("已存在非 xac 管理的 env 文件"),
+        assertTrue(buffer.toString("UTF-8").contains("existing env file is not managed by xac"),
                 buffer.toString("UTF-8"));
         assertTrue(Files.isRegularFile(envFile));
         assertEquals("OLD=1\n", read(envFile));
@@ -186,7 +186,8 @@ class ApplyRunnerTest {
 
         assertEquals(1, code);
         assertTrue(buffer.toString("UTF-8")
-                        .contains("目标已存在且不是指向源的软链接，请人工处理: " + link),
+                        .contains("target exists and is not a symlink to source, handle it manually: "
+                                + link),
                 buffer.toString("UTF-8"));
         assertTrue(runner.calls().isEmpty(), runner.calls().toString());
         assertTrue(Files.isDirectory(link));

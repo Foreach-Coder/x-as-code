@@ -19,7 +19,7 @@ public final class StopAction implements Action {
         ExecResult result = ctx.runner.run(
                 Arrays.asList("systemctl", "stop", UnitNaming.unitName(ctx.spec)));
         if (!result.ok()) {
-            ctx.warnings.add("systemctl stop 退出码 " + result.exitCode + "（已忽略）");
+            ctx.warnings.add("systemctl stop exit " + result.exitCode + " (ignored)");
         }
     }
 }

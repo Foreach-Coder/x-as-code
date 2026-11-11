@@ -57,7 +57,7 @@ class SpecLoaderTest {
         write(minimal().replace("name: demo", "name: demo\nnarration: 说明"));
         SpecLoader.Result result = SpecLoader.load(pkg);
         assertNull(result.spec);
-        assertEquals("narration: 未知字段", result.violations.get(0).toString());
+        assertEquals("narration: unknown field", result.violations.get(0).toString());
     }
 
     @Test
@@ -106,7 +106,7 @@ class SpecLoaderTest {
         write(minimal() + "env:\n  A: one\n  A: two\n");
         SpecLoader.Result result = SpecLoader.load(pkg);
         assertNull(result.spec);
-        assertEquals("env.A: 重复字段", result.violations.get(0).toString());
+        assertEquals("env.A: duplicate field", result.violations.get(0).toString());
     }
 
     @Test
@@ -114,7 +114,7 @@ class SpecLoaderTest {
         write(minimal() + "env:\n  SECRET:\n");
         SpecLoader.Result result = SpecLoader.load(pkg);
         assertNull(result.spec);
-        assertEquals("env.SECRET: 应为字符串", result.violations.get(0).toString());
+        assertEquals("env.SECRET: must be a string", result.violations.get(0).toString());
     }
 
     @Test

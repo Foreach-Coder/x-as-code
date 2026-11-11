@@ -149,7 +149,7 @@ class PreflightTest {
 
         assertEquals(1, out.size(), out.toString());
         assertEquals("path-links[0]", out.get(0).path);
-        assertTrue(out.get(0).message.contains("源目录不存在"), out.get(0).message);
+        assertTrue(out.get(0).message.contains("source directory does not exist"), out.get(0).message);
     }
 
     @Test
@@ -163,7 +163,7 @@ class PreflightTest {
 
         assertEquals(1, out.size(), out.toString());
         assertEquals("unit", out.get(0).path);
-        assertEquals("同名 unit 已存在且不由 xac 管理: /usr/lib/systemd/system/ssh.service，请人工处理",
+        assertEquals("unit with same name exists and is not managed by xac: /usr/lib/systemd/system/ssh.service, handle it manually",
                 out.get(0).message);
     }
 
@@ -189,7 +189,7 @@ class PreflightTest {
 
         assertEquals(1, out.size(), out.toString());
         assertEquals("unit", out.get(0).path);
-        assertEquals("无法查询同名 unit 的状态（systemctl show 失败），请人工处理", out.get(0).message);
+        assertEquals("cannot query unit with same name (systemctl show failed), handle it manually", out.get(0).message);
     }
 
     @Test
@@ -202,7 +202,8 @@ class PreflightTest {
 
         assertEquals(1, out.size(), out.toString());
         assertEquals("unit", out.get(0).path);
-        assertEquals("已存在非 xac 管理的 unit 文件，拒绝覆盖: " + unitPath, out.get(0).message);
+        assertEquals("existing unit file is not managed by xac, refusing to overwrite: " + unitPath,
+                out.get(0).message);
         assertTrue(Files.isRegularFile(unitPath));
     }
 
@@ -216,8 +217,8 @@ class PreflightTest {
 
         assertEquals(1, out.size(), out.toString());
         assertEquals("env", out.get(0).path);
-        assertEquals("已存在非 xac 管理的 env 文件，拒绝覆盖或删除: " + envPath,
-                out.get(0).message);
+        assertEquals("existing env file is not managed by xac, refusing to overwrite or remove: "
+                + envPath, out.get(0).message);
         assertTrue(Files.isRegularFile(envPath));
     }
 
@@ -234,8 +235,8 @@ class PreflightTest {
 
         assertEquals(1, out.size(), out.toString());
         assertEquals("env", out.get(0).path);
-        assertEquals("已存在非 xac 管理的 env 文件，拒绝覆盖或删除: " + envPath,
-                out.get(0).message);
+        assertEquals("existing env file is not managed by xac, refusing to overwrite or remove: "
+                + envPath, out.get(0).message);
         assertEquals("SECRET=1\n", new String(Files.readAllBytes(envPath),
                 StandardCharsets.UTF_8));
     }
@@ -269,7 +270,7 @@ class PreflightTest {
     }
 
     private static String refuseMessage(Path target) {
-        return "目标已存在且不是指向源的软链接，请人工处理: " + target;
+        return "target exists and is not a symlink to source, handle it manually: " + target;
     }
 
     private ServiceSpec specWithLink(Path source, Path target) {

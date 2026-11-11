@@ -46,7 +46,8 @@ class WorkdirActionTest {
     void requiresParentToExist() {
         ActionFailure failure = assertThrows(ActionFailure.class,
                 () -> new WorkdirAction().run(context("missing/work")));
-        assertTrue(failure.getMessage().contains("父目录"), failure.getMessage());
+        assertTrue(failure.getMessage().contains("parent directory of workdir does not exist"),
+                failure.getMessage());
     }
 
     @Test

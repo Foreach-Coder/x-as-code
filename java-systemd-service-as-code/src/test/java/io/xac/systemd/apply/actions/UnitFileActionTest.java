@@ -63,7 +63,7 @@ class UnitFileActionTest {
 
         ActionFailure failure = assertThrows(ActionFailure.class, () -> new UnitFileAction().run(ctx));
 
-        assertTrue(failure.getMessage().contains("已存在非 xac 管理的 unit 文件，拒绝覆盖"),
+        assertTrue(failure.getMessage().contains("existing unit file is not managed by xac"),
                 failure.getMessage());
         assertEquals("Description=someone else\n",
                 new String(Files.readAllBytes(unit), StandardCharsets.UTF_8));

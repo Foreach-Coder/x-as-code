@@ -25,8 +25,8 @@ public final class AutoStartAction implements Action {
         ExecResult result = ctx.runner.run(
                 Arrays.asList("systemctl", verb, UnitNaming.unitName(ctx.spec)));
         if (!result.ok()) {
-            throw new ActionFailure("systemctl " + verb + " 失败（退出码 " + result.exitCode
-                    + "）: " + result.stderr.trim());
+            throw new ActionFailure("systemctl " + verb + " failed (exit " + result.exitCode
+                    + "): " + result.stderr.trim());
         }
     }
 }

@@ -11,11 +11,11 @@ import io.xac.systemd.systemd.SystemdTarget;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Parameters;
 
-@Command(name = "status", description = "报告安装与运行状态；退出码 0 一致，1 有漂移")
+@Command(name = "status", description = "report install and runtime status; exit 0 when in sync, 1 on drift")
 public final class StatusCommand implements Callable<Integer> {
 
     @Parameters(index = "0", arity = "0..1", defaultValue = ".",
-            description = "包目录，必须包含 xac.yaml（缺省当前目录）")
+            description = "package directory containing xac.yaml (default: current directory)")
     String packageDirArg;
 
     @Override

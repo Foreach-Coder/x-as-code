@@ -35,10 +35,10 @@ public final class DaemonReloadAction implements Action {
             return;
         }
         if (ignoreFailure) {
-            ctx.warnings.add("systemctl daemon-reload 退出码 " + result.exitCode + "（已忽略）");
+            ctx.warnings.add("systemctl daemon-reload exit " + result.exitCode + " (ignored)");
             return;
         }
-        throw new ActionFailure("systemctl daemon-reload 失败（退出码 " + result.exitCode
-                + "）: " + result.stderr.trim());
+        throw new ActionFailure("systemctl daemon-reload failed (exit " + result.exitCode
+                + "): " + result.stderr.trim());
     }
 }

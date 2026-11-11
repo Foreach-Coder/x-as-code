@@ -148,7 +148,8 @@ class SpecCommandsTest {
         assertNull(loaded.spec);
         assertEquals(1, loaded.violations.size(), loaded.violations.toString());
         assertTrue(hasPath(loaded.violations, "path-links[0]"), loaded.violations.toString());
-        assertTrue(loaded.violations.get(0).message.contains("请人工处理"),
+        assertTrue(loaded.violations.get(0).message.contains(
+                "target exists and is not a symlink to source, handle it manually: "),
                 loaded.violations.get(0).message);
         assertTrue(Files.isDirectory(target));
     }

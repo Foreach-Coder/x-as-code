@@ -23,10 +23,10 @@ public final class Preflight {
         List<Violation> out = new ArrayList<Violation>();
         checkEnvironment(probe, out);
         if (!probe.fileReadable(spec.jar)) {
-            out.add(new Violation("artifact.jar", "文件不存在: " + spec.jar));
+            out.add(new Violation("artifact.jar", "file does not exist: " + spec.jar));
         }
         if (!probe.executable(Paths.get(spec.java))) {
-            out.add(new Violation("runtime.java", "不存在或不可执行: " + spec.java));
+            out.add(new Violation("runtime.java", "does not exist or is not executable: " + spec.java));
         }
         for (int i = 0; i < spec.pathLinks.size(); i++) {
             PathLink link = PathLink.parse(spec.pathLinks.get(i), spec.packageDir);
@@ -56,7 +56,7 @@ public final class Preflight {
         SystemctlShow.Query query = SystemctlShow.query(runner, UnitNaming.unitName(spec));
         if (!query.ok) {
             out.add(new Violation("unit",
-                    "无法查询同名 unit 的状态（systemctl show 失败），请人工处理"));
+                    "cannot query unit with same name (systemctl show failed), handle it manually"));
             return;
         }
         String fragmentPath = query.values.get("FragmentPath");
@@ -67,7 +67,7 @@ public final class Preflight {
         Path expected = UnitNaming.unitPath(spec, target).toAbsolutePath().normalize();
         if (!expected.equals(actual)) {
             out.add(new Violation("unit",
-                    "同名 unit 已存在且不由 xac 管理: " + fragmentPath + "，请人工处理"));
+                    "unit with same name exists and is not managed by xac: " + fragmentPath + ", handle it manually"));
         }
     }
 
@@ -75,7 +75,7 @@ public final class Preflight {
             List<Violation> out) {
         Path unitPath = UnitNaming.unitPath(spec, target);
         if (ManagedUnit.existsAndIsForeign(unitPath)) {
-            out.add(new Violation("unit", "已存在非 xac 管理的 unit 文件，拒绝覆盖: " + unitPath));
+            out.add(new Violation("unit", "existing unit file is not managed by xac, refusing to overwrite: " + unitPath));
         }
     }
 
@@ -83,7 +83,7 @@ public final class Preflight {
             List<Violation> out) {
         Path envPath = UnitNaming.envPath(spec, target);
         if (ManagedUnit.existsAndIsForeign(envPath)) {
-            out.add(new Violation("env", "已存在非 xac 管理的 env 文件，拒绝覆盖或删除: " + envPath));
+            out.add(new Violation("env", "existing env file is not managed by xac, refusing to overwrite or remove: " + envPath));
         }
     }
 
@@ -96,10 +96,10 @@ public final class Preflight {
 
     private static void checkEnvironment(EnvironmentProbe probe, List<Violation> out) {
         if (!probe.isRoot()) {
-            out.add(new Violation("", "apply / destroy 需要 root 权限"));
+            out.add(new Violation("", "apply / destroy require root"));
         }
         if (!probe.systemdRunning()) {
-            out.add(new Violation("", "systemd 未运行（/run/systemd/system 不存在）"));
+            out.add(new Violation("", "systemd is not running (/run/systemd/system missing)"));
         }
     }
 

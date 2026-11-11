@@ -23,10 +23,10 @@ public final class NameValidator implements Validator {
                 && !name.contains("/");
         if (!allowed) {
             out.add(new Violation("name",
-                    "只能包含字母、数字和 _ . : -，不能以 . 开头，不能包含 /"));
+                    "must contain only letters, digits and _ . : -, must not start with '.', must not contain '/'"));
         } else if (name.toLowerCase(Locale.ROOT).startsWith("xac.")) {
             out.add(new Violation("name",
-                    "不要以 xac. 开头，工具会自动加该前缀"));
+                    "must not start with 'xac.'; the tool adds that prefix automatically"));
         }
     }
 }

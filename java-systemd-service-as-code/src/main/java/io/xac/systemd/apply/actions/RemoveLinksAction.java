@@ -12,7 +12,7 @@ public final class RemoveLinksAction implements Action {
 
     @Override
     public String describe(ApplyContext ctx) {
-        return "移除 path-links: " + ctx.spec.pathLinks;
+        return "remove path-links: " + ctx.spec.pathLinks;
     }
 
     @Override
@@ -29,7 +29,7 @@ public final class RemoveLinksAction implements Action {
                     Files.delete(link.target);
                 }
             } catch (IOException e) {
-                throw new ActionFailure("移除软链接失败 " + link.target + ": " + e.getMessage(), e);
+                throw new ActionFailure("failed to remove symlink " + link.target + ": " + e.getMessage(), e);
             }
         }
     }

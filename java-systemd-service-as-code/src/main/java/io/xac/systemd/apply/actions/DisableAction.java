@@ -19,7 +19,7 @@ public final class DisableAction implements Action {
         ExecResult result = ctx.runner.run(
                 Arrays.asList("systemctl", "disable", UnitNaming.unitName(ctx.spec)));
         if (!result.ok()) {
-            ctx.warnings.add("systemctl disable 退出码 " + result.exitCode + "（已忽略）");
+            ctx.warnings.add("systemctl disable exit " + result.exitCode + " (ignored)");
         }
     }
 }

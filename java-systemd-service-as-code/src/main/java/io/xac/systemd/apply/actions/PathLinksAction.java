@@ -14,7 +14,7 @@ public final class PathLinksAction implements Action {
 
     @Override
     public String describe(ApplyContext ctx) {
-        return "建立 path-links: " + ctx.spec.pathLinks;
+        return "create path-links: " + ctx.spec.pathLinks;
     }
 
     @Override
@@ -23,7 +23,7 @@ public final class PathLinksAction implements Action {
             String raw = ctx.spec.pathLinks.get(i);
             PathLink link = PathLink.parse(raw, ctx.spec.packageDir);
             if (link == null) {
-                throw new ActionFailure("非法的 path-links 项: " + raw);
+                throw new ActionFailure("invalid path-links entry: " + raw);
             }
             String problem = PathLinkGuard.check(link, ctx.target.unitDir, ctx.target.envDir,
                     ctx.spec.packageDir);
@@ -33,7 +33,7 @@ public final class PathLinksAction implements Action {
             try {
                 ensureLink(link);
             } catch (IOException e) {
-                throw new ActionFailure("建立软链接失败 " + link.target + ": " + e.getMessage(), e);
+                throw new ActionFailure("failed to create symlink " + link.target + ": " + e.getMessage(), e);
             }
         }
     }
@@ -41,7 +41,7 @@ public final class PathLinksAction implements Action {
     private static void ensureLink(PathLink link) throws IOException {
         Path parent = link.target.getParent();
         if (parent == null || !Files.isDirectory(parent)) {
-            throw new ActionFailure("目标的父目录不存在: " + parent);
+            throw new ActionFailure("parent directory of target does not exist: " + parent);
         }
         // 目标不存在才建链接；已是正确的软链接则跳过；其余形态一律拒绝，绝不移动用户数据。
         String problem = PathLinkGuard.checkTarget(link);

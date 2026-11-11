@@ -13,20 +13,20 @@ public final class RemoveEnvAction implements Action {
 
     @Override
     public String describe(ApplyContext ctx) {
-        return "删除 " + UnitNaming.envPath(ctx.spec, ctx.target);
+        return "remove " + UnitNaming.envPath(ctx.spec, ctx.target);
     }
 
     @Override
     public void run(ApplyContext ctx) {
         Path envPath = UnitNaming.envPath(ctx.spec, ctx.target);
         if (ManagedUnit.existsAndIsForeign(envPath)) {
-            ctx.warnings.add("已存在非 xac 管理的 env 文件，拒绝删除，已跳过: " + envPath);
+            ctx.warnings.add("existing env file is not managed by xac, refusing to remove, skipped: " + envPath);
             return;
         }
         try {
             Files.deleteIfExists(envPath);
         } catch (IOException e) {
-            throw new ActionFailure("删除 env 文件失败 " + envPath + ": " + e.getMessage(), e);
+            throw new ActionFailure("failed to remove env file " + envPath + ": " + e.getMessage(), e);
         }
     }
 }

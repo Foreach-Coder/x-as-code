@@ -13,8 +13,8 @@ public final class WorkdirAction implements Action {
     @Override
     public String describe(ApplyContext ctx) {
         return ctx.spec.workdir == null
-                ? "跳过工作目录（未配置 workdir）"
-                : "创建工作目录 " + ctx.spec.workdir;
+                ? "skip workdir (not configured)"
+                : "create workdir " + ctx.spec.workdir;
     }
 
     @Override
@@ -25,12 +25,12 @@ public final class WorkdirAction implements Action {
         }
         Path parent = workdir.getParent();
         if (parent == null || !Files.isDirectory(parent)) {
-            throw new ActionFailure("工作目录的父目录不存在: " + parent);
+            throw new ActionFailure("parent directory of workdir does not exist: " + parent);
         }
         try {
             Files.createDirectory(workdir);
         } catch (IOException e) {
-            throw new ActionFailure("创建工作目录失败 " + workdir + ": " + e.getMessage(), e);
+            throw new ActionFailure("failed to create workdir " + workdir + ": " + e.getMessage(), e);
         }
     }
 }

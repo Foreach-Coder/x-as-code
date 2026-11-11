@@ -21,7 +21,7 @@ public final class LogsRunner {
 
     public ExecResult run(ServiceSpec spec, CommandRunner runner, int lines, boolean follow) {
         if (lines <= 0) {
-            return new ExecResult(2, "", "-n 必须是正整数");
+            return new ExecResult(2, "", "-n must be a positive integer");
         }
         List<String> argv = new ArrayList<String>(Arrays.asList(
                 "journalctl", "-u", UnitNaming.unitName(spec), "--no-pager", "-n",

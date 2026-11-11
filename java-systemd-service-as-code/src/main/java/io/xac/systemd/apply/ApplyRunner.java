@@ -37,7 +37,7 @@ public final class ApplyRunner {
             try {
                 action.run(ctx);
             } catch (ActionFailure e) {
-                out.println("失败: " + e.getMessage());
+                out.println("failed: " + e.getMessage());
                 return 1;
             }
         }

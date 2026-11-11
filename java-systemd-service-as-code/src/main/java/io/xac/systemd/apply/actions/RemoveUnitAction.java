@@ -13,7 +13,7 @@ public final class RemoveUnitAction implements Action {
 
     @Override
     public String describe(ApplyContext ctx) {
-        return "删除 " + UnitNaming.unitPath(ctx.spec, ctx.target);
+        return "remove " + UnitNaming.unitPath(ctx.spec, ctx.target);
     }
 
     @Override
@@ -24,12 +24,12 @@ public final class RemoveUnitAction implements Action {
                 return;
             }
             if (!ManagedUnit.hasHeader(unitPath)) {
-                ctx.warnings.add("不是 xac 管理的 unit，已跳过删除: " + unitPath);
+                ctx.warnings.add("unit is not managed by xac, skipped removal: " + unitPath);
                 return;
             }
             Files.delete(unitPath);
         } catch (IOException e) {
-            throw new ActionFailure("删除 unit 文件失败 " + unitPath + ": " + e.getMessage(), e);
+            throw new ActionFailure("failed to remove unit file " + unitPath + ": " + e.getMessage(), e);
         }
     }
 }

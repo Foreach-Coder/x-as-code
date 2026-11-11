@@ -59,14 +59,14 @@ public final class SpecLoader {
         Path file = packageRoot.resolve("xac.yaml");
         List<Violation> violations = new ArrayList<Violation>();
         if (!Files.isRegularFile(file)) {
-            violations.add(new Violation("xac.yaml", "包目录下没有 xac.yaml"));
+            violations.add(new Violation("xac.yaml", "xac.yaml not found in package directory"));
             return new Result(null, violations);
         }
         String text;
         try {
             text = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
         } catch (IOException e) {
-            violations.add(new Violation("xac.yaml", "读取失败: " + e.getMessage()));
+            violations.add(new Violation("xac.yaml", "read failed: " + e.getMessage()));
             return new Result(null, violations);
         }
         Yaml yaml = newYaml();
@@ -74,7 +74,7 @@ public final class SpecLoader {
         try {
             composed = yaml.compose(new StringReader(text));
         } catch (MarkedYAMLException e) {
-            violations.add(new Violation("xac.yaml", "yaml 语法错误: " + e.getProblem()));
+            violations.add(new Violation("xac.yaml", "yaml syntax error: " + e.getProblem()));
             return new Result(null, violations);
         }
         if (composed != null) {
@@ -84,11 +84,11 @@ public final class SpecLoader {
         try {
             root = yaml.load(text);
         } catch (MarkedYAMLException e) {
-            violations.add(new Violation("xac.yaml", "yaml 语法错误: " + e.getProblem()));
+            violations.add(new Violation("xac.yaml", "yaml syntax error: " + e.getProblem()));
             return new Result(null, violations);
         }
         if (!(root instanceof Map)) {
-            violations.add(new Violation("", "顶层应为映射"));
+            violations.add(new Violation("", "top level must be a mapping"));
             return new Result(null, violations);
         }
         Schema.check(root, violations);
@@ -113,7 +113,7 @@ public final class SpecLoader {
                 String key = ((ScalarNode) keyNode).getValue();
                 String childPath = path.isEmpty() ? key : path + "." + key;
                 if (!seen.add(key)) {
-                    out.add(new Violation(childPath, "重复字段"));
+                    out.add(new Violation(childPath, "duplicate field"));
                 }
                 checkDuplicateKeys(tuple.getValueNode(), childPath, out);
             }

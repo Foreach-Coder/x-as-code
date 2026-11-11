@@ -165,7 +165,7 @@ public final class UnitRenderer {
 
     private static void requireSingleLine(String field, String value) {
         if (value != null && (value.indexOf('\n') >= 0 || value.indexOf('\r') >= 0)) {
-            throw new IllegalArgumentException(field + " 不能包含换行");
+            throw new IllegalArgumentException(field + " must not contain a newline");
         }
     }
 

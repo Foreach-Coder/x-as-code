@@ -30,7 +30,7 @@ public final class NewlineValidator implements Validator {
 
     private static void check(String path, String value, List<Violation> out) {
         if (value != null && (value.indexOf('\n') >= 0 || value.indexOf('\r') >= 0)) {
-            out.add(new Violation(path, "不能包含换行"));
+            out.add(new Violation(path, "must not contain a newline"));
         }
     }
 }

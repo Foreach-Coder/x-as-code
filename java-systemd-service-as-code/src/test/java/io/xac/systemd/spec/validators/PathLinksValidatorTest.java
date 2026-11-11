@@ -59,7 +59,7 @@ class PathLinksValidatorTest {
 
         String message = singleMessage(ValidationRunner.run(spec(pkg, "cfg:/etc")));
 
-        assertTrue(message.contains("被保护的系统目录"), message);
+        assertTrue(message.contains("target is a protected system directory"), message);
     }
 
     @Test
@@ -69,7 +69,7 @@ class PathLinksValidatorTest {
         String message = singleMessage(ValidationRunner.run(
                 spec(cwd, "/tmp/xac-same:/tmp/xac-same")));
 
-        assertTrue(message.contains("目标不能与源相同"), message);
+        assertTrue(message.contains("target must not equal source"), message);
     }
 
     @Test
@@ -85,7 +85,7 @@ class PathLinksValidatorTest {
         String message = singleMessage(ValidationRunner.run(
                 spec(Paths.get("/opt/demo"), "cfg:/opt")));
 
-        assertTrue(message.contains("或其上级"), message);
+        assertTrue(message.contains("or a parent of them"), message);
     }
 
     @Test
@@ -93,7 +93,7 @@ class PathLinksValidatorTest {
         String message = singleMessage(ValidationRunner.run(
                 spec(Paths.get("/opt/demo"), "cfg:/opt/demo")));
 
-        assertTrue(message.contains("或其上级"), message);
+        assertTrue(message.contains("or a parent of them"), message);
     }
 
     @Test
@@ -101,6 +101,6 @@ class PathLinksValidatorTest {
         String message = singleMessage(ValidationRunner.run(
                 spec(Paths.get("/opt/demo"), "cfg/app:/opt/demo/cfg")));
 
-        assertTrue(message.contains("源目录的上级目录"), message);
+        assertTrue(message.contains("a parent of the source directory"), message);
     }
 }

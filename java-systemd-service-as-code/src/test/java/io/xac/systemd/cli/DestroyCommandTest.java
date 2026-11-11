@@ -67,19 +67,19 @@ class DestroyCommandTest {
 
         String out = printPlan(spec, target);
 
-        assertTrue(out.contains("将删除:"), out);
+        assertTrue(out.contains("will remove:"), out);
         assertTrue(out.contains(UnitNaming.unitPath(spec, target).toString()), out);
         assertTrue(out.contains(UnitNaming.envPath(spec, target).toString()), out);
-        assertTrue(out.contains("保留: 包目录 " + root.toAbsolutePath().normalize()), out);
-        assertTrue(out.contains("、日志"), out);
+        assertTrue(out.contains("keep: package directory " + root.toAbsolutePath().normalize()), out);
+        assertTrue(out.contains(", logs"), out);
     }
 
     @Test
     void printsNoneWhenNothingIsInstalled() throws IOException {
         String out = printPlan(spec(), target());
 
-        assertTrue(out.contains("将删除:"), out);
-        assertTrue(out.contains("  (无)"), out);
+        assertTrue(out.contains("will remove:"), out);
+        assertTrue(out.contains("  (none)"), out);
     }
 
     @Test
@@ -92,7 +92,7 @@ class DestroyCommandTest {
 
         String out = printPlan(spec, target);
 
-        assertTrue(out.contains("  (无)"), out);
+        assertTrue(out.contains("  (none)"), out);
         assertFalse(out.contains(UnitNaming.unitPath(spec, target).toString()), out);
     }
 
@@ -119,7 +119,7 @@ class DestroyCommandTest {
 
         String out = printPlan(spec, target());
 
-        assertTrue(out.contains("工作目录 " + root.resolve("run").toAbsolutePath().normalize()), out);
+        assertTrue(out.contains("workdir " + root.resolve("run").toAbsolutePath().normalize()), out);
     }
 
     @Test

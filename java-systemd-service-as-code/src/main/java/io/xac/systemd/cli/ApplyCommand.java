@@ -16,14 +16,14 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
-@Command(name = "apply", description = "安装或更新服务：写文件、reload、enable、restart")
+@Command(name = "apply", description = "install or update the service: write files, reload, enable, restart")
 public final class ApplyCommand implements Callable<Integer> {
 
     @Parameters(index = "0", arity = "0..1", defaultValue = ".",
-            description = "包目录，必须包含 xac.yaml（缺省当前目录）")
+            description = "package directory containing xac.yaml (default: current directory)")
     String packageDirArg;
 
-    @Option(names = "--dry-run", description = "只打印将执行的动作，不做任何改动")
+    @Option(names = "--dry-run", description = "print the actions only, change nothing")
     boolean dryRun;
 
     @Override

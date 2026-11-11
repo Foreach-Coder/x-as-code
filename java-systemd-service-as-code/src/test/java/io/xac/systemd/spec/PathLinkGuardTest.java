@@ -48,7 +48,7 @@ class PathLinkGuardTest {
         String problem = check(link(root.resolve("src"), link.resolve("etc")));
 
         assertNotNull(problem);
-        assertTrue(problem.contains("被保护"), problem);
+        assertTrue(problem.contains("protected system directory"), problem);
     }
 
     @Test
@@ -60,7 +60,7 @@ class PathLinkGuardTest {
         String problem = check(link(root.resolve("src"), link.resolve("..").resolve("etc")));
 
         assertNotNull(problem);
-        assertTrue(problem.contains("被保护"), problem);
+        assertTrue(problem.contains("protected system directory"), problem);
     }
 
     @Test
@@ -92,7 +92,7 @@ class PathLinkGuardTest {
     void rejectsExistingDirectory() throws IOException {
         Path target = Files.createDirectories(root.resolve("target"));
 
-        assertEquals("目标已存在且不是指向源的软链接，请人工处理: " + target,
+        assertEquals("target exists and is not a symlink to source, handle it manually: " + target,
                 PathLinkGuard.checkTarget(link(root.resolve("src"), target)));
     }
 
@@ -100,7 +100,7 @@ class PathLinkGuardTest {
     void rejectsExistingRegularFile() throws IOException {
         Path target = Files.createFile(root.resolve("target"));
 
-        assertEquals("目标已存在且不是指向源的软链接，请人工处理: " + target,
+        assertEquals("target exists and is not a symlink to source, handle it manually: " + target,
                 PathLinkGuard.checkTarget(link(root.resolve("src"), target)));
     }
 
@@ -110,7 +110,7 @@ class PathLinkGuardTest {
         Path target = root.resolve("target");
         Files.createSymbolicLink(target, root.resolve("elsewhere"));
 
-        assertEquals("目标已存在且不是指向源的软链接，请人工处理: " + target,
+        assertEquals("target exists and is not a symlink to source, handle it manually: " + target,
                 PathLinkGuard.checkTarget(link(root.resolve("src"), target)));
     }
 
@@ -120,7 +120,7 @@ class PathLinkGuardTest {
         Path target = root.resolve("target");
         Files.createSymbolicLink(target, root.resolve("gone"));
 
-        assertEquals("目标已存在且不是指向源的软链接，请人工处理: " + target,
+        assertEquals("target exists and is not a symlink to source, handle it manually: " + target,
                 PathLinkGuard.checkTarget(link(root.resolve("src"), target)));
     }
 
@@ -131,7 +131,7 @@ class PathLinkGuardTest {
         String problem = check(link(source, root.resolve("pkg").resolve("cfg")));
 
         assertNotNull(problem);
-        assertTrue(problem.contains("源目录的上级目录"), problem);
+        assertTrue(problem.contains("a parent of the source directory"), problem);
     }
 
     @Test
@@ -141,7 +141,7 @@ class PathLinkGuardTest {
         String problem = check(link(root.resolve("src"), target));
 
         assertNotNull(problem);
-        assertTrue(problem.contains("unit 目录"), problem);
+        assertTrue(problem.contains("inside the unit directory"), problem);
     }
 
     @Test
@@ -149,7 +149,7 @@ class PathLinkGuardTest {
         String problem = check(link(root.resolve("src"), Paths.get("/etc/passwd")));
 
         assertNotNull(problem);
-        assertTrue(problem.contains("被保护"), problem);
+        assertTrue(problem.contains("protected system directory"), problem);
     }
 
     @Test
@@ -166,7 +166,7 @@ class PathLinkGuardTest {
                 unitDir(), envDir(), pkgThroughLink);
 
         assertNotNull(problem);
-        assertTrue(problem.contains("包目录"), problem);
+        assertTrue(problem.contains("unit directory, env directory or package directory"), problem);
     }
 
     @Test
@@ -184,7 +184,7 @@ class PathLinkGuardTest {
                 unitDir(), envDir(), pkgThroughLink);
 
         assertNotNull(problem);
-        assertTrue(problem.contains("上级"), problem);
+        assertTrue(problem.contains("or a parent of them"), problem);
     }
 
     private static boolean supportsSymlinks(Path dir) {

@@ -21,17 +21,17 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
-@Command(name = "destroy", description = "停止并移除服务（unit、env 文件与 path-links）")
+@Command(name = "destroy", description = "stop and remove the service (unit, env file and path-links)")
 public final class DestroyCommand implements Callable<Integer> {
 
     @Parameters(index = "0", arity = "0..1", defaultValue = ".",
-            description = "包目录，必须包含 xac.yaml（缺省当前目录）")
+            description = "package directory containing xac.yaml (default: current directory)")
     String packageDirArg;
 
-    @Option(names = "--dry-run", description = "只打印将执行的动作，不做任何改动")
+    @Option(names = "--dry-run", description = "print the actions only, change nothing")
     boolean dryRun;
 
-    @Option(names = {"-y", "--yes"}, description = "跳过确认")
+    @Option(names = {"-y", "--yes"}, description = "skip confirmation")
     boolean yes;
 
     @Override
@@ -59,7 +59,7 @@ public final class DestroyCommand implements Callable<Integer> {
         boolean unitManaged = Files.isRegularFile(unitPath, LinkOption.NOFOLLOW_LINKS)
                 && ManagedUnit.hasHeader(unitPath);
 
-        out.println("将删除:");
+        out.println("will remove:");
         boolean any = false;
         if (unitManaged) {
             out.println("  " + unitPath);
@@ -81,19 +81,19 @@ public final class DestroyCommand implements Callable<Integer> {
             }
         }
         if (!any) {
-            out.println("  (无)");
+            out.println("  (none)");
         }
         Path workdir = spec.workdir == null ? spec.packageDir : spec.workdir;
-        out.println("保留: 包目录 " + spec.packageDir + "、工作目录 " + workdir + "、日志");
+        out.println("keep: package directory " + spec.packageDir + ", workdir " + workdir + ", logs");
     }
 
     private boolean confirm(String name) throws IOException {
         Console console = System.console();
         if (console == null) {
-            System.err.println("非交互环境请加 --yes");
+            System.err.println("use --yes in a non-interactive environment");
             return false;
         }
-        String answer = console.readLine("确认删除 %s 的 unit 与 env 文件？[y/N] ", name);
+        String answer = console.readLine("remove unit and env file of %s? [y/N] ", name);
         return answer != null && (answer.equalsIgnoreCase("y") || answer.equalsIgnoreCase("yes"));
     }
 }
