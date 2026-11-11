@@ -139,11 +139,17 @@ class SmokeIT {
         ExecResult result = xac("status", PACKAGE_DIR);
         assertExit(1, result, "status before apply");
         String out = result.getStdout();
+        assertAscii("status before apply", out);
         assertContains(out, "unit: " + UNIT_PATH + " (missing)");
         assertContains(out, "env: " + ENV_PATH + " (out of sync)");
-        assertContains(out, "auto-start:");
-        assertContains(out, "drift:");
-        assertContains(out, "path-links[0]");
+        assertContains(out, "auto-start: disabled");
+        assertContains(out, "drift: unit not installed: " + UNIT_PATH);
+        assertContains(out, "drift: env missing: " + ENV_PATH);
+        assertContains(out, "drift: auto-start disabled");
+        for (int i = 0; i < LINK_NAMES.length; i++) {
+            assertContains(out, "drift: path-links[" + i + "] not active: /opt/links/"
+                    + LINK_NAMES[i] + "/app.jar");
+        }
     }
 
     @Test
@@ -154,14 +160,15 @@ class SmokeIT {
         String out = combined(result);
 
         // 四种形态都要在写入前被识别，且一起报告。
-        assertContains(out, "path-links[1]");
-        assertContains(out, "path-links[2]");
-        assertContains(out, "path-links[3]");
-        assertContains(out, "path-links[4]");
-        assertContains(out, "/opt/links/b/app.jar");
-        assertContains(out, "/opt/links/c/app.jar");
-        assertContains(out, "/opt/links/d/app.jar");
-        assertContains(out, "/opt/links/e/app.jar");
+        assertAscii("blocked apply", out);
+        assertContains(out, "path-links[1]: target exists and is not a symlink to source,"
+                + " handle it manually: /opt/links/b/app.jar");
+        assertContains(out, "path-links[2]: target exists and is not a symlink to source,"
+                + " handle it manually: /opt/links/c/app.jar");
+        assertContains(out, "path-links[3]: target exists and is not a symlink to source,"
+                + " handle it manually: /opt/links/d/app.jar");
+        assertContains(out, "path-links[4]: target exists and is not a symlink to source,"
+                + " handle it manually: /opt/links/e/app.jar");
 
         // 什么都没写、没启动。
         assertFalse(exists(UNIT_PATH), "unit must not be written on blocked apply");
@@ -189,11 +196,10 @@ class SmokeIT {
         ExecResult result = xac("apply", PACKAGE_DIR);
         assertExit(0, result, "apply after removing blockers");
         String out = result.getStdout();
-        // 容器 locale 是 C，CLI 的 System.out 是 ASCII，中文会被替换成 '?'；
-        // 这里只断言稳定的 ASCII 部分，不弱化「确实执行了 path-links」这一点。
-        assertContains(out, "path-links: [app.jar:/opt/links/a/app.jar");
-        assertContains(out, ENV_PATH);
-        assertContains(out, UNIT_PATH);
+        assertAscii("apply", out);
+        assertContains(out, pathLinksLine("create"));
+        assertContains(out, "write " + UNIT_PATH + " (0644)");
+        assertContains(out, "write " + ENV_PATH + " (0600)");
         assertContains(out, "systemctl enable " + UNIT);
         assertContains(out, "systemctl restart " + UNIT);
 
@@ -223,6 +229,7 @@ class SmokeIT {
         ExecResult status = xac("status", PACKAGE_DIR);
         assertExit(0, status, "status after apply");
         String statusOut = status.getStdout();
+        assertAscii("status after apply", statusOut);
         assertContains(statusOut, "unit: " + UNIT_PATH + " (in sync)");
         assertContains(statusOut, "env: " + ENV_PATH + " (in sync)");
         assertContains(statusOut, "auto-start: enabled");
@@ -326,10 +333,12 @@ class SmokeIT {
         ExecResult result = xac("destroy", PACKAGE_DIR, "--yes");
         assertExit(0, result, "destroy --yes");
         String out = combined(result);
+        assertAscii("destroy", out);
         assertContains(out, "systemctl stop " + UNIT);
-        assertContains(out, UNIT_PATH);
-        assertContains(out, ENV_PATH);
-        assertContains(out, "path-links");
+        assertContains(out, "systemctl disable " + UNIT);
+        assertContains(out, "remove " + UNIT_PATH);
+        assertContains(out, "remove " + ENV_PATH);
+        assertContains(out, pathLinksLine("remove"));
 
         assertFalse(exists(UNIT_PATH), "unit must be removed");
         assertFalse(exists(ENV_PATH), "env must be removed");
@@ -364,9 +373,9 @@ class SmokeIT {
         ExecResult result = xac("apply", "/opt/shadow");
         assertExit(2, result, "apply of a shadowed name");
         String out = combined(result);
-        assertContains(out, "unit:");
-        assertContains(out, "/usr/lib/systemd/system/xac.shadow.service");
-        assertContains(out, "xac.shadow.service");
+        assertAscii("shadow unit guard", out);
+        assertContains(out, "unit: unit with same name exists and is not managed by xac:"
+                + " /usr/lib/systemd/system/xac.shadow.service, handle it manually");
 
         assertFalse(exists("/etc/systemd/system/xac.shadow.service"),
                 "shadow guard must not write the unit");
@@ -405,6 +414,28 @@ class SmokeIT {
     private static void assertContains(String haystack, String needle) {
         assertTrue(haystack.contains(needle),
                 "expected to find [" + needle + "] in:\n" + haystack);
+    }
+
+    /** 运行时输出必须是纯 ASCII，且不能被编码回退成 '?'。 */
+    private static void assertAscii(String what, String text) {
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            assertTrue(c < 0x80, what + " must be ASCII, found U+"
+                    + Integer.toHexString(c) + " in:\n" + text);
+        }
+        assertFalse(text.contains("?"), what + " must not contain '?' (encoding fallback):\n" + text);
+    }
+
+    /** path-links 动作的完整描述行；链接按 xac.yaml 中的顺序列出。 */
+    private static String pathLinksLine(String action) {
+        StringBuilder line = new StringBuilder(action).append(" path-links: [");
+        for (int i = 0; i < LINK_NAMES.length; i++) {
+            if (i > 0) {
+                line.append(", ");
+            }
+            line.append("app.jar:/opt/links/").append(LINK_NAMES[i]).append("/app.jar");
+        }
+        return line.append(']').toString();
     }
 
     private static boolean exists(String path) throws IOException, InterruptedException {
