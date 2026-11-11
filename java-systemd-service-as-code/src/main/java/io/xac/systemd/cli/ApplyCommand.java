@@ -1,0 +1,37 @@
+package io.xac.systemd.cli;
+
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.concurrent.Callable;
+
+import io.xac.systemd.apply.ApplyContext;
+import io.xac.systemd.apply.ApplyRunner;
+import io.xac.systemd.exec.ProcessRunner;
+import io.xac.systemd.systemd.SystemdTarget;
+import picocli.CommandLine.Command;
+import picocli.CommandLine.Option;
+import picocli.CommandLine.Parameters;
+
+@Command(name = "apply", description = "安装或更新服务：写文件、reload、enable、restart")
+public final class ApplyCommand implements Callable<Integer> {
+
+    @Parameters(index = "0", arity = "0..1", defaultValue = ".",
+            description = "包目录，必须包含 xac.yaml（缺省当前目录）")
+    String packageDirArg;
+
+    @Option(names = "--dry-run", description = "只打印将执行的动作，不做任何改动")
+    boolean dryRun;
+
+    @Override
+    public Integer call() {
+        Path packageDir = Paths.get(packageDirArg).toAbsolutePath().normalize();
+        SpecCommands.Loaded loaded = SpecCommands.load(packageDir);
+        if (loaded.spec == null) {
+            SpecCommands.report(loaded.violations);
+            return 2;
+        }
+        ApplyContext ctx = new ApplyContext(loaded.spec, SystemdTarget.defaults(),
+                new ProcessRunner(), dryRun);
+        return new ApplyRunner().run(ctx, System.out);
+    }
+}

@@ -140,7 +140,19 @@ path-links:
 下的 `appfile`。
 
 目标位置如果已是真实目录（例如旧版本留下的），会先被备份成 `.bak`（已有 `.bak` 则加时间戳），
-再建链接。`destroy` 时一并移除。
+再建链接。目标位置是别人建的软链接时同样先备份、不静默覆盖。
+
+`destroy` 只删除「仍是软链接且指向配置的源」的那些链接；`.bak` 备份不删。
+
+**安全约束**（写错了就是把系统目录搬走，所以这些是硬错误）：
+
+- 目标不能是 `/`，不能落在 `/etc`、`/usr`、`/bin`、`/sbin`、`/lib*`、`/boot`、`/var`、`/root`、
+  `/home`、`/proc`、`/sys`、`/dev`、`/run` 及其子孙之下
+- 目标不能等于或包住包目录、unit 目录、env 文件
+- 目标不能等于源，也不能是源的上级目录
+- 源必须存在（只在 `apply` 检查；`status`、`logs`、`destroy` 在产物已删时也能用）
+
+判定会先解析真实路径，预置的符号链接不能用来绕过。
 
 `path-links` 只建链接，不影响工作目录，也不影响哪里可写。
 
@@ -194,14 +206,19 @@ lifecycle:
 3. `name` 只含字母、数字、`-`、`_`、`.`、`:`，不含 `/`，不以 `.` 开头。
 4. `env` 的键名合法、值不含换行、键不重复。
 5. `path-links` 的每一项都能按最后一个冒号切成非空的两段，且目标以 `/` 开头。
-6. `properties`、`runtime.opts` 里的 `${...}` 都能在 `env` 中找到。
-7. `lifecycle.auto-start` 是布尔值；`lifecycle.restart` 是合法的 systemd 取值；
+6. `path-links` 的目标不落在受保护位置，也不等于或包住包目录、unit 目录、env 文件（见 §4.6）。
+7. `path-links` 的目标既不能等于源，也不能是源的上级目录。
+8. `properties`、`runtime.opts` 里的 `${...}` 都能在 `env` 中找到。
+9. `lifecycle.auto-start` 是布尔值；`lifecycle.restart` 是合法的 systemd 取值；
    `restart-sec`、`timeout-stop-sec` 是正整数。
+10. 会写进 unit 的字符串不含换行：`description`、`artifact.jar`、`runtime.java`、`workdir`、
+    `runtime.opts` 的每一项、`properties` 的键与值。
 
-以下两条需要在本机看文件，由 CLI 在动手前检查：
+以下三条需要在本机看文件，由 CLI 在动手前检查：
 
-8. `artifact.jar` 指向的文件存在。
-9. `runtime.java` 指向的文件存在且可执行。
+11. `artifact.jar` 指向的文件存在。
+12. `runtime.java` 指向的文件存在且可执行。
+13. `path-links` 的源存在——只有 `apply` 检查，`status`、`logs`、`destroy` 不需要产物还在。
 
 ## 7. 样例
 

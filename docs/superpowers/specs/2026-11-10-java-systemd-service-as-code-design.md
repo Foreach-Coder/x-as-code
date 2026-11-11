@@ -19,6 +19,8 @@
 8. **所有命令都接收"包目录"**，包目录下必须有 `xac.yaml`
 9. unit 恒定渲染 **`SuccessExitStatus=143`**（否则停服务后 unit 被标成 `failed`）
 10. 目标平台定案 **Ubuntu 24.04 / systemd 255**，移出 CentOS 7 兼容
+11. `--dry-run` 先过预检再打印（§6.2）：预检不通过按输入错误退 2
+12. `destroy` 的 `stop`/`disable`/`reload` 失败只记警告（§6.5）：destroy 的目标是文件消失
 
 ## 1. 背景与目标
 
@@ -306,13 +308,26 @@ xac destroy [<package-dir>] [--dry-run] [--yes]
 7. `name` 只含字母数字 `-` `_` `.` `:`，不以 `.` 开头，不含 `/`
 8. `env` 键名合法、值不含换行、键不重复
 9. `path-links` 每项按最后一个冒号切成两段非空，目标以 `/` 开头
-10. `properties` 与 `runtime.opts` 里的 `${...}` 都能在 `env` 中找到
-11. `lifecycle.auto-start` 是布尔；`lifecycle.restart` 是合法取值；两个秒数是正整数
+10. `path-links` 的目标不得落在受保护位置：`/` 本身，`/etc`、`/usr`、`/bin`、`/sbin`、`/lib`、
+    `/lib32`、`/lib64`、`/boot`、`/var`、`/root`、`/home`、`/proc`、`/sys`、`/dev`、`/run` 及其子孙；
+    也不得等于或包住包目录、unit 目录、env 文件
+11. `path-links` 的目标不得等于源，也不得是源的上级目录（后者会建出自指的死链）
+12. `properties` 与 `runtime.opts` 里的 `${...}` 都能在 `env` 中找到
+13. `lifecycle.auto-start` 是布尔；`lifecycle.restart` 是合法取值；两个秒数是正整数
+14. 会进入 unit 的字符串不含换行：`description`、`artifact.jar`、`runtime.java`、`workdir`、
+    `runtime.opts` 的每一项、`properties` 的键与值
+
+第 10、11 条按**两种形式**各判一次：yaml 里的字面路径，以及把已存在的父目录解析成真实路径之后的
+路径（`/opt/link -> /` 这种预先布置的链接不能用来绕过）。末段不解析——删一个链接时删的就是链接本身。
 
 **环境检查**
 
-12. `artifact.jar` 存在
-13. `runtime.java` 存在且可执行
+15. `artifact.jar` 存在
+16. `runtime.java` 存在且可执行
+17. `path-links` 的源存在
+
+第 17 条**只在 apply 检查**。`status`、`logs`、`destroy` 要能在包目录内容已经没了的时候继续工作
+（典型场景：先把产物删了，再拆服务）。
 
 ### 6.2 apply
 
@@ -338,7 +353,9 @@ xac apply [<package-dir>] [--dry-run]
 （`workdir: /appfile/messystemservice` 与 `./appfile:/appfile/messystemservice`）。链接先建好，
 `workdir` 那步看到路径已存在就跳过，不会先造一个真实目录再把它备份成 `.bak`。
 
-`--dry-run`：打印 7 个动作的描述后退出 0，不写文件、不执行命令。
+`--dry-run`：**先过 §6.1 的预检**，通过后打印 7 个动作的描述并退出 0，不写文件、不执行命令；
+预检失败按 §6.1 退 2（什么都没改动）。dry-run 的价值是「这些动作在这台机器上真能执行」，
+把预检跳过去，打印出来的就只是一段文本。非 root 机器上的纯预览留到后续版本。
 
 **软链接是唯一保留状态分支的地方**（这不是 diff，是正确的覆盖语义）：
 
@@ -348,6 +365,12 @@ xac apply [<package-dir>] [--dry-run]
 | 已是指向正确源的软链接 | 跳过 |
 | 真实目录或文件 | 备份为 `<目标>.bak`（已存在则加时间戳）→ 建链接 |
 | 软链接但指向别处 | 同样备份为 `.bak` → 建链接（不静默覆盖别人的链接） |
+
+**护栏先于动作**：目标落在受保护位置（§6.1 第 10 条）或与源互相包含（第 11 条）时，apply 在写任何
+文件之前就退 2。这条护栏存在的理由很具体——`./conf:/etc` 这种笔误会把整个 `/etc` 改名成 `.bak`，
+`./u:/etc/systemd/system` 会把 unit 目录端掉。护栏执行前先解析真实路径，避免用链接绕过。
+
+`.bak` 备份不会被 destroy 清理，需要时手工删。
 
 **失败语义：不自动回滚。** 停在失败的动作，输出诊断，退出码 1。已完成的部分保留——
 下次 apply 会重新覆盖一遍。
@@ -388,6 +411,15 @@ drift:       none
 
 **退出码**：`0` = 已安装、已启用、正在运行、无漂移；`1` = 存在偏差（可直接用于 CI 巡检）。
 
+**「正在运行」怎么判**：读 `ActiveState`/`SubState`。不是 `active` 就记一条漂移（`systemctl stop`
+之后必须能看出来，否则 status 会对着一个停掉的服务报绿灯）。`systemctl show` 本身失败时记
+`systemd: 无法查询 <name>.service 的状态`；查询成功但没有 `ActiveState` 字段时不判漂移——观测不到
+不等于观测到「没在跑」。
+
+**env 不可读不算漂移**：env 文件是 0600 root，非 root 跑 status 读不到内容。这种情况打
+`env: (无法校验：需要 root 权限)`，不记漂移，退出码只看其余项——否则健康机器上的非 root 巡检
+永远是红的。文件不存在（`MISSING`）仍然算漂移。
+
 ### 6.4 logs
 
 ```
@@ -412,18 +444,39 @@ xac destroy [<package-dir>] [--dry-run] [--yes]
 需要 root。目标：让这个服务在本机上不存在。默认先打印将删除的清单并要求输入 `y` 确认；
 `--yes` 跳过（CI 用）；非交互环境又没给 `--yes` 时退出码 2。
 
+**先判归属，再动手**：只有当 `/etc/systemd/system/<name>.service` 是普通文件（lstat，不跟随链接）
+且首行是管理头时，才执行 `stop`/`disable`/`rm-unit`。其余情形一律跳过这三个动作并警告，然后继续
+删 env、reload、删链接：
+
+| unit 路径现状 | stop/disable/rm-unit |
+|---|---|
+| 管理头 + 普通文件 | 执行 |
+| 普通文件但没有管理头（别人的 unit） | 跳过 + 警告 |
+| 不存在（vendor unit 在 `/usr/lib/systemd/system`） | 跳过 + 警告：`同名 unit 不由 xac 管理，未停止；如仍有进程请手动处理` |
+| 目录、dangling 链接等非普通文件 | 跳过 + 警告 |
+
+这条闸门的代价要说清楚：如果 unit 文件被手工删掉了而进程还在，destroy 会退 0 但不杀进程——警告
+会写出来，但不会替你收拾。反过来，同名 vendor unit（如 `ssh`）永远不会被误停。
+
+确认提示列出**将要删除**的项和**确认保留**的项（包目录、workdir、`.bak`、日志）。
+
+**不要求 `artifact.jar` 与 `runtime.java` 存在**：产物先删、后拆服务是正常顺序。destroy 的预检只有
+root 与 `/run/systemd/system`。
+
 | # | 动作 | 落到机器上的操作 |
 |---|---|---|
 | 1 | `stop` | `systemctl stop <name>.service`；失败只记警告，不中止 |
 | 2 | `disable` | `systemctl disable <name>.service`；失败只记警告 |
 | 3 | `rm-unit` | 删 `/etc/systemd/system/<name>.service`（不存在则跳过） |
 | 4 | `rm-env` | 删 `/etc/xac/<name>.env`（不存在则跳过） |
-| 5 | `reload` | `systemctl daemon-reload` |
+| 5 | `reload` | `systemctl daemon-reload`；失败只记警告，不中止 |
 | 6 | `rm-links` | 删 `path-links` 里的链接，**仅当它是软链接且指向配置的源** |
 
 为什么 stop/disable 失败不中止：destroy 的语义是「让这些东西不存在」，本来就不存在时 systemctl
 会返回非 0（实测：不存在的 unit `stop` 退出 5、`disable` 退出 1）；那不是错误。文件层面的删除
-才是目标。
+才是目标。`reload` 同理：reload 只刷新 systemd 的内存态，删文件失败才是真失败；这台机器
+systemd 起不来时（`degraded`），reload 失败也挡不住「文件已经清掉」这个结果，下一次 `apply`
+必然会再 reload 一次。
 
 **不删**：包目录、workdir、`.bak` 备份、已产出的日志。
 
@@ -434,10 +487,13 @@ xac destroy [<package-dir>] [--dry-run] [--yes]
 | 码 | 含义 |
 |---|---|
 | 0 | 成功 |
-| 1 | 执行期失败（某动作失败、status 检出漂移） |
+| 1 | 执行期失败（某动作失败、status 检出漂移；destroy 的 stop/disable/reload 失败只记警告，不算） |
 | 2 | 输入错误，**什么都没改动**（包目录无 `xac.yaml`、yaml 不合法、参数错、非 root、destroy 未确认） |
 
 `2` 可以安全重试，`1` 需要人看一眼。
+
+`logs` 的两种失败都退 2：`-n` 不是正整数，以及 `journalctl` 起不来（这台机器没有 journalctl）。
+理由同「什么都没改动」——用户没拿到日志，但机器状态没变，重跑无害。
 
 ### 6.7 输出格式
 
@@ -537,6 +593,9 @@ docker run -d --name xac-e2e --privileged --cgroupns=host \
 - `apply` 无条件重启，无法避免短暂停机
 - status 不显示内存/CPU
 - `destroy` 不删包目录、workdir 与 `.bak` 备份
+- `destroy` 只处理带管理头的 unit 文件；手工删掉 unit 文件后仍在跑的进程不会被停掉（只警告）
+- 符号链接形式的「管理 unit」会被 destroy 整体跳过（xac 自己从不这样写 unit）
+- `path-links` 的受保护目录策略是保守的：`/var`、`/home` 下面也不能建链接（需要时先改用其它位置）
 
 ## 12. 后续（不在 v1）
 

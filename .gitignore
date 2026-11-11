@@ -5,3 +5,5 @@ target/
 *.iml
 .vscode/
 .tmp-e2e/
+
+mvn-out.txt
