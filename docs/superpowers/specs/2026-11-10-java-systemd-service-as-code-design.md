@@ -614,6 +614,8 @@ docker run -d --name xac-e2e --privileged --cgroupns=host \
 - `destroy` 只处理带管理头的 unit 文件；手工删掉 unit 文件后仍在跑的进程不会被停掉（只警告）
 - 符号链接形式的「管理 unit」会被 destroy 整体跳过（xac 自己从不这样写 unit）
 - `path-links` 的受保护目录策略是保守的：`/var`、`/home` 下面也不能建链接（需要时先改用其它位置）
+- 不防恶意 `xac.yaml`：`runtime.java` 与 `opts` 等价于「以 root 执行任意命令」，`xac` 只保证
+  「人写错或不一致时不波及系统」，不承担权限隔离职责
 
 ## 12. 后续（不在 v1）
 
