@@ -1,10 +1,14 @@
 package io.xac.systemd.apply;
 
+import io.xac.systemd.exec.CommandRunner;
+import io.xac.systemd.exec.ExecResult;
 import io.xac.systemd.exec.RecordingRunner;
 import io.xac.systemd.spec.Lifecycle;
 import io.xac.systemd.spec.ServiceSpec;
 import io.xac.systemd.spec.Violation;
 import io.xac.systemd.systemd.SystemdTarget;
+import io.xac.systemd.systemd.UnitNaming;
+import io.xac.systemd.systemd.UnitRenderer;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -42,6 +46,17 @@ class PreflightTest {
     /** 预检现在要查同名 unit；测试里用一个「查询成功但无内容」的 runner 与临时目标目录。 */
     private List<Violation> preflight(ServiceSpec spec, EnvironmentProbe probe) {
         return Preflight.check(spec, probe, new RecordingRunner(), target());
+    }
+
+    private List<Violation> preflight(ServiceSpec spec, EnvironmentProbe probe,
+            CommandRunner runner) {
+        return Preflight.check(spec, probe, runner, target());
+    }
+
+    private static Path write(Path path, String content) throws IOException {
+        Files.createDirectories(path.getParent());
+        Files.write(path, content.getBytes(StandardCharsets.UTF_8));
+        return path;
     }
 
     private static final class FakeProbe implements EnvironmentProbe {
@@ -135,6 +150,105 @@ class PreflightTest {
         assertEquals(1, out.size(), out.toString());
         assertEquals("path-links[0]", out.get(0).path);
         assertTrue(out.get(0).message.contains("源目录不存在"), out.get(0).message);
+    }
+
+    @Test
+    void refusesUnitProvidedBySystemd() throws IOException {
+        Files.createFile(pkg.resolve("app.jar"));
+        RecordingRunner runner = new RecordingRunner();
+        runner.addResultForCommand("systemctl", new ExecResult(0,
+                "LoadState=loaded\nFragmentPath=/usr/lib/systemd/system/ssh.service\n", ""));
+
+        List<Violation> out = preflight(spec("app.jar"), new FakeProbe(), runner);
+
+        assertEquals(1, out.size(), out.toString());
+        assertEquals("unit", out.get(0).path);
+        assertEquals("同名 unit 已存在且不由 xac 管理: /usr/lib/systemd/system/ssh.service，请人工处理",
+                out.get(0).message);
+    }
+
+    /** FragmentPath 指向本次要写的 unit，说明是 xac 自己装的，重复 apply 必须放行。 */
+    @Test
+    void acceptsUnitWhoseFragmentPathIsTheTarget() throws IOException {
+        Files.createFile(pkg.resolve("app.jar"));
+        Path unitPath = UnitNaming.unitPath(spec("app.jar"), target());
+        RecordingRunner runner = new RecordingRunner();
+        runner.addResultForCommand("systemctl", new ExecResult(0,
+                "LoadState=loaded\nFragmentPath=" + unitPath + "\n", ""));
+
+        assertTrue(preflight(spec("app.jar"), new FakeProbe(), runner).isEmpty());
+    }
+
+    @Test
+    void refusesWhenSystemctlShowFails() throws IOException {
+        Files.createFile(pkg.resolve("app.jar"));
+        RecordingRunner runner = new RecordingRunner();
+        runner.addResultForCommand("systemctl", new ExecResult(1, "", "Failed to connect to bus"));
+
+        List<Violation> out = preflight(spec("app.jar"), new FakeProbe(), runner);
+
+        assertEquals(1, out.size(), out.toString());
+        assertEquals("unit", out.get(0).path);
+        assertEquals("无法查询同名 unit 的状态（systemctl show 失败），请人工处理", out.get(0).message);
+    }
+
+    @Test
+    void refusesForeignUnitFile() throws IOException {
+        Files.createFile(pkg.resolve("app.jar"));
+        Path unitPath = UnitNaming.unitPath(spec("app.jar"), target());
+        write(unitPath, "[Unit]\nDescription=someone else\n");
+
+        List<Violation> out = preflight(spec("app.jar"), new FakeProbe());
+
+        assertEquals(1, out.size(), out.toString());
+        assertEquals("unit", out.get(0).path);
+        assertEquals("已存在非 xac 管理的 unit 文件，拒绝覆盖: " + unitPath, out.get(0).message);
+        assertTrue(Files.isRegularFile(unitPath));
+    }
+
+    @Test
+    void refusesForeignEnvFile() throws IOException {
+        Files.createFile(pkg.resolve("app.jar"));
+        Path envPath = UnitNaming.envPath(spec("app.jar"), target());
+        write(envPath, "SECRET=1\n");
+
+        List<Violation> out = preflight(spec("app.jar"), new FakeProbe());
+
+        assertEquals(1, out.size(), out.toString());
+        assertEquals("env", out.get(0).path);
+        assertEquals("已存在非 xac 管理的 env 文件，拒绝覆盖或删除: " + envPath,
+                out.get(0).message);
+        assertTrue(Files.isRegularFile(envPath));
+    }
+
+    /** env 为空时 apply 会删文件；外来文件同样要拦住，且预检不能动它。 */
+    @Test
+    void refusesToDeleteForeignEnvFileWhenEnvIsEmpty() throws IOException {
+        Files.createFile(pkg.resolve("app.jar"));
+        ServiceSpec spec = spec("app.jar");
+        assertTrue(spec.env.isEmpty());
+        Path envPath = UnitNaming.envPath(spec, target());
+        write(envPath, "SECRET=1\n");
+
+        List<Violation> out = preflight(spec, new FakeProbe());
+
+        assertEquals(1, out.size(), out.toString());
+        assertEquals("env", out.get(0).path);
+        assertEquals("已存在非 xac 管理的 env 文件，拒绝覆盖或删除: " + envPath,
+                out.get(0).message);
+        assertEquals("SECRET=1\n", new String(Files.readAllBytes(envPath),
+                StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void acceptsManagedUnitAndEnvFiles() throws IOException {
+        Files.createFile(pkg.resolve("app.jar"));
+        Path unitPath = UnitNaming.unitPath(spec("app.jar"), target());
+        Path envPath = UnitNaming.envPath(spec("app.jar"), target());
+        write(unitPath, UnitRenderer.HEADER + "\n[Unit]\nDescription=old\n");
+        write(envPath, UnitRenderer.HEADER + "\nOLD=1\n");
+
+        assertTrue(preflight(spec("app.jar"), new FakeProbe()).isEmpty());
     }
 
     // path-links 的目标必须是 POSIX 绝对路径，Windows 上会被解析器拒绝。

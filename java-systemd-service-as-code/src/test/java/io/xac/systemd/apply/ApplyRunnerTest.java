@@ -143,6 +143,26 @@ class ApplyRunnerTest {
     }
 
     @Test
+    void refusesToDeleteForeignEnvFile() throws IOException {
+        Files.createDirectories(target().envDir);
+        Path envFile = target().envDir.resolve("demo.env");
+        Files.write(envFile, "OLD=1\n".getBytes(StandardCharsets.UTF_8));
+        Files.createDirectories(target().unitDir);
+        ApplyContext ctx = new ApplyContext(spec(true, Collections.<String, String>emptyMap()),
+                target(), new RecordingRunner(), false);
+
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        int code = new ApplyRunner().run(ctx, new PrintStream(buffer, true, "UTF-8"));
+
+        assertEquals(1, code, buffer.toString("UTF-8"));
+        assertTrue(buffer.toString("UTF-8").contains("已存在非 xac 管理的 env 文件"),
+                buffer.toString("UTF-8"));
+        assertTrue(Files.isRegularFile(envFile));
+        assertEquals("OLD=1\n", read(envFile));
+        assertFalse(Files.exists(target().unitDir.resolve("demo.service")));
+    }
+
+    @Test
     void refusesBlockedPathLinkBeforeDoingAnything() throws IOException {
         Assumptions.assumeTrue(File.separatorChar == '/', "path-links 目标只支持 POSIX 绝对路径");
         Path source = Files.createDirectories(root.resolve("payload"));
