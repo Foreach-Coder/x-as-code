@@ -2,6 +2,7 @@ package io.xac.systemd.cli;
 
 import io.xac.systemd.apply.EnvironmentProbe;
 import io.xac.systemd.spec.Violation;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -38,7 +39,7 @@ class SpecCommandsTest {
         String yaml = String.join("\n",
                 "name: demo",
                 "artifact:",
-                "  jar: missing.jar",
+                "  jar: app.jar",
                 "runtime:",
                 "  java: /usr/bin/java",
                 "  opts:",
@@ -116,11 +117,78 @@ class SpecCommandsTest {
 
     @Test
     void applyLoadRejectsMissingPathLinkSource() throws IOException {
+        Files.createFile(pkg.resolve("app.jar"));
         writeSpecWithMissingLinkSource();
 
         SpecCommands.Loaded loaded = SpecCommands.load(pkg, new FakeProbe());
 
         assertNull(loaded.spec);
         assertTrue(hasPath(loaded.violations, "path-links[0]"), loaded.violations.toString());
+    }
+
+    @Test
+    void applyLoadRejectsExistingPathLinkTarget() throws IOException {
+        assumePosixTargets();
+        Files.createFile(pkg.resolve("app.jar"));
+        Files.createDirectories(pkg.resolve("payload"));
+        Path target = Files.createDirectories(pkg.resolve("link"));
+        writeSpecWithLink("./payload:" + target);
+
+        SpecCommands.Loaded loaded = SpecCommands.load(pkg, new FakeProbe());
+
+        assertNull(loaded.spec);
+        assertEquals(1, loaded.violations.size(), loaded.violations.toString());
+        assertTrue(hasPath(loaded.violations, "path-links[0]"), loaded.violations.toString());
+        assertTrue(loaded.violations.get(0).message.contains("请人工处理"),
+                loaded.violations.get(0).message);
+        assertTrue(Files.isDirectory(target));
+    }
+
+    @Test
+    void destroyLoadAcceptsExistingPathLinkTarget() throws IOException {
+        assumePosixTargets();
+        Files.createDirectories(pkg.resolve("payload"));
+        Path target = Files.createDirectories(pkg.resolve("link"));
+        writeSpecWithLink("./payload:" + target);
+
+        SpecCommands.Loaded loaded = SpecCommands.loadForDestroy(pkg, new FakeProbe());
+
+        assertNotNull(loaded.spec);
+        assertTrue(loaded.violations.isEmpty(), loaded.violations.toString());
+        assertTrue(Files.isDirectory(target));
+    }
+
+    @Test
+    void parseAcceptsExistingPathLinkTarget() throws IOException {
+        assumePosixTargets();
+        Files.createDirectories(pkg.resolve("payload"));
+        Path target = Files.createDirectories(pkg.resolve("link"));
+        writeSpecWithLink("./payload:" + target);
+
+        SpecCommands.Loaded loaded = SpecCommands.parse(pkg);
+
+        assertNotNull(loaded.spec);
+        assertTrue(loaded.violations.isEmpty(), loaded.violations.toString());
+        assertTrue(Files.isDirectory(target));
+    }
+
+    private void writeSpecWithLink(String link) throws IOException {
+        String yaml = String.join("\n",
+                "name: demo",
+                "artifact:",
+                "  jar: app.jar",
+                "runtime:",
+                "  java: /usr/bin/java",
+                "  opts:",
+                "    - -Xmx512m",
+                "path-links:",
+                "  - " + link,
+                "");
+        Files.write(pkg.resolve("xac.yaml"), yaml.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void assumePosixTargets() {
+        Assumptions.assumeTrue(java.io.File.separatorChar == '/',
+                "path-links 目标只支持 POSIX 绝对路径");
     }
 }

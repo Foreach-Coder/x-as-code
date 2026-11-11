@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -70,6 +71,57 @@ class PathLinkGuardTest {
 
         // 移动链接本身不会动到它指向的目录，因此这里应当放行。
         assertNull(check(link(root.resolve("src"), link)));
+    }
+
+    @Test
+    void acceptsMissingTarget() {
+        assertNull(PathLinkGuard.checkTarget(link(root.resolve("src"), root.resolve("absent"))));
+    }
+
+    @Test
+    void acceptsSymlinkThatPointsAtSource() throws IOException {
+        Assumptions.assumeTrue(supportsSymlinks(root));
+        Path source = Files.createDirectories(root.resolve("src"));
+        Path target = root.resolve("target");
+        Files.createSymbolicLink(target, source);
+
+        assertNull(PathLinkGuard.checkTarget(link(source, target)));
+    }
+
+    @Test
+    void rejectsExistingDirectory() throws IOException {
+        Path target = Files.createDirectories(root.resolve("target"));
+
+        assertEquals("目标已存在且不是指向源的软链接，请人工处理: " + target,
+                PathLinkGuard.checkTarget(link(root.resolve("src"), target)));
+    }
+
+    @Test
+    void rejectsExistingRegularFile() throws IOException {
+        Path target = Files.createFile(root.resolve("target"));
+
+        assertEquals("目标已存在且不是指向源的软链接，请人工处理: " + target,
+                PathLinkGuard.checkTarget(link(root.resolve("src"), target)));
+    }
+
+    @Test
+    void rejectsSymlinkThatPointsElsewhere() throws IOException {
+        Assumptions.assumeTrue(supportsSymlinks(root));
+        Path target = root.resolve("target");
+        Files.createSymbolicLink(target, root.resolve("elsewhere"));
+
+        assertEquals("目标已存在且不是指向源的软链接，请人工处理: " + target,
+                PathLinkGuard.checkTarget(link(root.resolve("src"), target)));
+    }
+
+    @Test
+    void rejectsDanglingSymlink() throws IOException {
+        Assumptions.assumeTrue(supportsSymlinks(root));
+        Path target = root.resolve("target");
+        Files.createSymbolicLink(target, root.resolve("gone"));
+
+        assertEquals("目标已存在且不是指向源的软链接，请人工处理: " + target,
+                PathLinkGuard.checkTarget(link(root.resolve("src"), target)));
     }
 
     @Test

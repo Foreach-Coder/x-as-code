@@ -71,7 +71,7 @@ class DestroyCommandTest {
         assertTrue(out.contains(UnitNaming.unitPath(spec, target).toString()), out);
         assertTrue(out.contains(UnitNaming.envPath(spec, target).toString()), out);
         assertTrue(out.contains("保留: 包目录 " + root.toAbsolutePath().normalize()), out);
-        assertTrue(out.contains(".bak 备份与日志"), out);
+        assertTrue(out.contains("、日志"), out);
     }
 
     @Test

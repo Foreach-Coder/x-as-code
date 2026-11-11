@@ -6,13 +6,16 @@ import io.xac.systemd.spec.Lifecycle;
 import io.xac.systemd.spec.ServiceSpec;
 import io.xac.systemd.systemd.SystemdTarget;
 import io.xac.systemd.systemd.UnitNaming;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -136,5 +139,40 @@ class ApplyRunnerTest {
         assertTrue(lines.get(0).startsWith("would "), lines.toString());
         assertTrue(lines.get(0).contains("path-links"), lines.toString());
         assertTrue(lines.get(6).contains("restart"), lines.toString());
+    }
+
+    @Test
+    void refusesBlockedPathLinkBeforeDoingAnything() throws IOException {
+        Assumptions.assumeTrue(File.separatorChar == '/', "path-links 目标只支持 POSIX 绝对路径");
+        Path source = Files.createDirectories(root.resolve("payload"));
+        Path link = Files.createDirectories(root.resolve("link"));
+        Files.write(link.resolve("keep.txt"), "keep".getBytes(StandardCharsets.UTF_8));
+        ServiceSpec spec = ServiceSpec.builder(root)
+                .name("demo")
+                .jar("app.jar")
+                .java("/usr/bin/java")
+                .opts(Collections.<String>emptyList())
+                .pathLinks(Collections.singletonList(source + ":" + link))
+                .lifecycle(new Lifecycle(true, null, null, null))
+                .build();
+        RecordingRunner runner = new RecordingRunner();
+        ApplyContext ctx = new ApplyContext(spec, target(), runner, false);
+        Files.createDirectories(target().unitDir);
+        Files.createDirectories(target().envDir);
+
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        int code = new ApplyRunner().run(ctx, new PrintStream(buffer, true, "UTF-8"));
+
+        assertEquals(1, code);
+        assertTrue(buffer.toString("UTF-8")
+                        .contains("目标已存在且不是指向源的软链接，请人工处理: " + link),
+                buffer.toString("UTF-8"));
+        assertTrue(runner.calls().isEmpty(), runner.calls().toString());
+        assertTrue(Files.isDirectory(link));
+        assertEquals("keep", read(link.resolve("keep.txt")));
+        assertFalse(Files.exists(target().unitDir.resolve("demo.service")));
+        try (DirectoryStream<Path> entries = Files.newDirectoryStream(root, "*.bak*")) {
+            assertFalse(entries.iterator().hasNext(), "不应创建 .bak 备份");
+        }
     }
 }

@@ -10,8 +10,10 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -20,6 +22,7 @@ import java.util.Arrays;
 import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -56,8 +59,27 @@ class PathLinksActionTest {
         }
     }
 
+    /**
+     * path-links 的目标必须是 POSIX 绝对路径（以 / 开头），Windows 上会被解析器拒绝，
+     * 因此这些用例只能在类 Unix 环境执行。
+     */
+    private static void assumePosixTargets() {
+        Assumptions.assumeTrue(File.separatorChar == '/', "path-links 目标只支持 POSIX 绝对路径");
+    }
+
+    private static String refuseMessage(Path target) {
+        return "目标已存在且不是指向源的软链接，请人工处理: " + target;
+    }
+
+    private static void assertNoBackup(Path target) throws IOException {
+        try (DirectoryStream<Path> entries = Files.newDirectoryStream(target.getParent(), "*.bak*")) {
+            assertFalse(entries.iterator().hasNext(), "不应创建 .bak 备份");
+        }
+    }
+
     @Test
     void createsLinkWhenTargetMissing() throws IOException {
+        assumePosixTargets();
         Assumptions.assumeTrue(supportsSymlinks(root));
         Path source = Files.createFile(root.resolve("payload.txt"));
         Path target = root.resolve("link.txt");
@@ -66,10 +88,12 @@ class PathLinksActionTest {
 
         assertTrue(Files.isSymbolicLink(target));
         assertEquals(source, Files.readSymbolicLink(target));
+        assertNoBackup(target);
     }
 
     @Test
     void isIdempotentWhenLinkAlreadyPointsToSource() throws IOException {
+        assumePosixTargets();
         Assumptions.assumeTrue(supportsSymlinks(root));
         Path source = Files.createFile(root.resolve("payload.txt"));
         Path target = root.resolve("link.txt");
@@ -78,26 +102,93 @@ class PathLinksActionTest {
         new PathLinksAction().run(context(source + ":" + target));
 
         assertEquals(source, Files.readSymbolicLink(target));
-        assertTrue(Files.notExists(root.resolve("link.txt.bak")));
+        assertNoBackup(target);
     }
 
     @Test
-    void backsUpRealDirectoryBeforeLinking() throws IOException {
-        Assumptions.assumeTrue(supportsSymlinks(root));
+    void refusesExistingEmptyDirectory() throws IOException {
+        assumePosixTargets();
+        Path source = Files.createDirectories(root.resolve("payload"));
+        Path target = Files.createDirectories(root.resolve("link"));
+
+        ActionFailure failure = assertThrows(ActionFailure.class,
+                () -> new PathLinksAction().run(context(source + ":" + target)));
+
+        assertEquals(refuseMessage(target), failure.getMessage());
+        assertTrue(Files.isDirectory(target));
+        assertNoBackup(target);
+    }
+
+    @Test
+    void refusesExistingNonEmptyDirectory() throws IOException {
+        assumePosixTargets();
         Path source = Files.createDirectories(root.resolve("payload"));
         Path target = Files.createDirectories(root.resolve("link"));
         Files.write(target.resolve("old.txt"), "old".getBytes(StandardCharsets.UTF_8));
 
-        new PathLinksAction().run(context(source + ":" + target));
+        ActionFailure failure = assertThrows(ActionFailure.class,
+                () -> new PathLinksAction().run(context(source + ":" + target)));
 
+        assertEquals(refuseMessage(target), failure.getMessage());
+        assertEquals("old", new String(Files.readAllBytes(target.resolve("old.txt")), StandardCharsets.UTF_8));
+        assertFalse(Files.isSymbolicLink(target));
+        assertNoBackup(target);
+    }
+
+    @Test
+    void refusesExistingRegularFile() throws IOException {
+        assumePosixTargets();
+        Path source = Files.createDirectories(root.resolve("payload"));
+        Path target = Files.write(root.resolve("link"), "old".getBytes(StandardCharsets.UTF_8));
+
+        ActionFailure failure = assertThrows(ActionFailure.class,
+                () -> new PathLinksAction().run(context(source + ":" + target)));
+
+        assertEquals(refuseMessage(target), failure.getMessage());
+        assertTrue(Files.isRegularFile(target));
+        assertEquals("old", new String(Files.readAllBytes(target), StandardCharsets.UTF_8));
+        assertNoBackup(target);
+    }
+
+    @Test
+    void refusesSymlinkThatPointsElsewhere() throws IOException {
+        assumePosixTargets();
+        Assumptions.assumeTrue(supportsSymlinks(root));
+        Path source = Files.createDirectories(root.resolve("payload"));
+        Path elsewhere = Files.createDirectories(root.resolve("elsewhere"));
+        Path target = root.resolve("link");
+        Files.createSymbolicLink(target, elsewhere);
+
+        ActionFailure failure = assertThrows(ActionFailure.class,
+                () -> new PathLinksAction().run(context(source + ":" + target)));
+
+        assertEquals(refuseMessage(target), failure.getMessage());
         assertTrue(Files.isSymbolicLink(target));
-        assertEquals(source, Files.readSymbolicLink(target));
-        assertTrue(Files.isRegularFile(root.resolve("link.bak").resolve("old.txt")));
+        assertEquals(elsewhere, Files.readSymbolicLink(target));
+        assertNoBackup(target);
+    }
+
+    @Test
+    void refusesDanglingSymlink() throws IOException {
+        assumePosixTargets();
+        Assumptions.assumeTrue(supportsSymlinks(root));
+        Path source = Files.createDirectories(root.resolve("payload"));
+        Path gone = root.resolve("gone");
+        Path target = root.resolve("link");
+        Files.createSymbolicLink(target, gone);
+
+        ActionFailure failure = assertThrows(ActionFailure.class,
+                () -> new PathLinksAction().run(context(source + ":" + target)));
+
+        assertEquals(refuseMessage(target), failure.getMessage());
+        assertTrue(Files.isSymbolicLink(target));
+        assertEquals(gone, Files.readSymbolicLink(target));
+        assertNoBackup(target);
     }
 
     @Test
     void failsWhenTargetParentDoesNotExist() throws IOException {
-        Assumptions.assumeTrue(supportsSymlinks(root));
+        assumePosixTargets();
         Path source = Files.createFile(root.resolve("payload.txt"));
         Path target = root.resolve("missing-dir").resolve("link.txt");
 
