@@ -136,7 +136,7 @@ class PathLinkGuardTest {
 
     @Test
     void rejectsTargetUnderUnitDir() {
-        Path target = unitDir().resolve("demo.service");
+        Path target = unitDir().resolve("xac.demo.service");
 
         String problem = check(link(root.resolve("src"), target));
 

@@ -6,12 +6,14 @@ import io.xac.systemd.spec.ServiceSpec;
 
 public final class UnitNaming {
 
+    public static final String PREFIX = "xac.";
+
     public static String unitName(ServiceSpec spec) {
-        return spec.name + ".service";
+        return PREFIX + spec.name + ".service";
     }
 
     public static String envFileName(ServiceSpec spec) {
-        return spec.name + ".env";
+        return PREFIX + spec.name + ".env";
     }
 
     public static Path unitPath(ServiceSpec spec, SystemdTarget target) {

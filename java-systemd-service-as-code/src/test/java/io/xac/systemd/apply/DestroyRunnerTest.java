@@ -71,8 +71,8 @@ class DestroyRunnerTest {
 
         assertEquals(0, code);
         assertEquals(Arrays.asList(
-                Arrays.asList("systemctl", "stop", "demo.service"),
-                Arrays.asList("systemctl", "disable", "demo.service"),
+                Arrays.asList("systemctl", "stop", "xac.demo.service"),
+                Arrays.asList("systemctl", "disable", "xac.demo.service"),
                 Arrays.asList("systemctl", "daemon-reload")), runner.calls());
         assertFalse(Files.exists(UnitNaming.unitPath(spec, target())));
         assertFalse(Files.exists(UnitNaming.envPath(spec, target())));

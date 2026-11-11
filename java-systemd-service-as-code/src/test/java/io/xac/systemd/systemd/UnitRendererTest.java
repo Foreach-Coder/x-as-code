@@ -75,8 +75,8 @@ class UnitRendererTest {
                 "Type=simple",
                 "WorkingDirectory=" + PKG_ABS.resolve("run"),
                 "SuccessExitStatus=143",
-                "EnvironmentFile=" + TARGET.envDir.resolve("demo.env"),
-                "SyslogIdentifier=demo",
+                "EnvironmentFile=" + TARGET.envDir.resolve("xac.demo.env"),
+                "SyslogIdentifier=xac.demo",
                 "ExecStart=/usr/bin/java -Xmx512m -XX:+UseSerialGC -Dfoo=${BAR}"
                         + " -jar " + pathArg(PKG_ABS.resolve("app.jar")),
                 "Restart=on-failure",
@@ -108,7 +108,7 @@ class UnitRendererTest {
                 "Type=simple",
                 "WorkingDirectory=" + PKG_ABS,
                 "SuccessExitStatus=143",
-                "SyslogIdentifier=demo",
+                "SyslogIdentifier=xac.demo",
                 "ExecStart=/usr/bin/java -Xmx512m -jar " + pathArg(PKG_ABS.resolve("app.jar")),
                 "Restart=on-failure",
                 "RestartSec=5",
@@ -163,9 +163,11 @@ class UnitRendererTest {
                 .lifecycle(new Lifecycle(null, null, null, null))
                 .build();
         UnitRenderer renderer = new UnitRenderer();
-        assertEquals(renderer.render(spec, TARGET), renderer.render(spec, TARGET));
-        assertEquals(UnitNaming.unitName(spec), "demo.service");
-        assertEquals(Paths.get("/opt/xac/demo.env"), UnitNaming.envPath(spec, TARGET));
+        String unit = renderer.render(spec, TARGET);
+        assertEquals(unit, renderer.render(spec, TARGET));
+        assertEquals("SyslogIdentifier=xac.demo", lineOf(unit, "SyslogIdentifier="));
+        assertEquals(UnitNaming.unitName(spec), "xac.demo.service");
+        assertEquals(Paths.get("/opt/xac/xac.demo.env"), UnitNaming.envPath(spec, TARGET));
     }
 
     @Test

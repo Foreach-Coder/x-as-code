@@ -36,7 +36,7 @@ class LogsRunnerTest {
         ExecResult result = new LogsRunner().run(spec(), runner, 100, false);
 
         assertEquals("line1\nline2\n", result.stdout);
-        assertEquals(Arrays.asList("journalctl", "-u", "demo.service", "--no-pager", "-n", "100"),
+        assertEquals(Arrays.asList("journalctl", "-u", "xac.demo.service", "--no-pager", "-n", "100"),
                 runner.calls().get(0));
         assertTrue(runner.inheritIoCalls().isEmpty());
     }
@@ -48,7 +48,7 @@ class LogsRunnerTest {
         ExecResult result = new LogsRunner().run(spec(), runner, 50, true);
 
         assertEquals(0, result.exitCode);
-        assertEquals(Arrays.asList("journalctl", "-u", "demo.service", "--no-pager", "-n", "50",
+        assertEquals(Arrays.asList("journalctl", "-u", "xac.demo.service", "--no-pager", "-n", "50",
                         "--follow"),
                 runner.inheritIoCalls().get(0));
         assertTrue(runner.calls().isEmpty());

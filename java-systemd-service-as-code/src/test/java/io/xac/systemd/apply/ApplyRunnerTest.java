@@ -80,8 +80,8 @@ class ApplyRunnerTest {
         assertEquals(ctx.envContent, read(UnitNaming.envPath(ctx.spec, ctx.target)));
         assertEquals(Arrays.asList(
                 Arrays.asList("systemctl", "daemon-reload"),
-                Arrays.asList("systemctl", "enable", "demo.service"),
-                Arrays.asList("systemctl", "restart", "demo.service")), runner.calls());
+                Arrays.asList("systemctl", "enable", "xac.demo.service"),
+                Arrays.asList("systemctl", "restart", "xac.demo.service")), runner.calls());
     }
 
     @Test
@@ -91,14 +91,14 @@ class ApplyRunnerTest {
 
         run(ctx);
 
-        assertEquals(Arrays.asList("systemctl", "disable", "demo.service"), runner.calls().get(1));
+        assertEquals(Arrays.asList("systemctl", "disable", "xac.demo.service"), runner.calls().get(1));
         assertFalse(ctx.unitContent.contains("[Install]"));
     }
 
     @Test
     void deletesEnvFileWhenEnvIsEmpty() throws IOException {
         Files.createDirectories(target().envDir);
-        Path envFile = target().envDir.resolve("demo.env");
+        Path envFile = target().envDir.resolve("xac.demo.env");
         Files.write(envFile, (UnitRenderer.HEADER + "\nOLD=1\n").getBytes(StandardCharsets.UTF_8));
 
         ApplyContext ctx = new ApplyContext(spec(true, Collections.<String, String>emptyMap()),
@@ -134,7 +134,7 @@ class ApplyRunnerTest {
 
         assertEquals(0, code);
         assertTrue(runner.calls().isEmpty());
-        assertFalse(Files.exists(target().unitDir.resolve("demo.service")));
+        assertFalse(Files.exists(target().unitDir.resolve("xac.demo.service")));
         List<String> lines = Arrays.asList(buffer.toString("UTF-8").split("\n"));
         assertEquals(7, lines.size(), lines.toString());
         assertTrue(lines.get(0).startsWith("would "), lines.toString());
@@ -145,7 +145,7 @@ class ApplyRunnerTest {
     @Test
     void refusesToDeleteForeignEnvFile() throws IOException {
         Files.createDirectories(target().envDir);
-        Path envFile = target().envDir.resolve("demo.env");
+        Path envFile = target().envDir.resolve("xac.demo.env");
         Files.write(envFile, "OLD=1\n".getBytes(StandardCharsets.UTF_8));
         Files.createDirectories(target().unitDir);
         ApplyContext ctx = new ApplyContext(spec(true, Collections.<String, String>emptyMap()),
@@ -159,7 +159,7 @@ class ApplyRunnerTest {
                 buffer.toString("UTF-8"));
         assertTrue(Files.isRegularFile(envFile));
         assertEquals("OLD=1\n", read(envFile));
-        assertFalse(Files.exists(target().unitDir.resolve("demo.service")));
+        assertFalse(Files.exists(target().unitDir.resolve("xac.demo.service")));
     }
 
     @Test
@@ -191,7 +191,7 @@ class ApplyRunnerTest {
         assertTrue(runner.calls().isEmpty(), runner.calls().toString());
         assertTrue(Files.isDirectory(link));
         assertEquals("keep", read(link.resolve("keep.txt")));
-        assertFalse(Files.exists(target().unitDir.resolve("demo.service")));
+        assertFalse(Files.exists(target().unitDir.resolve("xac.demo.service")));
         try (DirectoryStream<Path> entries = Files.newDirectoryStream(root, "*.bak*")) {
             assertFalse(entries.iterator().hasNext(), "不应创建 .bak 备份");
         }

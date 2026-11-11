@@ -37,7 +37,7 @@ class StatusRunnerTest {
             "UnitFileState=enabled",
             "MainPID=1234",
             "ActiveEnterTimestamp=Mon 2026-11-10 19:00:00 CST",
-            "FragmentPath=/etc/systemd/system/demo.service",
+            "FragmentPath=/etc/systemd/system/xac.demo.service",
             "");
 
     private static final String SHOW_INACTIVE = String.join("\n",
@@ -47,7 +47,7 @@ class StatusRunnerTest {
             "UnitFileState=enabled",
             "MainPID=0",
             "ActiveEnterTimestamp=",
-            "FragmentPath=/etc/systemd/system/demo.service",
+            "FragmentPath=/etc/systemd/system/xac.demo.service",
             "");
 
     private static final String SHOW_NO_ACTIVE = String.join("\n",
@@ -57,7 +57,7 @@ class StatusRunnerTest {
             "UnitFileState=enabled",
             "MainPID=0",
             "ActiveEnterTimestamp=",
-            "FragmentPath=/etc/systemd/system/demo.service",
+            "FragmentPath=/etc/systemd/system/xac.demo.service",
             "");
 
     private SystemdTarget target() {
@@ -243,7 +243,7 @@ class StatusRunnerTest {
         StatusResult result = new StatusRunner().run(spec, target, runner);
 
         assertFalse(result.healthy(), result.format());
-        assertTrue(result.drift().contains("systemd: 无法查询 demo.service 的状态"),
+        assertTrue(result.drift().contains("systemd: 无法查询 xac.demo.service 的状态"),
                 result.drift().toString());
         assertFalse(result.drift().contains("未设置开机自启"), result.drift().toString());
         assertTrue(result.format().contains("auto-start: unknown"), result.format());

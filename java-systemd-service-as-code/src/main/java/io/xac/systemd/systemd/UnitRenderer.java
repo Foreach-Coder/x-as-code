@@ -54,7 +54,7 @@ public final class UnitRenderer {
         directives.add(new Directive() {
             @Override
             public String render(ServiceSpec s) {
-                return "SyslogIdentifier=" + s.name;
+                return "SyslogIdentifier=" + UnitNaming.PREFIX + s.name;
             }
         });
         directives.add(new Directive() {

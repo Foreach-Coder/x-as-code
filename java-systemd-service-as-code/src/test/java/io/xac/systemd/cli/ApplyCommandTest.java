@@ -77,7 +77,7 @@ class ApplyCommandTest {
     }
 
     private Path unitPath() {
-        return target().unitDir.resolve("demo.service");
+        return target().unitDir.resolve("xac.demo.service");
     }
 
     private void createTargetDirs() throws IOException {
@@ -150,7 +150,7 @@ class ApplyCommandTest {
         assertEquals(2, apply(false, runner));
 
         assertEquals(1, runner.calls().size(), runner.calls().toString());
-        assertEquals(Arrays.asList("systemctl", "show", "demo.service", SHOW_PROPERTY),
+        assertEquals(Arrays.asList("systemctl", "show", "xac.demo.service", SHOW_PROPERTY),
                 runner.calls().get(0));
         assertFalse(Files.exists(unitPath()));
         try (DirectoryStream<Path> entries = Files.newDirectoryStream(target().unitDir)) {

@@ -80,7 +80,7 @@ public final class StatusResult {
             }
         } else if (unitInstalled) {
             // 查询失败时不能把空 map 当成 disabled，只报告「没有观察到状态」。
-            drift.add("systemd: 无法查询 " + service + ".service 的状态");
+            drift.add("systemd: 无法查询 " + unitPath.getFileName() + " 的状态");
         }
         drift.addAll(linkProblems);
         return drift;
