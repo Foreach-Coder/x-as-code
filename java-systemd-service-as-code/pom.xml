@@ -31,6 +31,18 @@
       <version>5.10.2</version>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers</artifactId>
+      <version>1.19.8</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>1.19.8</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>
@@ -66,4 +78,34 @@
       </plugin>
     </plugins>
   </build>
+
+  <profiles>
+    <!-- 真 systemd 冒烟：需要 Docker 与本机镜像 xac-e2e:24.04（见 e2e/README.md）。
+         mvn test 不激活此 profile，单元测试保持不依赖 Docker。 -->
+    <profile>
+      <id>e2e</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-failsafe-plugin</artifactId>
+            <version>3.2.5</version>
+            <configuration>
+              <systemPropertyVariables>
+                <xac.build.dir>${project.build.directory}</xac.build.dir>
+              </systemPropertyVariables>
+            </configuration>
+            <executions>
+              <execution>
+                <goals>
+                  <goal>integration-test</goal>
+                  <goal>verify</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
 </project>
