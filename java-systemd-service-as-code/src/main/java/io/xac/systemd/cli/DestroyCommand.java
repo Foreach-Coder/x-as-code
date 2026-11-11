@@ -84,8 +84,7 @@ public final class DestroyCommand implements Callable<Integer> {
             out.println("  (无)");
         }
         Path workdir = spec.workdir == null ? spec.packageDir : spec.workdir;
-        out.println("保留: 包目录 " + spec.packageDir + "、工作目录 " + workdir
-                + "、.bak 备份与日志");
+        out.println("保留: 包目录 " + spec.packageDir + "、工作目录 " + workdir + "、日志");
     }
 
     private boolean confirm(String name) throws IOException {

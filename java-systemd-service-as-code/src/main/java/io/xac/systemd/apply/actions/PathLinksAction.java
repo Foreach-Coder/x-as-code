@@ -3,10 +3,6 @@ package io.xac.systemd.apply.actions;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
-import java.text.SimpleDateFormat;
-import java.util.Date;
 
 import io.xac.systemd.apply.Action;
 import io.xac.systemd.apply.ActionFailure;
@@ -47,23 +43,14 @@ public final class PathLinksAction implements Action {
         if (parent == null || !Files.isDirectory(parent)) {
             throw new ActionFailure("目标的父目录不存在: " + parent);
         }
+        // 目标不存在才建链接；已是正确的软链接则跳过；其余形态一律拒绝，绝不移动用户数据。
+        String problem = PathLinkGuard.checkTarget(link);
+        if (problem != null) {
+            throw new ActionFailure(problem);
+        }
         if (Files.isSymbolicLink(link.target)) {
-            if (Files.readSymbolicLink(link.target).equals(link.source)) {
-                return;
-            }
-            backup(link.target);
-        } else if (Files.exists(link.target)) {
-            backup(link.target);
+            return;
         }
         Files.createSymbolicLink(link.target, link.source);
-    }
-
-    private static void backup(Path target) throws IOException {
-        Path backup = Paths.get(target.toString() + ".bak");
-        if (Files.exists(backup)) {
-            String stamp = new SimpleDateFormat("yyyyMMddHHmmss").format(new Date());
-            backup = Paths.get(target.toString() + ".bak." + stamp);
-        }
-        Files.move(target, backup, StandardCopyOption.ATOMIC_MOVE);
     }
 }

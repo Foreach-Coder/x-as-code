@@ -2,6 +2,7 @@ package io.xac.systemd.spec;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -163,6 +164,46 @@ public final class PathLinkGuard {
             return "源目录不存在: " + source;
         }
         return null;
+    }
+
+    /**
+     * 只允许目标不存在，或目标已经是指向源的软链接；真实目录、普通文件、
+     * 指向别处的软链接、悬空软链接、FIFO/socket 等一律拒绝，交给人处理。
+     */
+    public static String checkTarget(PathLink link) {
+        if (Files.isSymbolicLink(link.target)) {
+            return pointsAtSource(link) ? null : refuseTarget(link.target);
+        }
+        if (Files.exists(link.target, LinkOption.NOFOLLOW_LINKS)) {
+            return refuseTarget(link.target);
+        }
+        return null;
+    }
+
+    private static String refuseTarget(Path target) {
+        return "目标已存在且不是指向源的软链接，请人工处理: " + target;
+    }
+
+    private static boolean pointsAtSource(PathLink link) {
+        Path raw;
+        try {
+            raw = Files.readSymbolicLink(link.target);
+        } catch (IOException e) {
+            return false;
+        }
+        Path parent = link.target.toAbsolutePath().getParent();
+        Path absolute = raw.isAbsolute() || parent == null
+                ? raw.toAbsolutePath().normalize()
+                : parent.resolve(raw).normalize();
+        Path source = link.source.toAbsolutePath().normalize();
+        if (absolute.equals(source)) {
+            return true;
+        }
+        try {
+            return absolute.toRealPath().equals(source.toRealPath());
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     private static List<Path> absoluteProtected() {

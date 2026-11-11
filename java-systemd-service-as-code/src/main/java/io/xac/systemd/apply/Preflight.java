@@ -27,6 +27,9 @@ public final class Preflight {
                 continue;
             }
             String problem = PathLinkGuard.checkSource(link);
+            if (problem == null) {
+                problem = PathLinkGuard.checkTarget(link);
+            }
             if (problem != null) {
                 out.add(new Violation("path-links[" + i + "]", problem));
             }
