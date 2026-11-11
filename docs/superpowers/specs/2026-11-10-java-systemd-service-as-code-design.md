@@ -158,7 +158,7 @@ public interface UnitRenderer { String render(ServiceSpec spec); }
 扩展动作必须永远是「追加」，不改主干。
 
 1. **解析层：自建 schema 表**。`FieldDef` 声明每个 section 允许的键、类型、转换器。
-   报错能给出 `runtime.opts[3] 应为字符串` 这种精确路径。加字段 = 表里加一行。
+   报错能给出 `runtime.opts[3] must be a string` 这种精确路径。加字段 = 表里加一行。
 2. **模型层：字段全可空 + Builder**。必填性归 Validator，构造函数不约束。
 3. **校验层：`List<Validator>`**。规范 §6 的每条规则一个类，加规则 = 加类 + 注册一行。
 4. **渲染层：`List<Directive>`**。每条 unit 指令一个类，返回 `Optional<String>`。
@@ -305,7 +305,7 @@ xac destroy [<package-dir>] [--dry-run] [--yes]
 **静态校验**（只看 yaml 文本，与规范 §6 一一对应）
 
 5. 顶层是映射；`name`、`artifact.jar`、`runtime.java`、`runtime.opts` 齐备
-6. 无未知字段、无类型不符（报精确路径，如 `runtime.opts[3] 应为字符串`）
+6. 无未知字段、无类型不符（报精确路径，如 `runtime.opts[3] must be a string`）
 7. `name` 只含字母数字 `-` `_` `.` `:`，不以 `.` 开头，不含 `/`，且不以 `xac.` 开头（不区分大小写；工具会自动加该前缀）
 8. `env` 键名合法、值不含换行、键不重复
 9. `path-links` 每项按最后一个冒号切成两段非空，目标以 `/` 开头
@@ -378,7 +378,7 @@ xac apply [<package-dir>] [--dry-run]
 | 已是指向正确源的软链接 | 跳过 |
 | 真实目录（空或非空）、普通文件、指向别处的软链接、悬空软链接、FIFO/socket 等 | **拒绝**：整次 apply 退 2，不移动、不删除、不覆盖任何东西，交给人处理 |
 
-拒绝时的报错是 `目标已存在且不是指向源的软链接，请人工处理: <目标>`。实现上彻底移除了
+拒绝时的报错是 `target exists and is not a symlink to source, handle it manually: <目标>`。实现上彻底移除了
 `<目标>.bak` 备份与 `Files.move` 用户数据的时间戳逻辑——xac 不再替用户决定旧目录/旧文件的去留。
 
 **护栏先于动作**：目标落在受保护位置（§6.1 第 10 条）、与源互相包含（第 11 条），或目标已存在
@@ -388,7 +388,7 @@ xac apply [<package-dir>] [--dry-run]
 
 拒绝发生在改动之前，原路径原样保留；人工处理掉障碍后重新 apply 即可。
 
-**失败语义：不自动回滚。** 停在失败的动作，输出诊断，退出码 1。已完成的部分保留——
+**失败语义：不自动回滚。** 停在失败的动作，输出 `failed: ...` 诊断，退出码 1。已完成的部分保留——
 下次 apply 会重新覆盖一遍。
 
 **已知代价**：每次 apply 都会重启服务，即产生短暂停机；CI 每次触发也会重启。
@@ -429,11 +429,11 @@ drift:       none
 
 **「正在运行」怎么判**：读 `ActiveState`/`SubState`。不是 `active` 就记一条漂移（`systemctl stop`
 之后必须能看出来，否则 status 会对着一个停掉的服务报绿灯）。`systemctl show` 本身失败时记
-`systemd: 无法查询 xac.<name>.service 的状态`；查询成功但没有 `ActiveState` 字段时不判漂移——观测不到
+`systemd: cannot query xac.<name>.service`；查询成功但没有 `ActiveState` 字段时不判漂移——观测不到
 不等于观测到「没在跑」。
 
 **env 不可读不算漂移**：env 文件是 0600 root，非 root 跑 status 读不到内容。这种情况打
-`env: (无法校验：需要 root 权限)`，不记漂移，退出码只看其余项——否则健康机器上的非 root 巡检
+`env: (cannot verify: root required)`，不记漂移，退出码只看其余项——否则健康机器上的非 root 巡检
 永远是红的。文件不存在（`MISSING`）仍然算漂移。
 
 ### 6.4 logs
@@ -457,18 +457,18 @@ journalctl -u xac.<name>.service --no-pager -n <N> --follow    # -f 时，走 ru
 xac destroy [<package-dir>] [--dry-run] [--yes]
 ```
 
-需要 root。目标：让这个服务在本机上不存在。默认先打印将删除的清单并要求输入 `y` 确认；
+需要 root。目标：让这个服务在本机上不存在。默认先打印 `will remove:` 清单与 `keep:` 项，并要求输入 `y` 确认；
 `--yes` 跳过（CI 用）；非交互环境又没给 `--yes` 时退出码 2。
 
 **先判归属，再动手**：只有当 `/etc/systemd/system/xac.<name>.service` 是普通文件（lstat，不跟随链接）
-且首行是管理头时，才执行 `stop`/`disable`/`rm-unit`。其余情形一律跳过这三个动作并警告，然后继续
+且首行是管理头时，才执行 `stop`/`disable`/`rm-unit`。其余情形一律跳过这三个动作并输出 `warning: ...`，然后继续
 删 env、reload、删链接：
 
 | unit 路径现状 | stop/disable/rm-unit |
 |---|---|
 | 管理头 + 普通文件 | 执行 |
 | 普通文件但没有管理头（别人的 unit） | 跳过 + 警告 |
-| 不存在（vendor unit 在 `/usr/lib/systemd/system`） | 跳过 + 警告：`同名 unit 不由 xac 管理，未停止；如仍有进程请手动处理` |
+| 不存在（vendor unit 在 `/usr/lib/systemd/system`） | 跳过 + 警告：`unit with same name is not managed by xac, not stopped; stop it manually if a process is still running` |
 | 目录、dangling 链接等非普通文件 | 跳过 + 警告 |
 
 这条闸门的代价要说清楚：如果 unit 文件被手工删掉了而进程还在，destroy 会退 0 但不杀进程——警告
@@ -511,13 +511,16 @@ systemd 起不来时（`degraded`），reload 失败也挡不住「文件已经�
 
 `2` 可以安全重试，`1` 需要人看一眼。
 
-`logs` 的两种失败都退 2：`-n` 不是正整数，以及 `journalctl` 起不来（这台机器没有 journalctl）。
+`logs` 的两种失败都退 2：`-n` 非正整数（输出 `-n must be a positive integer`），以及 `journalctl` 起不来（这台机器没有 journalctl）。
 理由同「什么都没改动」——用户没拿到日志，但机器状态没变，重跑无害。
 
 ### 6.7 输出格式
 
 结果对象（`ApplyResult` / `StatusResult` / `DestroyResult`）与打印分离，将来加 `--json` 只需新增
 Formatter。v1 不实现。
+
+运行时输出（stdout/stderr、`--help`、校验与警告）统一英文 ASCII，便于 `LANG` 为空的服务器与 CI
+日志；代码注释与文档正文仍可用中文。
 
 ## 7. 测试策略
 
@@ -604,7 +607,7 @@ CMD：本机缓存的镜像元数据可能是 `ENTRYPOINT ["/bin/sh"]`，不覆�
 
 - 校验失败：列出**全部**违规（不只第一条），每条含字段路径、期望、实际
 - 执行失败：打印失败的命令、退出码、stderr 摘要，并给出下一步建议
-- 非 root：直接提示「apply / destroy 需要 root 权限」（退出码 2，什么都没改）
+- 非 root：直接提示 `apply / destroy require root`（退出码 2，什么都没改）
 
 ## 10. 术语
 

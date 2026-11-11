@@ -30,6 +30,7 @@
   打包用 maven-shade-plugin，e2e 用 maven-failsafe-plugin。不新增其他依赖，不追大版本。
 - 外部命令一律 `ProcessBuilder` + `List<String>` 传 argv，**不经过 shell**，不做字符串拼接。
 - 渲染必须确定性：同样的 `xac.yaml` 产出逐字节相同的 unit 与 env 文件。
+- 运行时输出（stdout/stderr、`--help`、校验与警告）统一英文 ASCII；注释与文档正文不限。
 
 ## 命令
 
