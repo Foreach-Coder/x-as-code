@@ -58,6 +58,20 @@ class ValidatorsTest {
     }
 
     @Test
+    void rejectsNameWithXacPrefix() {
+        List<Violation> out = ValidationRunner.run(base().name("xac.demo").build());
+        assertEquals(1, out.size(), messages(out).toString());
+        assertEquals("name: 不要以 xac. 开头，工具会自动加该前缀", out.get(0).toString());
+    }
+
+    @Test
+    void rejectsNameWithXacPrefixCaseInsensitively() {
+        List<Violation> out = ValidationRunner.run(base().name("XAC.demo").build());
+        assertEquals(1, out.size(), messages(out).toString());
+        assertEquals("name: 不要以 xac. 开头，工具会自动加该前缀", out.get(0).toString());
+    }
+
+    @Test
     void rejectsBadEnvKeyAndNewlineValue() {
         Map<String, String> env = new LinkedHashMap<String, String>();
         env.put("1BAD", "x");
