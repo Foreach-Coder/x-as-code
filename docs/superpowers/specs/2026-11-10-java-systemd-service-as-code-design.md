@@ -326,6 +326,17 @@ xac destroy [<package-dir>] [--dry-run] [--yes]
 16. `runtime.java` 存在且可执行
 17. `path-links` 的源存在
 18. `path-links` 的目标要么不存在，要么已是指向源的软链接；其余形态一律拒绝，交给人处理
+19. 同名 unit 不是由 systemd 提供的：`systemctl show <name>.service --property=LoadState,FragmentPath`
+    查一次；查询本身失败直接拒绝；`FragmentPath` 非空且不等于本次要写的 unit 路径（两边都
+    `toAbsolutePath().normalize()` 后比较）即视为同名 unit 已存在，请人处理；`LoadState=not-found`
+    或 `FragmentPath` 为空则放行
+20. 已存在的 unit 文件（`<unit 目录>/<name>.service`）必须是普通文件且首行是 xac 管理头，
+    否则拒绝覆盖
+21. 已存在的 env 文件（`<env 目录>/<name>.env`）必须是普通文件且首行是 xac 管理头，
+    否则拒绝覆盖；`env` 为空时的删除同样受这条约束
+
+第 19-21 条是归属与影子检查，**只在 apply（含 `--dry-run`）检查**，且发生在任何写入之前。
+`destroy` 另有自己的一套：只对普通文件且带管理头的 unit 执行 `stop`/`disable` 并删除。
 
 第 17、18 条**只在 apply 检查**。`status`、`logs`、`destroy` 要能在包目录内容已经没了的时候继续工作
 （典型场景：先把产物删了，再拆服务）。
@@ -461,6 +472,9 @@ xac destroy [<package-dir>] [--dry-run] [--yes]
 
 这条闸门的代价要说清楚：如果 unit 文件被手工删掉了而进程还在，destroy 会退 0 但不杀进程——警告
 会写出来，但不会替你收拾。反过来，同名 vendor unit（如 `ssh`）永远不会被误停。
+
+env 文件用同一把尺子：只有 `/etc/xac/<name>.env` 是普通文件且首行是 xac 管理头时才删除，
+其余情形跳过并警告，绝不覆盖或删除别人的文件。
 
 确认提示列出**将要删除**的项和**确认保留**的项（包目录、workdir、日志）。
 
