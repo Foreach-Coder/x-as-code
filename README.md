@@ -1,4 +1,4 @@
-# xac（x-as-code）
+﻿# xac（x-as-code）
 
 用代码定义和管理一切。仓库里每个子项目都是「把某类基础设施写成代码」：
 
@@ -34,7 +34,7 @@ sudo java -jar xac.jar apply .
 
 ```bash
 mvn -f java-systemd-service-as-code/pom.xml -DskipTests package
-# → java-systemd-service-as-code/target/java-systemd-service-cli-0.1.0-SNAPSHOT.jar
+# → java-systemd-service-as-code/target/java-systemd-service-cli-0.1.0.jar
 ```
 
 ### 2. 在目标机上准备包目录

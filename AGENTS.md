@@ -1,4 +1,4 @@
-# AGENTS.md
+﻿# AGENTS.md
 
 本文件是本仓库的长期约定，对任何在本仓库工作的 agent 生效（人同样适用）。
 
@@ -40,7 +40,7 @@ mvn -f java-systemd-service-as-code/pom.xml test
 
 # 打包成 fat jar
 mvn -f java-systemd-service-as-code/pom.xml -DskipTests package
-#   → java-systemd-service-as-code/target/java-systemd-service-cli-0.1.0-SNAPSHOT.jar
+#   → java-systemd-service-as-code/target/java-systemd-service-cli-0.1.0.jar
 
 # 真 systemd e2e（Testcontainers；需要 Docker + 镜像 xac-e2e:24.04，见 e2e/README.md）
 mvn -f java-systemd-service-as-code/pom.xml -Pe2e verify
