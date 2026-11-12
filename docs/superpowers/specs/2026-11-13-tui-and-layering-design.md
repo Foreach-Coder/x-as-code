@@ -99,7 +99,6 @@ public final class ServicePackage {
     public ApplyOutcome apply(boolean dryRun) throws InvalidSpecException;
     public DestroyOutcome destroyPlan() throws InvalidSpecException;
     public DestroyOutcome destroy(boolean dryRun) throws InvalidSpecException;
-    public LogStream logs();                       // Task 6 落地
 }
 ```
 
@@ -112,7 +111,8 @@ public final class ServicePackage {
 - `apply(true)`：预检 + 七步描述，不落盘、不执行命令；`apply(false)`：预检 + 执行，首个失败即停。
 - `destroyPlan`：只读计划，预检后只读文件系统、零动作，供确认面板使用；TUI 取 destroy 计划必须用它，**不要**用 `destroy(true)` 代替。
 - `destroy(true/false)`：返回删除清单、保留项、步骤结果、警告；`Stop/Disable/Reload` 的失败记入 `warnings` 而不是中止。
-- `logs()`：返回 `LogStream`，由调用方决定 `start(lines, sink)` 与 `close()`。日志门面在 Task 6 以 `LogStream logs()` 落地，本阶段不预埋。
+- `destroyPlan(DestroyRunner)` / `destroy(boolean, DestroyRunner)`：供 CLI/测试注入动作序列；生产默认用无参重载。
+- 日志门面在 Task 6 以 `LogStream logs(int lines)` 落地，本阶段不预埋。
 
 返回类型（全部为不可变数据）：
 

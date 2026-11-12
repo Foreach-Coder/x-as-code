@@ -111,6 +111,7 @@ public final class ServicePackage {
         return destroyPlan(new DestroyRunner());
     }
 
+    /** 测试/入口层注入用，非稳定 API。 */
     public DestroyOutcome destroyPlan(DestroyRunner destroyRunner) throws InvalidSpecException {
         requirePreflight(Preflight.checkDestroy(probe));
         return destroyRunner.plan(spec, target);
@@ -120,7 +121,7 @@ public final class ServicePackage {
         return destroy(dryRun, new DestroyRunner());
     }
 
-    /** 唯一编排入口：预检 + `DestroyRunner.run`；runner 参数只用于注入测试替身。 */
+    /** 唯一编排入口：预检 + `DestroyRunner.run`。测试/入口层注入用，非稳定 API。 */
     public DestroyOutcome destroy(boolean dryRun, DestroyRunner destroyRunner)
             throws InvalidSpecException {
         requirePreflight(Preflight.checkDestroy(probe));
