@@ -31,12 +31,15 @@ import java.util.regex.Pattern;
  * {@code lifecycle} 恒写四键，未设置的值用 {@link Lifecycle} 的文档默认值。</p>
  *
  * <p>标量按需加双引号：空串、首尾空白、含 {@code :} 或 {@code #} 或 {@code ${}、含控制字符、
- * 形似 YAML 布尔/空值/数字/日期、或以 YAML 指示符开头时加引号，并转义 {@code \\}、
- * {@code "}、换行、制表符等控制字符；不使用 block 标量。这样同一个值读回
- * {@link SpecLoader} 后仍是同一个字符串。</p>
+ * 形似 YAML 布尔/空值/数字/日期、以 YAML 指示符开头、或以 {@code <<}（YAML merge key 形态）
+ * 开头时加引号，并转义 {@code \\}、{@code "}、换行、制表符等控制字符；不使用 block 标量。
+ * C0（{@code < 0x20}）、DEL（{@code 0x7f}）与 C1（{@code 0x80–0x9f}，含 NEL U+0085）一律写成
+ * {@code \xNN}，LINE/PARAGRAPH SEPARATOR（U+2028/U+2029）写成 {@code \\uNNNN}。这样同一个值
+ * 读回 {@link SpecLoader} 后仍是同一个字符串。</p>
  *
  * <p>路径（{@code artifact.jar}、{@code workdir}）相对包目录渲染，分隔符统一成 {@code /}；
- * 与包目录不在同一个根（例如 Windows 上换了盘符）时退回绝对路径。</p>
+ * 与包目录同一目录时渲染成 {@code .}；与包目录不在同一个根（例如 Windows 上换了盘符）时
+ * 退回绝对路径。</p>
  */
 public final class SpecWriter {
 
@@ -152,9 +155,14 @@ public final class SpecWriter {
      * <p>父目录必须已存在，否则抛 {@link IOException}，目标文件保持原样。失败时临时文件被
      * 删除，目标文件不会被部分写入。这里不做备份，也不做 diff/确认——那是编辑器的职责。</p>
      *
+     * <p>如果 {@code file} 是软链接，写入的是链接指向的真实文件（{@link Path#toRealPath()}），
+     * 链接本身保持不变；解析失败（悬空链接、无权限）时退回普通替换语义。文件系统不支持
+     * 原子移动时不会静默降级：抛 {@link IOException}，消息以
+     * {@code atomic move not supported: } 开头，避免出现「看似成功、实际非原子」的写入。</p>
+     *
      * @param file 目标文件（通常是 {@code <package>/xac.yaml}）
      * @param yaml 完整的新内容
-     * @throws IOException 父目录不存在、临时文件无法创建或最终替换失败
+     * @throws IOException 父目录不存在、临时文件无法创建、原子移动不受支持或最终替换失败
      */
     public static void save(Path file, String yaml) throws IOException {
         if (file == null) {
@@ -163,7 +171,7 @@ public final class SpecWriter {
         if (yaml == null) {
             throw new IllegalArgumentException("yaml is null");
         }
-        Path target = file.toAbsolutePath().normalize();
+        Path target = resolveSymlink(file.toAbsolutePath().normalize());
         Path dir = target.getParent();
         if (dir == null) {
             throw new IOException("no parent directory: " + target);
@@ -181,7 +189,8 @@ public final class SpecWriter {
                 Files.move(temp, target,
                         StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             } catch (AtomicMoveNotSupportedException e) {
-                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+                // 不回退到非原子的普通 move：静默降级会让「原子写」的承诺失效。
+                throw new IOException("atomic move not supported: " + target, e);
             }
             moved = true;
         } finally {
@@ -212,7 +221,7 @@ public final class SpecWriter {
         }
     }
 
-    /** 相对包目录的路径文本，分隔符统一成 {@code /}；跨根时退回绝对路径。 */
+    /** 相对包目录的路径文本，分隔符统一成 {@code /}；同一目录为 {@code .}，跨根时用绝对路径。 */
     private static String relativePath(Path path, Path packageDir) {
         if (path == null) {
             return "";
@@ -223,15 +232,31 @@ public final class SpecWriter {
         if (root != null) {
             try {
                 Path relative = root.relativize(target);
-                if (relative.toString().length() > 0) {
-                    text = relative.toString();
-                }
+                // 空路径表示两者是同一个目录（例如 workdir: .）；不能退回绝对路径，
+                // 否则会把机器相关的包目录写进 xac.yaml。
+                text = relative.toString().isEmpty() ? "." : relative.toString();
             } catch (IllegalArgumentException e) {
                 // 不同根（Windows 盘符）无法相对化，用绝对路径。
                 text = target.toString();
             }
         }
         return text.replace('\\', '/');
+    }
+
+    /**
+     * 软链接写到链接目标而不是替换链接本身；解析失败时保留原路径，走普通替换语义。
+     */
+    private static Path resolveSymlink(Path target) {
+        if (!Files.isSymbolicLink(target)) {
+            return target;
+        }
+        try {
+            return target.toRealPath();
+        } catch (IOException e) {
+            return target;
+        } catch (SecurityException e) {
+            return target;
+        }
     }
 
     /**
@@ -265,10 +290,11 @@ public final class SpecWriter {
                     quoted.append("\\t");
                     break;
                 default:
-                    if (c < 0x20 || c == 0x7f) {
+                    if (c < 0x20 || c == 0x7f || isC1Control(c)) {
+                        // C0/DEL/C1（含 NEL）在 YAML 里要么非法、要么被当成换行；统一转成 \xNN。
                         quoted.append("\\x").append(HEX[(c >> 4) & 0xf]).append(HEX[c & 0xf]);
                     } else if (isUnicodeLineBreak(c)) {
-                        // YAML 把 NEL/LS/PS 当换行；plain 标量里会被折叠成空格，必须转义。
+                        // LS/PS 在 plain 标量里会被折叠成空格，必须转义。
                         quoted.append("\\u")
                                 .append(HEX[(c >> 12) & 0xf]).append(HEX[(c >> 8) & 0xf])
                                 .append(HEX[(c >> 4) & 0xf]).append(HEX[c & 0xf]);
@@ -297,7 +323,16 @@ public final class SpecWriter {
         if (startsWithIndicator(raw)) {
             return true;
         }
+        if (isMergeKeyLike(raw)) {
+            // YAML 的 merge key：未加引号的 `<<` 会被读成 merge tag，而不是字符串。
+            return true;
+        }
         return hasControlCharacter(raw);
+    }
+
+    /** {@code <<} 及其同类形态（以 {@code <<} 开头）作为 plain 标量会被解析成 merge key。 */
+    private static boolean isMergeKeyLike(String raw) {
+        return raw.trim().startsWith("<<");
     }
 
     private static boolean startsWithIndicator(String raw) {
@@ -315,16 +350,21 @@ public final class SpecWriter {
     private static boolean hasControlCharacter(String raw) {
         for (int i = 0; i < raw.length(); i++) {
             char c = raw.charAt(i);
-            if (c < 0x20 || c == 0x7f || isUnicodeLineBreak(c)) {
+            if (c < 0x20 || c == 0x7f || isC1Control(c) || isUnicodeLineBreak(c)) {
                 return true;
             }
         }
         return false;
     }
 
-    /** NEL (U+0085)、LINE SEPARATOR (U+2028)、PARAGRAPH SEPARATOR (U+2029)。 */
+    /** C1 控制字符 U+0080–U+009F；其中 U+0085 (NEL) 也属于换行。 */
+    private static boolean isC1Control(char c) {
+        return c >= 0x80 && c <= 0x9f;
+    }
+
+    /** LINE SEPARATOR (U+2028)、PARAGRAPH SEPARATOR (U+2029)。 */
     private static boolean isUnicodeLineBreak(char c) {
-        return c == '\u0085' || c == '\u2028' || c == '\u2029';
+        return c == '\u2028' || c == '\u2029';
     }
 
     private static void setReadableMode(Path temp) throws IOException {

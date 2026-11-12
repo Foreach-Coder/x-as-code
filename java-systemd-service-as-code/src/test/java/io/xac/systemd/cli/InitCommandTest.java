@@ -81,6 +81,7 @@ class InitCommandTest {
         assertTrue(content.contains("java: /usr/bin/java"), content);
         assertTrue(content.contains("# opts:"), content);
         assertTrue(content.contains("# path-links:"), content);
+        assertTrue(content.contains("timeout-stop-sec: 60"), content);
         assertTrue(content.endsWith("\n"), "template should end with a newline");
     }
 
@@ -96,6 +97,8 @@ class InitCommandTest {
         assertTrue(violations.isEmpty(), "violations: " + violations);
         assertEquals("demo", parsed.spec.name);
         assertEquals(0, parsed.spec.opts.size());
+        assertEquals(60, parsed.spec.lifecycle.timeoutStopSec.intValue(),
+                "template must match the documented default of xac-yaml-spec.md");
     }
 
     @Test

@@ -52,4 +52,4 @@ lifecycle:
   auto-start: true
   restart: on-failure
   restart-sec: 5
-  timeout-stop-sec: 30
+  timeout-stop-sec: 60

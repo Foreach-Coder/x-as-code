@@ -61,6 +61,16 @@ class SpecWriterTest {
         throw new AssertionError("no line starting with [" + prefix + "] in:\n" + yaml);
     }
 
+    private static int count(String haystack, String needle) {
+        int count = 0;
+        int index = haystack.indexOf(needle);
+        while (index >= 0) {
+            count++;
+            index = haystack.indexOf(needle, index + needle.length());
+        }
+        return count;
+    }
+
     private static boolean isPosix() {
         return java.nio.file.FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
     }
@@ -259,6 +269,24 @@ class SpecWriterTest {
     }
 
     @Test
+    void rendersThePackageDirItselfAsDot() {
+        String yaml = SpecWriter.render(builder()
+                .name("demo")
+                .jar("app.jar")
+                .java("/usr/bin/java")
+                .workdir(".")
+                .build());
+
+        assertTrue(yaml.contains("\nworkdir: .\n"), yaml);
+        assertFalse(yaml.contains(pkg.toAbsolutePath().normalize().toString().replace('\\', '/')), yaml);
+
+        SpecLoader.Result loaded = load(yaml);
+        assertTrue(loaded.violations.isEmpty(), loaded.violations.toString());
+        assertEquals(pkg.toAbsolutePath().normalize(), loaded.spec.workdir);
+        assertEquals(yaml, SpecWriter.render(loaded.spec));
+    }
+
+    @Test
     void writesExplicitLifecycleValues() {
         String yaml = SpecWriter.render(builder()
                 .name("demo")
@@ -293,6 +321,8 @@ class SpecWriterTest {
                 {"#x", "\"#x\""},
                 {"x#y", "\"x#y\""},
                 {"a:", "\"a:\""},
+                {"<<", "\"<<\""},
+                {"<<foo", "\"<<foo\""},
                 {"%percent", "\"%percent\""},
                 {"@at", "\"@at\""},
                 {" leading", "\" leading\""},
@@ -354,6 +384,33 @@ class SpecWriterTest {
     }
 
     @Test
+    void quotesMergeKeyLikeScalarsEverywhere() {
+        String yaml = SpecWriter.render(builder()
+                .name("demo")
+                .description("<<")
+                .jar("app.jar")
+                .java("/usr/bin/java")
+                .opts(Arrays.asList("<<"))
+                .env(map("<<", "<<"))
+                .properties(map("<<", "<<"))
+                .build());
+
+        assertEquals("description: \"<<\"", lineOf(yaml, "description: "));
+        assertTrue(yaml.contains("\n    - \"<<\"\n"), yaml);
+        assertEquals(2, count(yaml, "\n  \"<<\": \"<<\"\n"),
+                "env and properties keys/values must both be quoted in:\n" + yaml);
+        assertFalse(yaml.contains("\n  <<:"), yaml);
+
+        // 未加引号的 << 会被 snakeyaml 当成 merge tag；引号后必须仍是普通字符串。
+        SpecLoader.Result loaded = load(yaml);
+        assertTrue(loaded.violations.isEmpty(), loaded.violations.toString());
+        assertEquals("<<", loaded.spec.description);
+        assertEquals(Collections.singletonList("<<"), loaded.spec.opts);
+        assertEquals("<<", loaded.spec.env.get("<<"));
+        assertEquals("<<", loaded.spec.properties.get("<<"));
+    }
+
+    @Test
     void escapesControlCharactersInsteadOfUsingBlockScalars() {
         String yaml = renderWithEnvValue("K", "a\nb\tc");
         assertEquals("  K: \"a\\nb\\tc\"", lineOf(yaml, "  K: "));
@@ -371,10 +428,10 @@ class SpecWriterTest {
     }
 
     @Test
-    void escapesUnicodeLineBreaksSoTheySurviveARoundTrip() {
+    void escapesC1AndUnicodeLineBreaksSoTheySurviveARoundTrip() {
         String value = "a\u0085b\u2028c\u2029d";
         String yaml = renderWithEnvValue("K", value);
-        assertEquals("  K: \"a\\u0085b\\u2028c\\u2029d\"", lineOf(yaml, "  K: "));
+        assertEquals("  K: \"a\\x85b\\u2028c\\u2029d\"", lineOf(yaml, "  K: "));
 
         SpecLoader.Result loaded = load(SpecWriter.render(builder()
                 .name("demo")
@@ -384,6 +441,36 @@ class SpecWriterTest {
                 .build()));
         assertTrue(loaded.violations.isEmpty(), loaded.violations.toString());
         assertEquals(value, loaded.spec.env.get("K"));
+    }
+
+    @Test
+    void escapesC1ControlRangeSoLoaderAcceptsIt() {
+        String value = "a\u0080b\u0081c\u009fd";
+        String yaml = renderWithEnvValue("K", value);
+        assertEquals("  K: \"a\\x80b\\x81c\\x9fd\"", lineOf(yaml, "  K: "));
+
+        SpecLoader.Result loaded = load(SpecWriter.render(builder()
+                .name("demo")
+                .jar("app.jar")
+                .java("/usr/bin/java")
+                .env(map("K", value))
+                .build()));
+        assertTrue(loaded.violations.isEmpty(), loaded.violations.toString());
+        assertEquals(value, loaded.spec.env.get("K"));
+    }
+
+    @Test
+    void escapesDelAndRemainingC1AsHex() {
+        String[][] cases = {
+                {"\u007f", "\"\\x7f\""},
+                {"\u0082", "\"\\x82\""},
+                {"\u009e", "\"\\x9e\""}
+        };
+        for (String[] c : cases) {
+            String yaml = renderWithEnvValue("K", c[0]);
+            assertEquals("  K: " + c[1], lineOf(yaml, "  K: "),
+                    "unexpected rendering for U+" + Integer.toHexString(c[0].charAt(0)));
+        }
     }
 
     // ------------------------------------------------------------- round trip
@@ -500,6 +587,25 @@ class SpecWriterTest {
         Object after = Files.getAttribute(target, "unix:ino");
         assertNotEquals(before, after, "atomic move should install a new inode");
         assertEquals("new\n", new String(Files.readAllBytes(target), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void saveFollowsSymlinkAndKeepsTheLink() throws IOException {
+        Path real = pkg.resolve("real.yaml");
+        Files.write(real, "old\n".getBytes(StandardCharsets.UTF_8));
+        Path link = pkg.resolve("xac.yaml");
+        try {
+            Files.createSymbolicLink(link, real.getFileName());
+        } catch (IOException | UnsupportedOperationException | SecurityException e) {
+            assumeTrue(false, "symlinks are not supported here: " + e);
+        }
+        assertEquals(real.getFileName(), Files.readSymbolicLink(link));
+
+        SpecWriter.save(link, "new\n");
+
+        assertTrue(Files.isSymbolicLink(link), "save must not replace the symlink itself");
+        assertEquals(real.getFileName(), Files.readSymbolicLink(link));
+        assertEquals("new\n", new String(Files.readAllBytes(real), StandardCharsets.UTF_8));
     }
 
     @Test
