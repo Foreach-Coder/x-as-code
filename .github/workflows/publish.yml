@@ -113,6 +113,10 @@ jobs:
           echo "wrapper reports version: $version"
           test "$version" = "${TAG#v}"
 
+          # launcher help lists the shell-side commands too
+          "$root/bin/java-systemd-service-cli" --help | grep -q 'install'
+          "$root/bin/java-systemd-service-cli" --help | grep -q 'uninstall'
+
           # install/uninstall: link into PATH, verify through PATH, then remove it
           "$root/bin/java-systemd-service-cli" install --dry-run | grep -q 'would link'
           sudo "$root/bin/java-systemd-service-cli" install
