@@ -2,3 +2,5 @@
 *.sh text eol=lf
 Dockerfile text eol=lf
 *.md text eol=lf
+# 入口脚本没有扩展名，单独固定 LF，避免 Windows 检出后把 CRLF 打进 tar.gz
+java-systemd-service-as-code/src/main/scripts/* text eol=lf
