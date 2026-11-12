@@ -41,7 +41,10 @@
 代码分三层，依赖只能向下：
 
 - **入口层**：`cli`（picocli 命令、文案、退出码）与 `tui`（Lanterna 画面、键位、视图模型）。
-  两者都只依赖 `core`；`cli` 与 `tui` 之间零依赖。
+  `tui` 只依赖 `core`，不得 import `cli`；展示时可直接读 `spec` / `status` 等低层的不可变结果
+  类型（如 `StatusResult`），但 systemd 动作编排只能经 `core` / `apply`。`cli` 允许 import `tui`，
+  仅限 `RootCommand` 注册 `tui` 子命令这一处（picocli 必需），不调用 TUI 的渲染与视图代码；
+  除此之外两层互不依赖。
 - **门面层**：`core`。`ServicePackage` 是唯一门面，只返回数据与英文事实描述；
   不出现 `System.out`/`PrintStream`、退出码或中文用户文案。`core` 只依赖
   `spec`、`systemd`、`exec`、`apply`、`status`、`logs`。
@@ -80,9 +83,11 @@ mvn -f java-systemd-service-as-code/pom.xml -Pe2e verify
 ```
 
 TUI 测试不启动真实终端：单测通过 `Display` / `KeySource` 抽象注入假实现（见
-`tui/RecordingDisplay`、`tui/ScriptedKeySource`），Lanterna 适配层用 `DefaultVirtualTerminal`
-验证，不需要 TTY。e2e 里的 `tui` 冒烟只验证非 TTY 退 2
-（`SmokeIT#tuiRefusesToStartWithoutATty`），不做真实 PTY 全屏驱动。
+`tui/RecordingDisplay`、`tui/ScriptedKeySource`）；Lanterna 适配层另用 `LanternaDisplayTest`
+（动态代理 + `RecordingScreen`）与 `LanternaKeySourceTest`（匿名 `InputProvider`）验证，
+不需要 TTY。e2e 里的 `tui` 冒烟只验证非 TTY 退 2
+（`SmokeIT#tuiRefusesToStartWithoutATty`），不做真实 PTY 全屏驱动；
+Lanterna 3.1.5 没有 `terminfo/` 资源，也不添加 terminfo 冒烟。
 
 ## 安全语义（改代码前先读）
 

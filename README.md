@@ -150,7 +150,7 @@ sudo java-systemd-service-cli destroy . -y     # 非交互环境用 -y
 
 ## TUI
 
-`xac tui` 在终端里提供状态面板、动作确认和 `xac.yaml` 行编辑，适合 SSH 上快速查看和操作。
+`java-systemd-service-cli tui <package-dir>` 在终端里提供状态面板、动作确认和 `xac.yaml` 行编辑，适合 SSH 上快速查看和操作。
 
 ```bash
 sudo java-systemd-service-cli tui /opt/demo   # 可执行 apply / restart / destroy
@@ -173,13 +173,13 @@ stderr 打印 `tui requires an interactive terminal` 并退出 2；`xac.yaml` �
 | `process` | `systemctl show` 的 `ActiveState` 原值，或 `unknown` | `active` / `inactive` / `failed` / … |
 | `links` | `ok` / `problems` | `path-links` 全部正常 / 有问题 |
 
-`systemctl show` 查询失败时四行都是 `unknown`，底部 notice 给出原因。
+`systemctl show` 查询失败时四行都是 `unknown`，失败原因显示在 `process` 行的详情里（不是底部 notice）。
 CLI `status` 的 `(in sync)` / `(missing)` / `(cannot verify: root required)` 描述的是同一批事实；
 TUI 里对应的写法是 `in sync` / `missing` / `cannot check`。
 
-非 root 时标题栏是 `not root`：`a` / `r` / `d` 面板仍可打开并显示计划，但只显示 `requires root`，
-`y` 不会执行（只读）；状态、日志和编辑仍可用。systemd 不可达时动作键不生效，notice 提示
-`actions disabled: systemd is not reachable`。
+非 root 时标题栏是 `not root`：`a` / `r` / `d` 面板仍可打开，但不展示计划，只显示一行
+`requires root`，`y` 不会执行（只读）；状态、日志和编辑仍可用。systemd 不可达时动作键不生效，
+notice 提示 `actions disabled: systemd is not reachable`。
 
 日志区默认在终端高度 ≥ 20 行时显示，来源是 `journald` 或 `xac.yaml` 的 `logs.file`。
 
@@ -198,7 +198,7 @@ TUI 里对应的写法是 `in sync` / `missing` / `cannot check`。
 | `?` | 帮助面板尚未实现，目前只显示 notice `help is not implemented yet` |
 | `q` / `Esc` / `Ctrl-C` | 退出 |
 
-动作在当前进程的前台线程里执行，底部显示 `running...`，完成后自动刷新；**不提供 detached 模式**。
+动作在后台 daemon 线程里执行，底部显示 `running...`，完成后自动刷新；**不提供 detached 模式**。
 执行期间按 `q` / `Esc` / `Ctrl-C` 会放弃等待并退出（当前这条外部命令可能跑完，剩余步骤不会再执行，
 需要重新执行 `apply` / `destroy`）。
 

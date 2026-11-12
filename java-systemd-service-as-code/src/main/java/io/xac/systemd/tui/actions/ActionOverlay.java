@@ -69,7 +69,7 @@ public final class ActionOverlay {
     }
 
     /**
-     * 非 root：面板仍可打开、计划仍可看，但确认键不可用；提示直接说明需要 root（design §6.5）。
+     * 非 root：面板仍可打开，但不展示计划，只显示一行 {@code requires root}；确认键不可用（design §6.5）。
      */
     public static ActionOverlay rootRequired(ActionKind kind) {
         return new ActionOverlay(kind, Collections.singletonList("requires root"),

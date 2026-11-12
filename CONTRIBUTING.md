@@ -53,8 +53,9 @@ e2e 的细节（容器参数、产物怎么进去、`degraded` 状态的容忍�
 Windows 上跑 `mvn -Pe2e verify` 需要 Docker Desktop（WSL2 后端），且 `docker version` 可用。
 
 TUI 测试不启动真实终端：`TuiApp` / `EditScreen` / `StatusView` 等通过 `Display`、`KeySource` 抽象
-注入 `RecordingDisplay` / `ScriptedKeySource`，视图模型用纯 JUnit 断言；Lanterna 适配层用
-`DefaultVirtualTerminal` 验证，不需要 TTY。e2e 只覆盖非 TTY 退 2
+注入 `RecordingDisplay` / `ScriptedKeySource`，视图模型用纯 JUnit 断言；Lanterna 适配层另用
+`LanternaDisplayTest`（动态代理 + `RecordingScreen`）与 `LanternaKeySourceTest`（匿名 `InputProvider`）
+验证，不需要 TTY。e2e 只覆盖非 TTY 退 2
 （`SmokeIT#tuiRefusesToStartWithoutATty`），不做真实 PTY 全屏驱动。
 
 ## 目录
@@ -78,7 +79,9 @@ java-systemd-service-as-code/
     └── logs/                     日志流（journalctl / 文件）
 ```
 
-分层纪律：`cli` 与 `tui` 只依赖 `core` 且互不依赖；`core` 只依赖
+分层纪律：`tui` 只依赖 `core`，不得 import `cli`（可读 `spec` / `status` 等低层的不可变结果
+类型，如 `StatusResult`，但 systemd 动作编排只经 `core` / `apply`）；`cli` 仅允许在
+`RootCommand` 注册 `tui` 子命令处 import `tui`。`core` 只依赖
 `spec` / `systemd` / `exec` / `apply` / `status` / `logs`，不出现 `System.out`、退出码或用户文案；
 `spec` / `systemd` / `exec` 不反向依赖上层。`exec` 包不出现 systemd 语义，`spec` 包不做进程执行；
 渲染是纯函数、确定性输出。完整约定见 [`AGENTS.md`](AGENTS.md)。
