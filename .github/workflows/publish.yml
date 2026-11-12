@@ -29,6 +29,12 @@ jobs:
   mirror:
     name: mirror git refs to GitCode
     runs-on: ubuntu-latest
+    # push master 与 push tag 会各触发一次运行；两者都往 GitCode 推同样的分支与 tag 时，
+    # 后到的那个会带着旧的 expected 值被 GitCode 以「cannot lock ref」拒绝。
+    # 用固定 group 把镜像步骤串起来（不取消在跑的），整条流水线其余 job 仍可并行。
+    concurrency:
+      group: gitcode-mirror
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
