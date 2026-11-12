@@ -24,7 +24,7 @@ import picocli.CommandLine.Parameters;
 @Command(mixinStandardHelpOptions = true, name = "destroy", description = "stop and remove the service (unit, env file and path-links)")
 public final class DestroyCommand implements Callable<Integer> {
 
-    @Parameters(index = "0", arity = "0..1", defaultValue = ".",
+    @Parameters(index = "0", arity = "0..1", defaultValue = ".", paramLabel = "<package-dir>",
             description = "package directory containing xac.yaml (default: current directory)")
     String packageDirArg;
 

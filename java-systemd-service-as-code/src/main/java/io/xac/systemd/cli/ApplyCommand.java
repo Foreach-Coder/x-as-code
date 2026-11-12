@@ -19,7 +19,7 @@ import picocli.CommandLine.Parameters;
 @Command(mixinStandardHelpOptions = true, name = "apply", description = "install or update the service: write files, reload, enable, restart")
 public final class ApplyCommand implements Callable<Integer> {
 
-    @Parameters(index = "0", arity = "0..1", defaultValue = ".",
+    @Parameters(index = "0", arity = "0..1", defaultValue = ".", paramLabel = "<package-dir>",
             description = "package directory containing xac.yaml (default: current directory)")
     String packageDirArg;
 

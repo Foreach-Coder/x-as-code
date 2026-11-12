@@ -12,21 +12,34 @@ public final class NameValidator implements Validator {
 
     private static final Pattern ALLOWED = Pattern.compile("[A-Za-z0-9_.:-]+");
 
-    @Override
-    public void validate(ServiceSpec spec, List<Violation> out) {
-        String name = spec.name;
+    private static final String CHARSET_MESSAGE =
+            "must contain only letters, digits and _ . : -, must not start with '.', must not contain '/'";
+
+    private static final String PREFIX_MESSAGE =
+            "must not start with 'xac.'; the tool adds that prefix automatically";
+
+    /** 返回 null 表示合法；供 init 在提问时复用同一套规则。 */
+    public static Violation violationFor(String name) {
         if (name == null) {
-            return;
+            return null;
         }
         boolean allowed = ALLOWED.matcher(name).matches()
                 && !name.startsWith(".")
                 && !name.contains("/");
         if (!allowed) {
-            out.add(new Violation("name",
-                    "must contain only letters, digits and _ . : -, must not start with '.', must not contain '/'"));
-        } else if (name.toLowerCase(Locale.ROOT).startsWith("xac.")) {
-            out.add(new Violation("name",
-                    "must not start with 'xac.'; the tool adds that prefix automatically"));
+            return new Violation("name", CHARSET_MESSAGE);
+        }
+        if (name.toLowerCase(Locale.ROOT).startsWith("xac.")) {
+            return new Violation("name", PREFIX_MESSAGE);
+        }
+        return null;
+    }
+
+    @Override
+    public void validate(ServiceSpec spec, List<Violation> out) {
+        Violation violation = violationFor(spec.name);
+        if (violation != null) {
+            out.add(violation);
         }
     }
 }

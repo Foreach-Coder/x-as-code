@@ -1,0 +1,49 @@
+# xac.yaml -- service definition for java-systemd-service-as-code.
+#
+# This file is the single source of truth for one service. `apply` validates it,
+# renders /etc/systemd/system/xac.<name>.service and /etc/xac/xac.<name>.env,
+# then reloads systemd, enables and restarts the unit.
+#
+# The schema is strict: unknown keys are errors.
+
+name: {{name}}
+description: {{name}} service
+
+artifact:
+  # Application jar, relative to this package directory or absolute.
+  jar: {{jar}}
+
+runtime:
+  # Java executable used to start the service.
+  java: {{java}}
+  # JVM arguments, one list item per argument, passed verbatim. A heap limit is
+  # optional:
+  #   - -Xmx512m
+  #   - -XX:+UseG1GC
+  opts: []
+
+# Environment variables, written to /etc/xac/xac.{{name}}.env with mode 0600.
+# Values are literal; ${VAR} inside opts/properties is expanded by systemd when
+# the service starts, not when the unit is rendered.
+# env:
+#   GREETING: hello world
+
+# System properties, rendered as -Dkey=value after opts (so they win).
+# properties:
+#   server.port: "8080"
+
+# Working directory; defaults to this package directory when omitted.
+# workdir: /opt/{{name}}/work
+
+# Symlinks created before the service starts: "source:target", target absolute.
+# If a target already exists and is not a symlink to the source, apply refuses
+# to run and changes nothing; fix it by hand.
+# path-links:
+#   - ./conf:/opt/{{name}}/conf
+
+lifecycle:
+  # false keeps the service from starting at boot.
+  auto-start: true
+  restart: on-failure
+  restart-sec: 5
+  timeout-stop-sec: 30

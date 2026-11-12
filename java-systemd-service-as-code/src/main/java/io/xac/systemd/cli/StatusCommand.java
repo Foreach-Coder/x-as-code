@@ -14,7 +14,7 @@ import picocli.CommandLine.Parameters;
 @Command(mixinStandardHelpOptions = true, name = "status", description = "report install and runtime status; exit 0 when in sync, 1 on drift")
 public final class StatusCommand implements Callable<Integer> {
 
-    @Parameters(index = "0", arity = "0..1", defaultValue = ".",
+    @Parameters(index = "0", arity = "0..1", defaultValue = ".", paramLabel = "<package-dir>",
             description = "package directory containing xac.yaml (default: current directory)")
     String packageDirArg;
 
