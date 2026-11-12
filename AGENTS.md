@@ -49,6 +49,9 @@ mvn -f java-systemd-service-as-code/pom.xml -DskipTests package
 sudo java-systemd-service-cli-0.1.1/bin/java-systemd-service-cli install
 sudo java-systemd-service-cli-0.1.1/bin/java-systemd-service-cli uninstall
 
+# 交互式生成 xac.yaml 模板（父目录 → <父目录>/<服务名>/xac.yaml；不需要 root，不覆盖已有文件）
+java -jar java-systemd-service-as-code/target/java-systemd-service-cli-0.1.1.jar init /tmp
+
 # 真 systemd e2e（Testcontainers；需要 Docker + 镜像 xac-e2e:24.04，见 e2e/README.md）
 mvn -f java-systemd-service-as-code/pom.xml -Pe2e verify
 #   镜像缺失时先构建：cd java-systemd-service-as-code && docker build -t xac-e2e:24.04 e2e

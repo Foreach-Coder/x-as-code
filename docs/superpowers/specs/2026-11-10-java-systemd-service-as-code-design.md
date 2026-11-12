@@ -23,6 +23,7 @@
 12. `destroy` 的 `stop`/`disable`/`reload` 失败只记警告（§6.5）：destroy 的目标是文件消失
 13. 交付形态改为 **`tar.gz` 发行包**（`bin/` 启动脚本 + `libs/` fat jar），release 只发这个包（§8）
 14. 启动脚本自带 **`install` / `uninstall`**：把自己软链进 `/usr/local/bin`，只有脚本知道自己的真实路径（§8）
+15. 新增 **`init`**：交互式在 `<父目录>/<服务名>/xac.yaml` 生成带注释的模板，不覆盖已有文件（§6.8）
 
 ## 1. 背景与目标
 
@@ -278,14 +279,17 @@ LinkedHashMap），输出以单个 `\n` 结尾。
 
 ### 6.0 调用形态
 
-四个命令的**第一个位置参数都是包目录**，缺省为当前目录 `.`。包目录下必须有 `xac.yaml`，
-否则退出码 2。
+包目录类命令（`apply` / `status` / `logs` / `destroy`）的**第一个位置参数都是包目录**，缺省为当前目录 `.`。
+包目录下必须有 `xac.yaml`，否则退出码 2。`init` 的参数是**父目录**，见 §6.8。
+
+二进制名是 `java-systemd-service-cli`；下文为简洁仍写作 `xac`，指同一个可执行文件。
 
 ```
 xac apply     [<package-dir>] [--dry-run]
 xac status    [<package-dir>]
 xac logs      [<package-dir>] [-n <行数>] [-f]
 xac destroy   [<package-dir>] [--dry-run] [--yes]
+xac init      [<parent-dir>]
 xac install   [--dry-run]      # 由发行包的启动脚本处理，见 §8
 xac uninstall [--dry-run]      # 由发行包的启动脚本处理，见 §8
 ```
@@ -525,6 +529,37 @@ Formatter。v1 不实现。
 
 运行时输出（stdout/stderr、`--help`、校验与警告）统一英文 ASCII，便于 `LANG` 为空的服务器与 CI
 日志；代码注释与文档正文仍可用中文。
+
+### 6.8 init
+
+```
+xac init [<parent-dir>]
+```
+
+在 `<parent-dir>/<name>/xac.yaml` 生成一份带注释的模板，`<parent-dir>` 缺省为当前目录，`<name>` 在交互中询问。
+不需要 root；不写任何其它文件，不建 `conf/`、不造 jar。
+
+交互只问三个字段，回车接受方括号默认值：
+
+| 提示 | 默认 | 写入 |
+|---|---|---|
+| `service name` | `demo` | `name:`，同时决定子目录名 |
+| `artifact jar` | `app.jar` | `artifact.jar` |
+| `java executable` | `/usr/bin/java` | `runtime.java` |
+
+`runtime.opts` 不提问：模板写 `opts: []`，并用注释给出 `-Xmx512m` / `-XX:+UseG1GC` 示例。`env`、`properties`、
+`workdir`、`path-links` 同样只以注释形式出现——DSL 是严格模式，可选段落注释掉才不会触发未知字段错误。
+
+不覆盖任何文件：服务名不合法（复用 §6.1 第 7 条字符集）、目标目录已有 `xac.yaml`、目标目录非空时，
+重新提问该字段；父目录不存在、或输入在问完前结束（EOF）→ 退出码 2。生成文件 `0644`，写入走 §5.8 的
+临时文件 + 原子移动。
+
+生成成功打印：
+
+```
+created /abs/path/demo/xac.yaml
+next: edit it, then run: java-systemd-service-cli apply /abs/path/demo --dry-run
+```
 
 ## 7. 测试策略
 

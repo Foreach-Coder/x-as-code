@@ -41,7 +41,21 @@ mvn -f java-systemd-service-as-code/pom.xml -DskipTests package
 
 发行包里的 `bin/java-systemd-service-cli` 是 POSIX `sh` 启动脚本：先按 `XAC_JAVA` → `$JAVA_HOME/bin/java` → `PATH` 的顺序找 JVM，再 `exec java -jar ../libs/*.jar "$@"`。脚本按自身真实路径定位 jar，所以可以软链到 `/usr/local/bin`。
 
-### 2. 在目标机上准备包目录
+### 2. 生成项目目录（可选）
+
+不想手写 `xac.yaml`，可以让 CLI 交互式生成一份带注释的模板。参数是**父目录**，服务名在交互里问，最终落在 `<父目录>/<服务名>/xac.yaml`：
+
+```bash
+java-systemd-service-cli init /opt
+# service name [demo]:
+# artifact jar [app.jar]:
+# java executable [/usr/bin/java]:
+# → created /opt/demo/xac.yaml
+```
+
+已有同名 `xac.yaml`、目标目录非空或服务名不合法时会重新提问，不覆盖任何文件。生成后编辑它，再用 `apply <目录> --dry-run` 预览。
+
+### 3. 在目标机上准备包目录
 
 包目录必须包含 `xac.yaml`；`artifact.jar` 与 `path-links` 的源都相对包目录解析。
 
@@ -103,7 +117,7 @@ lifecycle:
   timeout-stop-sec: 30
 ```
 
-### 3. 管理服务
+### 4. 管理服务
 
 ```bash
 cd /opt/demo
@@ -123,6 +137,7 @@ sudo /opt/xac/bin/java-systemd-service-cli destroy . -y       # 停止并清理
 | `status` | `[包目录]` | 只读；比对磁盘与期望、查询 `systemctl show`；一致退 0，有漂移退 1 |
 | `logs` | `[包目录] [-n N] [-f]` | `journalctl -u xac.<name>.service --no-pager`；`-f` 跟随 |
 | `destroy` | `[包目录] [--dry-run] [-y]` | 停止、禁用、删 unit/env/软链接；非交互环境必须加 `-y` |
+| `init` | `[父目录]` | 交互式创建 `<父目录>/<服务名>/xac.yaml` 模板，不覆盖已有文件 |
 
 退出码：`0` 成功；`1` 执行失败或 `status` 检出漂移；`2` 输入/环境问题且**什么都没改动**。
 
