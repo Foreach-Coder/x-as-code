@@ -27,9 +27,16 @@ public final class LanternaDisplay implements Display {
     }
 
     private LanternaDisplay(Terminal terminal) throws IOException {
-        this.terminal = terminal;
-        this.screen = new TerminalScreen(terminal);
+        this(terminal, new TerminalScreen(terminal));
         this.screen.startScreen();
+    }
+
+    /**
+     * 测试接缝：直接注入 Screen/Terminal 替身，不启动真实终端。
+     */
+    LanternaDisplay(Terminal terminal, Screen screen) {
+        this.terminal = terminal;
+        this.screen = screen;
     }
 
     /**
@@ -45,7 +52,19 @@ public final class LanternaDisplay implements Display {
             screen.clear();
             for (int y = 0; y < canvas.height(); y++) {
                 for (int x = 0; x < canvas.width(); x++) {
-                    screen.setCharacter(x, y, new TextCharacter(canvas.charAt(x, y)));
+                    char c = canvas.charAt(x, y);
+                    if (c == Canvas.PLACEHOLDER) {
+                        // 宽字形的第二列：字形已经占了这一列，不能再写空格覆盖。
+                        continue;
+                    }
+                    if (Character.isHighSurrogate(c) && x + 1 < canvas.width()
+                            && Character.isLowSurrogate(canvas.charAt(x + 1, y))) {
+                        String glyph = new String(new char[]{c, canvas.charAt(x + 1, y)});
+                        screen.setCharacter(x, y, TextCharacter.fromString(glyph)[0]);
+                        x++;
+                    } else {
+                        screen.setCharacter(x, y, new TextCharacter(c));
+                    }
                 }
             }
             screen.setCursorPosition(new TerminalPosition(canvas.cursorX(), canvas.cursorY()));
@@ -65,13 +84,14 @@ public final class LanternaDisplay implements Display {
     public void close() {
         try {
             screen.close();
-        } catch (IOException e) {
-            throw new UncheckedIOException("failed to close TUI screen", e);
+        } catch (IOException ignored) {
+            // 屏幕/终端已经断开时，退出路径上不要再抛：close 在 finally 里，
+            // 抛出去会覆盖 TuiCommand 已经算好的退出码。
         } finally {
             try {
                 terminal.close();
             } catch (IOException ignored) {
-                // 终端已不可用时不要在退出路径上再抛一次
+                // 同上
             }
         }
     }

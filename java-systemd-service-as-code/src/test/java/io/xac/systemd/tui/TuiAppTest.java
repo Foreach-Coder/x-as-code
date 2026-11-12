@@ -11,10 +11,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -62,6 +64,32 @@ class TuiAppTest {
         @Override
         public boolean executable(Path path) {
             return true;
+        }
+    }
+
+    /** 每次 show 都抛同一个 RuntimeException，用来验证 TuiApp 的异常收口。 */
+    private static final class FailingDisplay implements Display {
+
+        private final RuntimeException failure;
+        int shows;
+
+        FailingDisplay(RuntimeException failure) {
+            this.failure = failure;
+        }
+
+        @Override
+        public void show(Canvas canvas) {
+            shows++;
+            throw failure;
+        }
+
+        @Override
+        public Size size() {
+            return new Size(80, 24);
+        }
+
+        @Override
+        public void close() {
         }
     }
 
@@ -218,5 +246,32 @@ class TuiAppTest {
         assertFalse(app.tick());
         // 一次 tick 把队列里的事件全部消费掉，不会留下未处理的退出键。
         assertTrue(keys.polls() >= 4, "polls=" + keys.polls());
+    }
+
+    @Test
+    void runReturnsZeroAfterQuit() throws Exception {
+        RecordingDisplay display = new RecordingDisplay(80, 24);
+        TuiApp app = app(display, new ScriptedKeySource(KeyEvent.of(NavKey.QUIT)));
+
+        assertEquals(0, app.run());
+        assertFalse(app.running());
+        assertEquals(1, display.shows());
+    }
+
+    @Test
+    void runtimeFailureFromDisplayIsContainedAndReturnsOne() throws Exception {
+        UncheckedIOException failure = new UncheckedIOException(
+                "failed to draw TUI frame", new IOException("broken pipe"));
+        FailingDisplay display = new FailingDisplay(failure);
+        TuiApp app = new TuiApp(openPackage(), display,
+                new ScriptedKeySource(KeyEvent.of(NavKey.QUIT)));
+
+        int code = assertDoesNotThrow(() -> app.run());
+
+        assertEquals(1, code);
+        assertFalse(app.running());
+        assertTrue(app.statusNote().startsWith("tui failed: "), app.statusNote());
+        assertTrue(app.statusNote().contains("failed to draw TUI frame"), app.statusNote());
+        assertTrue(display.shows <= 1, "shows=" + display.shows);
     }
 }

@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Locale;
 import java.util.concurrent.Callable;
 
 import io.xac.systemd.core.InvalidSpecException;
@@ -54,11 +55,17 @@ public final class TuiCommand implements Callable<Integer> {
     }
 
     /**
-     * 同时要求：进程挂着控制台，且 TERM 非空。任一不满足都按非 TTY 处理，
-     * 不尝试打开终端。
+     * 同时要求：进程挂着控制台，且 TERM 非空、不是 dumb/unknown。任一不满足都按非 TTY
+     * 处理，不尝试打开终端。dumb/unknown 虽然可能是合法终端类型，但无法承载全屏字符界面。
      */
     static boolean isInteractiveTerminal(boolean consoleAttached, String term) {
-        return consoleAttached && term != null && !term.trim().isEmpty();
+        if (!consoleAttached || term == null) {
+            return false;
+        }
+        String normalized = term.trim().toLowerCase(Locale.ROOT);
+        return !normalized.isEmpty()
+                && !"dumb".equals(normalized)
+                && !"unknown".equals(normalized);
     }
 
     interface Launcher {
@@ -78,16 +85,29 @@ public final class TuiCommand implements Callable<Integer> {
             LanternaDisplay display = null;
             try {
                 display = LanternaDisplay.open();
-                new TuiApp(servicePackage, display, display.keys()).run();
-                return 0;
-            } catch (IOException e) {
-                err.println("tui failed: " + e.getMessage());
+                TuiApp app = new TuiApp(servicePackage, display, display.keys());
+                int code = app.run();
+                if (code != 0) {
+                    // 终端画面可能已经不可用，把收口后的 notice 也留在 stderr 上。
+                    err.println(app.statusNote());
+                }
+                return code;
+            } catch (IOException | RuntimeException e) {
+                err.println("tui failed: " + messageOf(e));
                 return 1;
             } finally {
                 if (display != null) {
                     display.close();
                 }
             }
+        }
+
+        private static String messageOf(Throwable e) {
+            String message = e.getMessage();
+            if (message == null || message.isEmpty()) {
+                return e.getClass().getSimpleName();
+            }
+            return message;
         }
     }
 }

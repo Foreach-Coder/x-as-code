@@ -87,6 +87,20 @@ class TuiCommandTest {
     }
 
     @Test
+    void dumbTerminalIsNotAnInteractiveTerminal() {
+        assertFalse(TuiCommand.isInteractiveTerminal(true, "dumb"));
+        assertFalse(TuiCommand.isInteractiveTerminal(true, "DUMB"));
+        assertFalse(TuiCommand.isInteractiveTerminal(true, "  dumb  "));
+    }
+
+    @Test
+    void unknownTerminalIsNotAnInteractiveTerminal() {
+        assertFalse(TuiCommand.isInteractiveTerminal(true, "unknown"));
+        assertFalse(TuiCommand.isInteractiveTerminal(true, "UNKNOWN"));
+        assertFalse(TuiCommand.isInteractiveTerminal(true, " unknown "));
+    }
+
+    @Test
     void missingPackageFailsWithViolationsAndOpensNoTerminal() throws Exception {
         ByteArrayOutputStream err = new ByteArrayOutputStream();
         RecordingLauncher launcher = new RecordingLauncher();

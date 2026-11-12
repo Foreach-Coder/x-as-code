@@ -154,4 +154,59 @@ class CanvasTest {
         assertEquals(7, canvas.line(0).length());
         assertTrue(canvas.line(0).startsWith("ab" + repeat(' ', 5)));
     }
+
+    @Test
+    void wideCharacterOccupiesTwoColumns() {
+        Canvas canvas = new Canvas(5, 1);
+        canvas.text(0, 0, "中a");
+        assertEquals('中', canvas.charAt(0, 0));
+        assertEquals(Canvas.PLACEHOLDER, canvas.charAt(1, 0));
+        assertEquals('a', canvas.charAt(2, 0));
+        assertEquals("中\0a  ", canvas.line(0));
+        assertEquals(5, canvas.line(0).length());
+
+        // 后续文字从第 3 列继续，不会因为中文只记了 1 个 code unit 而左移。
+        canvas.text(3, 0, "b");
+        assertEquals('b', canvas.charAt(3, 0));
+        assertEquals("中\0ab ", canvas.line(0));
+    }
+
+    @Test
+    void wideCharacterThatDoesNotFitIsDroppedWithoutHalfAGlyph() {
+        Canvas canvas = new Canvas(2, 1);
+        canvas.text(1, 0, "中");
+        assertEquals("  ", canvas.line(0));
+
+        Canvas oneColumn = new Canvas(1, 1);
+        oneColumn.text(0, 0, "中");
+        assertEquals(" ", oneColumn.line(0));
+    }
+
+    @Test
+    void surrogatePairOccupiesTwoColumns() {
+        Canvas canvas = new Canvas(4, 1);
+        canvas.text(0, 0, "\uD83D\uDE00x");
+        assertEquals('\uD83D', canvas.charAt(0, 0));
+        assertEquals('\uDE00', canvas.charAt(1, 0));
+        assertEquals('x', canvas.charAt(2, 0));
+        assertEquals(4, canvas.line(0).length());
+    }
+
+    @Test
+    void overwritingAWideGlyphLeavesNoPlaceholder() {
+        Canvas canvas = new Canvas(3, 1);
+        canvas.text(0, 0, "中");
+        canvas.text(0, 0, "ab");
+        assertEquals("ab ", canvas.line(0));
+    }
+
+    @Test
+    void overwritingSecondHalfOfSurrogatePairClearsBothCells() {
+        Canvas canvas = new Canvas(4, 1);
+        canvas.text(0, 0, "\uD83D\uDE00");
+        canvas.put(1, 0, 'x');
+        // 后半格被覆盖时前半格不能留成孤立高代理。
+        assertEquals(' ', canvas.charAt(0, 0));
+        assertEquals('x', canvas.charAt(1, 0));
+    }
 }

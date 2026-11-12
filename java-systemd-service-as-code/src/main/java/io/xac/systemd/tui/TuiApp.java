@@ -8,7 +8,7 @@ import io.xac.systemd.core.ServicePackage;
  * TUI 外壳。只依赖 {@link Display} 与 {@link KeySource}，因此测试不用启动终端；
  * 真实终端实现在 {@link LanternaDisplay} / {@link LanternaKeySource}。
  */
-public final class TuiApp implements Runnable {
+public final class TuiApp {
 
     private static final long POLL_MILLIS = 50;
     private static final int WIDE_SCREEN = 80;
@@ -22,6 +22,7 @@ public final class TuiApp implements Runnable {
 
     private TuiState state;
     private boolean running = true;
+    private boolean failed;
     private boolean dirty = true;
     private String notice = "";
 
@@ -32,8 +33,12 @@ public final class TuiApp implements Runnable {
         this.state = TuiState.load(servicePackage);
     }
 
-    @Override
-    public void run() {
+    /**
+     * 主循环。终端读写失败都在这里收口：
+     * 写一条 notice、停止循环、返回 1，绝不把异常抛给 picocli。
+     * 返回 0 表示用户正常退出。
+     */
+    public int run() {
         while (running) {
             try {
                 KeyEvent event = keys.next(POLL_MILLIS);
@@ -41,16 +46,17 @@ public final class TuiApp implements Runnable {
                     handle(event);
                     dirty = true;
                 }
+                renderIfDirty();
             } catch (IOException e) {
-                notice = "input error: " + e.getMessage();
+                notice = "input error: " + messageOf(e);
                 running = false;
                 dirty = true;
-            }
-            if (dirty) {
-                render();
-                dirty = false;
+                renderFinalNotice();
+            } catch (RuntimeException e) {
+                fail(e);
             }
         }
+        return failed ? 1 : 0;
     }
 
     /**
@@ -66,14 +72,14 @@ public final class TuiApp implements Runnable {
                 handle(event);
                 dirty = true;
             }
+            renderIfDirty();
         } catch (IOException e) {
-            notice = "input error: " + e.getMessage();
+            notice = "input error: " + messageOf(e);
             running = false;
             dirty = true;
-        }
-        if (dirty) {
-            render();
-            dirty = false;
+            renderFinalNotice();
+        } catch (RuntimeException e) {
+            fail(e);
         }
         return running;
     }
@@ -84,6 +90,39 @@ public final class TuiApp implements Runnable {
 
     public String statusNote() {
         return notice;
+    }
+
+    private void renderIfDirty() {
+        if (dirty) {
+            render();
+            dirty = false;
+        }
+    }
+
+    /**
+     * 输入已经失败时，尽力把带 notice 的最后一帧画出来；画不出来就按终端故障收口。
+     */
+    private void renderFinalNotice() {
+        try {
+            renderIfDirty();
+        } catch (RuntimeException e) {
+            fail(e);
+        }
+    }
+
+    private void fail(RuntimeException e) {
+        failed = true;
+        running = false;
+        dirty = false;
+        notice = "tui failed: " + messageOf(e);
+    }
+
+    private static String messageOf(Throwable e) {
+        String message = e.getMessage();
+        if (message == null || message.isEmpty()) {
+            return e.getClass().getSimpleName();
+        }
+        return message;
     }
 
     private void handle(KeyEvent event) {
