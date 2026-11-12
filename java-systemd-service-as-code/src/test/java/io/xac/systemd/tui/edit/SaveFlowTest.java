@@ -22,6 +22,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -107,12 +108,27 @@ class SaveFlowTest {
         SaveFlow.Result result = SaveFlow.prepare(model(), file);
 
         assertTrue(result.ok(), String.valueOf(result.violations));
-        assertTrue(result.orphanNotes.contains("1 comments could not be placed"),
-                result.orphanNotes.toString());
+        assertFalse(result.orphanNotes.isEmpty(), "losing a comment must be reported");
         assertTrue(result.orphanNotes.contains(
-                        "1 comments left as-is (commented-out fields)"),
+                        "1 commented-out field examples will not be kept"),
                 result.orphanNotes.toString());
+        assertEquals(1, result.lostComments, result.orphanNotes.toString());
+        assertTrue(result.losesComments());
         assertFalse(result.newText.contains("stray tail note"), result.newText);
+    }
+
+    @Test
+    void reportsCommentsThatCannotBePlacedAtAll() throws IOException {
+        String text = SpecWriter.render(fullSpec()) + "\n# gone comment\nworkdir: /tmp/old\n";
+        Path file = write(text);
+
+        SaveFlow.Result result = SaveFlow.prepare(model(), file);
+
+        assertTrue(result.ok(), String.valueOf(result.violations));
+        assertTrue(result.orphanNotes.contains(
+                        "1 comments could not be placed and will be dropped"),
+                result.orphanNotes.toString());
+        assertFalse(result.newText.contains("gone comment"), result.newText);
     }
 
     @Test
@@ -126,8 +142,48 @@ class SaveFlowTest {
 
         assertTrue(result.ok(), String.valueOf(result.violations));
         assertTrue(result.modifiedOutside);
-        assertTrue(result.orphanNotes.contains("1 comments left as-is (commented-out fields)"),
+        assertTrue(result.orphanNotes.contains(
+                        "1 commented-out field examples will not be kept"),
                 result.orphanNotes.toString());
+    }
+
+    @Test
+    void detectsSameSizeRewriteWithRestoredMtime() throws IOException {
+        Path file = write(SpecWriter.render(fullSpec()));
+        FileStamp baseline = FileStamp.of(file);
+        java.nio.file.attribute.FileTime mtime = Files.getLastModifiedTime(file);
+        String text = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+        // 同长度改写，再把 mtime 原样塞回去：只看 mtime+size 的实现会漏掉。
+        Files.write(file, text.replace("demo service", "demo servicX")
+                .getBytes(StandardCharsets.UTF_8));
+        Files.setLastModifiedTime(file, mtime);
+
+        assertEquals(baseline.size(), FileStamp.of(file).size());
+        assertEquals(baseline.mtimeMillis(), FileStamp.of(file).mtimeMillis());
+        SaveFlow.Result result = SaveFlow.prepare(model(), file, baseline);
+
+        assertTrue(result.ok(), String.valueOf(result.violations));
+        assertTrue(result.modifiedOutside);
+    }
+
+    @Test
+    void commitRejectsBaselineThatWentStale() throws IOException {
+        Path file = write(SpecWriter.render(fullSpec()));
+        FileStamp baseline = FileStamp.of(file);
+        EditorModel changed = model().with("description", list("changed"));
+        SaveFlow.Result result = SaveFlow.prepare(changed, file, baseline);
+        byte[] before = Files.readAllBytes(file);
+        Files.write(file, "# sneaky\n".getBytes(StandardCharsets.UTF_8),
+                java.nio.file.StandardOpenOption.APPEND);
+
+        IOException failure = assertThrows(IOException.class,
+                () -> SaveFlow.commit(file, result.newText, baseline));
+
+        assertTrue(failure.getMessage().startsWith("file changed outside: "),
+                failure.getMessage());
+        byte[] after = Files.readAllBytes(file);
+        assertEquals(new String(before, StandardCharsets.UTF_8) + "# sneaky\n",
+                new String(after, StandardCharsets.UTF_8));
     }
 
     @Test
@@ -183,5 +239,17 @@ class SaveFlowTest {
 
         assertEquals("name: demo\n", new String(Files.readAllBytes(file),
                 StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void directoryTargetIsReportedClearly() throws IOException {
+        Path dir = pkg.resolve("xac.yaml");
+        Files.createDirectory(dir);
+
+        IOException failure = assertThrows(IOException.class,
+                () -> SaveFlow.prepare(model(), dir));
+
+        assertTrue(failure.getMessage().contains("is a directory"),
+                failure.getMessage());
     }
 }

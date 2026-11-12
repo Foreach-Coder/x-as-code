@@ -1076,6 +1076,89 @@ class TuiAppTest {
         assertEquals("changed", reopened.get().spec().description);
         assertEquals("saved", app.statusNote());
         assertEquals(2, streams.size(), "log stream must be rebuilt after reopen");
+        assertTrue(streams.get(0).closed, "old log stream must be closed");
+    }
+
+    @Test
+    void editOpensWithSpecFreshlyReadFromDisk() throws Exception {
+        RecordingDisplay display = new RecordingDisplay(80, 24);
+        TuiApp app = new TuiApp(openPackage(), display,
+                new ScriptedKeySource(KeyEvent.character('e')),
+                FIXED_CLOCK,
+                new TuiApp.LogStreamFactory() {
+                    @Override
+                    public LogStream open(int lines, boolean follow) {
+                        FakeLogStream stream = new FakeLogStream();
+                        stream.blockUntilClosed = true;
+                        return stream;
+                    }
+                },
+                new TuiApp.PackageOpener() {
+                    @Override
+                    public ServicePackage open(Path packageDir) throws InvalidSpecException {
+                        return ServicePackage.open(packageDir, runner, probe,
+                                new SystemdTarget(packageDir.resolve("units"),
+                                        packageDir.resolve("env")));
+                    }
+                });
+        // TUI 启动后有人先改了文件：编辑屏必须用重读的 spec，而不是启动时的快照。
+        Path file = pkg.resolve("xac.yaml");
+        String text = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+        Files.write(file, text.replace("name: demo", "name: demo\ndescription: external text")
+                .getBytes(StandardCharsets.UTF_8));
+
+        assertTrue(app.tick(0));
+
+        String screen = screen(display);
+        assertTrue(screen.contains("external text"), screen);
+        assertFalse(screen.contains("cannot edit"), screen);
+    }
+
+    @Test
+    void editSaveReportsDroppedCommentsInNotice() throws Exception {
+        RecordingDisplay display = new RecordingDisplay(80, 24);
+        Path file = pkg.resolve("xac.yaml");
+        String text = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+        Files.write(file, (text + "\n# tail note\n").getBytes(StandardCharsets.UTF_8));
+        TuiApp app = new TuiApp(openPackage(), display,
+                new ScriptedKeySource(
+                        KeyEvent.character('e'),
+                        KeyEvent.character('c'),
+                        KeyEvent.of(NavKey.ENTER),
+                        KeyEvent.character('c'),
+                        KeyEvent.character('h'),
+                        KeyEvent.character('a'),
+                        KeyEvent.character('n'),
+                        KeyEvent.character('g'),
+                        KeyEvent.character('e'),
+                        KeyEvent.character('d'),
+                        KeyEvent.of(NavKey.ENTER),
+                        KeyEvent.character('s'),
+                        KeyEvent.character('s')),
+                FIXED_CLOCK,
+                new TuiApp.LogStreamFactory() {
+                    @Override
+                    public LogStream open(int lines, boolean follow) {
+                        FakeLogStream stream = new FakeLogStream();
+                        stream.blockUntilClosed = true;
+                        return stream;
+                    }
+                },
+                new TuiApp.PackageOpener() {
+                    @Override
+                    public ServicePackage open(Path packageDir) throws InvalidSpecException {
+                        return ServicePackage.open(packageDir, runner, probe,
+                                new SystemdTarget(packageDir.resolve("units"),
+                                        packageDir.resolve("env")));
+                    }
+                });
+
+        assertTrue(app.tick(0));
+
+        assertTrue(app.statusNote().startsWith("saved"),
+                app.statusNote());
+        assertTrue(app.statusNote().contains("1 commented-out field examples will not be kept"),
+                app.statusNote());
     }
 
     @Test

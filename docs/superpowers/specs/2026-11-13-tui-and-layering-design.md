@@ -184,7 +184,7 @@ java-systemd-service-cli tui [<package-dir>]
 
 主屏：`j/k`、`↑/↓` 滚日志，`PgUp/PgDn` 翻页，`g/G` 顶/底，`L` 切跟随，`R` 立即刷新，`a/r/d/e` 动作，`?` 帮助，`q` 退出。
 
-编辑屏：`tab/shift-tab` 切分区，`↑/↓` 选字段，`enter` 编辑或打开子编辑器，`space` 切布尔，`c` 循环枚举，`a` 加行，`x` 删行，`s` 保存，`u` 回滚上一版，`q` 放弃（脏时二次确认）。
+编辑屏：`tab/shift-tab` 切分区，`↑/↓` 选字段，`enter` 编辑或打开子编辑器，`space` 切布尔，`c` 清空标量/枚举，`a` 加行，`x` 删行，`s` 保存，`u` 回滚上一版，`q` 放弃（脏时二次确认）。
 
 ### 6.4 线程与刷新
 
@@ -200,7 +200,7 @@ java-systemd-service-cli tui [<package-dir>]
 - 逐项显示 `unit / env / process / links`，各自带状态与原因；漂移行标红并用 `StatusResult.drift()` 的同源判断：unit 行同时覆盖 unit 文件不同步、systemd 未加载（`not-found`）与 auto-start 期望不符；env 行覆盖配置了却不同步以及未配置但文件多余；process 行覆盖查询失败与非 active；links 行覆盖链接问题。
 - `systemctl` 查询失败（无 systemd、D-Bus 不可用）显示 `unknown` + 原因；不阻止退出与编辑，但禁用所有动作键。
 - 非 root：标题栏标 `not root`，动作面板可打开但 `y` 不可用并提示需要 root。
-- 通知行显示成功/失败/“N 条注释无法定位”，3 秒淡出；错误保留到下次动作。
+- 通知行显示成功/失败/“N comments could not be placed and will be dropped”，3 秒淡出；错误保留到下次动作。保存成功后主屏 notice 也带上丢失注释的条数。
 
 ### 6.6 动作
 
@@ -233,7 +233,7 @@ ApplyResult apply(String rendered, Comments source, Comments template)  // 模�
 final class ApplyResult { String text; int kept; int dropped; }
 ```
 
-`apply` 不重排、不重写任何配置行，只在目标行前插入注释行、在行尾追加同行注释，因此结果仍能被 `SpecLoader` 读回与 `render` 等价的 spec。`kept` 是实际写入的注释条数，`dropped` 是未能挂回的用户注释条数，供 §6.5 的 “N 条注释无法定位” 使用；三参重载只统计用户注释，模板里没有对应字段的默认注释不算丢失。用户文件里逐字等于模板原文的注释（`init` 文件首次保存时被空行冲散的模板注释块）也不算丢失，因为模板打底会重新写出它们；比较是逐字相等，用户改动过的模板示例行会被明确计为 `dropped`。以 `key:` 开头的被注释字段（如文件末尾自写的 `# workdir: /opt/prod/work`）属于示例而非丢失的散文，保留在 `orphans` 里但同样不计入 `dropped`。模板打底只回写散文注释：`# env:`、`#   GREETING: hello world` 这类列表/字段示例行按 §7.4 只作路径锚点，首次保存后不会重新出现。
+`apply` 不重排、不重写任何配置行，只在目标行前插入注释行、在行尾追加同行注释，因此结果仍能被 `SpecLoader` 读回与 `render` 等价的 spec。`kept` 是实际写入的注释条数，`dropped` 是未能挂回的用户注释条数，供 §6.5 的 “N comments could not be placed and will be dropped” 使用；三参重载只统计用户注释，模板里没有对应字段的默认注释不算丢失。用户文件里逐字等于模板原文的注释（`init` 文件首次保存时被空行冲散的模板注释块）也不算丢失，因为模板打底会重新写出它们；比较是逐字相等，用户改动过的模板示例行会被明确计为 `dropped`。以 `key:` 开头的被注释字段（如文件末尾自写的 `# workdir: /opt/prod/work`）属于示例而非丢失的散文，保留在 `orphans` 里但同样不计入 `dropped`。模板打底只回写散文注释：`# env:`、`#   GREETING: hello world` 这类列表/字段示例行按 §7.4 只作路径锚点，首次保存后不会重新出现。
 
 注释文本写入前必须同行化转义：`\n` → `\\n`、`\r` → `\\r`、NEL/LS/PS → `\\x85`/`\\u2028`/`\\u2029`，保证程序化构造的 `Comments` 不能用换行注入配置行。
 
@@ -276,6 +276,7 @@ final class ApplyResult { String text; int kept; int dropped; }
 
 - 失焦校验：用草稿构建 `ServiceSpec`，跑 `ValidationRunner`，取路径前缀匹配当前字段的 `Violation` 显示在行尾；不阻塞编辑。
 - 保存前全量校验：有错则停留，底部列错误，光标跳到第一条。
+- 保存前二次确认：有注释将丢失（`dropped > 0` 或 `orphans > 0`）或文件被外部改动时，第一次 `s` 只提示（`! N comment(s) will be dropped; press s again to confirm` / `! file changed outside; press s again to overwrite`），第二次 `s` 才真正写入。
 - `EditorModel.validate()` 是**不抛异常**的全量入口：先检查 `name`、`artifact.jar`、
   `runtime.java` 非空（`Violation(path, "must not be empty")`），再做草稿到 spec 的
   转换，最后跑 `ValidationRunner`；转换失败的 `IllegalArgumentException` 折成
@@ -288,16 +289,20 @@ final class ApplyResult { String text; int kept; int dropped; }
 s → 草稿 spec → EditorModel.validate（必填非空 + Schema + ValidationRunner）
    ├─ 错误 → 停留、列错、跳第一条
    └─ 通过 → SpecWriter 生成规范文本（含保留注释）
-        → diff 面板（逐行对比）
-        → y → 临时文件 + 0644 + ATOMIC_MOVE
-        → 重新 open → 状态刷新 → 通知 saved
+        → 有注释将丢失 / 文件被外部改动 → 提示，再按一次 s 确认
+        → 写前再验 mtime + size + sha256（与进入编辑时的基线比较）
+        → 临时文件 + 0644 + ATOMIC_MOVE
+        → 重新 open → 状态刷新 → 通知 saved（并带上丢失注释条数）
 ```
 
 安全细节：
 
-1. 进入编辑时记录 `mtime + size`；保存前若变化，提示“文件在编辑期间被外部修改”，选择覆盖或放弃。
+1. 进入编辑时记录 `mtime + size + SHA-256`；保存前若变化，提示“文件在编辑期间被外部修改”，
+   选择覆盖或放弃。只比 `mtime + size` 会漏掉同长度改写后回填时间戳的情况，因此内容摘要也参与比较；
+   `commit` 落盘前再验一次，防止 prepare 与写入之间又被改过。
 2. 不自动备份；会话内保留上一版文本供 `u` 回滚。
 3. 保存与 apply 解耦，不提供“保存并应用”。
+4. 逐行 diff 由 `SaveFlow.Result.diff` 提供；TUI 当前用“二次 `s`”确认代替 diff 面板，面板留待后续迭代。
 
 ### 7.4 注释保留
 
@@ -321,7 +326,10 @@ s → 草稿 spec → EditorModel.validate（必填非空 + Schema + ValidationR
 
 块标量（`|`/`>`）内部的 `#` 是标量内容，既不是注释，也不计入 `dropped`。`apply` 只增注释行，不重排配置行；对 `scan` 结果 apply 是幂等的，对已合并文本再次 apply 也不会重复插入。
 
-无法定位的注释（文件末尾游离、多余注释块、重复值注释）由 `ApplyResult.dropped` 在 diff 前提示条数，不静默丢弃；`Comments.orphans` 里另有一类被注释掉的字段示例（`# workdir: /opt/prod/work`），它们不计入 `dropped`，但保存前的 diff 面板必须同时显示 `orphans` 条数，避免这类用户手写内容无声消失。
+无法定位的注释（文件末尾游离、多余注释块、重复值注释）由 `ApplyResult.dropped` 统计，提示语为
+`N comments could not be placed and will be dropped`；`Comments.orphans` 里另有一类被注释掉的字段示例
+（`# workdir: /opt/prod/work`），提示语为 `N commented-out field examples will not be kept`，两类不重复计数。
+保存前必须显示条数并要求二次确认（第一次 `s` 不写），避免这类用户手写内容无声消失；diff 面板留待后续迭代。
 
 ### 7.5 限制
 

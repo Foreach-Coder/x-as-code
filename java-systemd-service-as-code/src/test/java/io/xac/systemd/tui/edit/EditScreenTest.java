@@ -268,22 +268,68 @@ class EditScreenTest {
         press(screen, NavKey.ENTER);
         type(screen, " plus");
         press(screen, NavKey.ENTER);
-        Files.write(file, "# external note\n".getBytes(StandardCharsets.UTF_8),
+        Files.write(file, "\nworkdir: /tmp/external\n".getBytes(StandardCharsets.UTF_8),
                 StandardOpenOption.APPEND);
 
         screen.handle(NavKey.CHAR, 's');
 
         assertFalse(screen.closed());
         assertTrue(anyContains(screen.lines(120, 0),
-                "note: file changed outside; press s again to overwrite"));
+                "! file changed outside; press s again to overwrite"),
+                screen.lines(120, 0).toString());
+        assertFalse(new String(Files.readAllBytes(file), StandardCharsets.UTF_8)
+                .contains("demo service plus"));
 
         screen.handle(NavKey.CHAR, 's');
 
         assertTrue(screen.closed());
         assertTrue(screen.saved());
         String text = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
-        assertFalse(text.contains("# external note"), text);
+        assertFalse(text.contains("/tmp/external"), text);
         assertTrue(text.contains("description: demo service plus"), text);
+    }
+
+    @Test
+    void losingCommentsNeedsASecondSave() throws Exception {
+        Path file = write();
+        Files.write(file, "\n# stray tail note\n".getBytes(StandardCharsets.UTF_8),
+                StandardOpenOption.APPEND);
+        byte[] before = Files.readAllBytes(file);
+        EditScreen screen = new EditScreen(model(), file);
+        press(screen, NavKey.ENTER);
+        type(screen, " plus");
+        press(screen, NavKey.ENTER);
+
+        screen.handle(NavKey.CHAR, 's');
+
+        assertFalse(screen.closed(), "first s must only warn");
+        List<String> lines = screen.lines(120, 0);
+        assertTrue(anyContains(lines, "! 1 comment(s) will be dropped; press s again to confirm"),
+                lines.toString());
+        assertTrue(screen.saveNote().contains(
+                        "1 commented-out field examples will not be kept"),
+                screen.saveNote().toString());
+        assertArrayEqualsQuiet(before, Files.readAllBytes(file));
+
+        screen.handle(NavKey.CHAR, 's');
+
+        assertTrue(screen.closed());
+        assertTrue(screen.saved());
+        String text = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+        assertTrue(text.contains("description: demo service plus"), text);
+        assertFalse(text.contains("stray tail note"), text);
+        assertFalse(screen.saveNote().isEmpty());
+    }
+
+    @Test
+    void unchangedBufferDoesNotMarkScreenDirty() throws Exception {
+        EditScreen screen = new EditScreen(model(), write());
+
+        press(screen, NavKey.ENTER);
+        press(screen, NavKey.ENTER);
+
+        assertFalse(screen.dirty());
+        assertFalse(screen.closed());
     }
 
     @Test

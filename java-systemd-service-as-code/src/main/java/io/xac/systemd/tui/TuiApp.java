@@ -571,27 +571,32 @@ public final class TuiApp {
     // --------------------------------------------------------------- editing
 
     /**
-     * 打开编辑屏：读当前 xac.yaml 的文本与注释，服务模型来自已加载的 spec。
-     * 语法坏到连 spec 都建不起来的包在 {@link ServicePackage#open} 就失败了，
-     * 根本进不到这里——这正是 design §7.5 的边界。
+     * 打开编辑屏：读当前 xac.yaml 的文本与注释。模型必须来自磁盘上最新的 spec，
+     * 不能拿 TUI 启动时的快照配新指纹——否则外部先改文件、再按 e/s 就会把别人的修改
+     * 静默覆盖。语法坏到连 spec 都建不起来的包在这里拒绝进入编辑器（design §7.5）。
      */
     private void openEditor() {
         if (editor != null) {
             return;
         }
-        Path file = servicePackage.packageDir().resolve("xac.yaml");
+        Path packageDir = servicePackage.packageDir();
+        Path file = packageDir.resolve("xac.yaml");
         try {
+            ServicePackage fresh = opener.open(packageDir);
             // 先取指纹再读文本：读完到保存之间任何外部改动都能被发现。
             FileStamp stamp = FileStamp.of(file);
             String text = readText(file);
             Comments comments = YamlCommentScanner.scan(text);
-            EditorModel model = EditorModel.from(servicePackage.spec(), comments);
+            EditorModel model = EditorModel.from(fresh.spec(), comments);
             editor = new EditScreen(model, file, stamp);
             setOverlayOpen(true);
             notice = "";
             dirty = true;
+        } catch (InvalidSpecException e) {
+            notice = "cannot edit: " + firstViolation(e);
+            dirty = true;
         } catch (IOException | RuntimeException e) {
-            notice = "edit unavailable: " + messageOf(e);
+            notice = "cannot edit: " + messageOf(e);
             dirty = true;
         }
     }
@@ -606,17 +611,19 @@ public final class TuiApp {
             return;
         }
         boolean wasSaved = current.saved();
+        List<String> notes = current.saveNote();
         editor = null;
         setOverlayOpen(false);
         dirty = true;
         if (wasSaved) {
-            reopenAfterSave();
+            reopenAfterSave(notes);
         }
     }
 
     /** 保存成功后重新打开包，让 spec/状态/日志都基于新文件；失败也要把原因说清楚。 */
-    private void reopenAfterSave() {
+    private void reopenAfterSave(List<String> notes) {
         Path packageDir = servicePackage.packageDir();
+        String savedNotice = "saved" + noteSuffix(notes);
         try {
             servicePackage = opener.open(packageDir);
             state = loadStateSafely();
@@ -626,13 +633,27 @@ public final class TuiApp {
             logPane = new LogPane(LOG_CAPACITY);
             logsEnded = false;
             startLogs();
-            notice = "saved";
+            notice = savedNotice;
         } catch (InvalidSpecException e) {
-            notice = "saved; reopen failed: " + firstViolation(e);
+            notice = savedNotice + "; reopen failed: " + firstViolation(e);
         } catch (RuntimeException e) {
-            notice = "saved; reopen failed: " + messageOf(e);
+            notice = savedNotice + "; reopen failed: " + messageOf(e);
         }
         dirty = true;
+    }
+
+    private static String noteSuffix(List<String> notes) {
+        if (notes == null || notes.isEmpty()) {
+            return "";
+        }
+        StringBuilder suffix = new StringBuilder("; ");
+        for (int i = 0; i < notes.size(); i++) {
+            if (i > 0) {
+                suffix.append("; ");
+            }
+            suffix.append(notes.get(i));
+        }
+        return suffix.toString();
     }
 
     private static String readText(Path file) throws IOException {
@@ -937,7 +958,8 @@ public final class TuiApp {
         int width = canvas.width();
         int height = canvas.height();
         canvas.clear();
-        canvas.text(0, 0, "edit " + state.service);
+        String service = state == null ? "xac" : state.service;
+        canvas.text(0, 0, "edit " + service);
         List<String> lines = current.lines(Math.max(1, width - 2), Math.max(1, height - 1));
         int row = 1;
         for (String line : lines) {

@@ -1,6 +1,7 @@
 package io.xac.systemd.spec;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -90,6 +91,30 @@ class LineDiffTest {
         assertEquals(2, diff.size());
         assertEquals("+ a", diff.get(0));
         assertEquals("+ b", diff.get(1));
+    }
+
+    @Test
+    void nullTextIsTreatedAsEmpty() {
+        assertEquals(Collections.singletonList("+ a"), LineDiff.diff(null, "a\n"));
+        assertEquals(Collections.singletonList("- a"), LineDiff.diff("a\n", null));
+        assertTrue(LineDiff.diff(null, null).isEmpty());
+    }
+
+    @Test
+    void comparesLastLineWithoutTrailingNewline() {
+        List<String> diff = LineDiff.diff("a\nb", "a\nc");
+
+        assertEquals(3, diff.size(), diff.toString());
+        assertEquals("  a", diff.get(0));
+        assertEquals("- b", diff.get(1));
+        assertEquals("+ c", diff.get(2));
+    }
+
+    @Test
+    void loneCarriageReturnInsideLineIsKept() {
+        List<String> diff = LineDiff.diff("a\rb\n", "a\rb\n");
+
+        assertEquals(Collections.singletonList("  a\rb"), diff);
     }
 
     @Test

@@ -44,7 +44,8 @@ public final class EditScreen {
     private boolean closed;
     private boolean saved;
     private boolean confirmDiscard;
-    private boolean overwriteArmed;
+    /** 用户已经被提示过一次（外部改动或注释将丢失），下一次 s 直接落地。 */
+    private boolean confirmArmed;
     private List<Violation> saveError = Collections.emptyList();
     private List<String> saveNote = Collections.emptyList();
 
@@ -161,19 +162,27 @@ public final class EditScreen {
         EditorField field = current();
         if (rowEdit) {
             List<String> values = new ArrayList<String>(field.values);
+            boolean changed;
             if (lineIndex >= 0 && lineIndex < values.size()) {
+                changed = !buffer.equals(values.get(lineIndex));
                 values.set(lineIndex, buffer);
             } else {
                 values.add(buffer);
                 lineIndex = values.size() - 1;
+                changed = true;
             }
-            mutate(field.path, values);
+            if (changed) {
+                mutate(field.path, values);
+            }
             rowEdit = false;
             buffer = "";
             mode = Mode.EDIT_LINES;
             return;
         }
-        mutate(field.path, Collections.singletonList(buffer));
+        String existing = field.values.isEmpty() ? "" : field.values.get(0);
+        if (!buffer.equals(existing)) {
+            mutate(field.path, Collections.singletonList(buffer));
+        }
         buffer = "";
         mode = Mode.BROWSE;
     }
@@ -373,7 +382,7 @@ public final class EditScreen {
         undoStack.add(model);
         model = model.with(path, values);
         dirty = true;
-        overwriteArmed = false;
+        confirmArmed = false;
         saveError = Collections.emptyList();
         saveNote = Collections.emptyList();
     }
@@ -385,7 +394,7 @@ public final class EditScreen {
         }
         model = undoStack.remove(undoStack.size() - 1);
         dirty = !undoStack.isEmpty();
-        overwriteArmed = false;
+        confirmArmed = false;
         saveError = Collections.emptyList();
         saveNote = Collections.emptyList();
         if (focus >= model.fields().size()) {
@@ -410,33 +419,49 @@ public final class EditScreen {
         } catch (IOException e) {
             saveError = Collections.singletonList(new Violation("", "cannot read file: " + messageOf(e)));
             saveNote = Collections.emptyList();
+            confirmArmed = false;
             return;
         }
         if (!result.ok()) {
             saveError = result.violations;
             saveNote = Collections.emptyList();
+            confirmArmed = false;
             focusFirst(result.violations);
             return;
         }
-        if (result.modifiedOutside && !overwriteArmed) {
-            overwriteArmed = true;
-            saveError = Collections.emptyList();
-            saveNote = Collections.singletonList(
-                    "file changed outside; press s again to overwrite");
+        if ((result.modifiedOutside || result.losesComments()) && !confirmArmed) {
+            confirmArmed = true;
+            saveError = Collections.singletonList(new Violation("", confirmPrompt(result)));
+            saveNote = result.orphanNotes;
             return;
         }
         saveError = Collections.emptyList();
+        // 已经确认要覆盖外部改动时，baseline 必然对不上，不能再拿它拦自己；
+        // 正常路径仍然在写前验一次指纹，堵住 prepare 到 commit 之间的改动。
+        FileStamp stamp = result.modifiedOutside ? null : baseline;
         try {
-            SaveFlow.commit(yamlFile, result.newText);
+            SaveFlow.commit(yamlFile, result.newText, stamp);
         } catch (IOException e) {
+            confirmArmed = false;
             saveError = Collections.singletonList(new Violation("", "save failed: " + messageOf(e)));
             return;
         }
         saveNote = result.orphanNotes;
         dirty = false;
-        overwriteArmed = false;
+        confirmArmed = false;
         saved = true;
         closed = true;
+    }
+
+    private static String confirmPrompt(SaveFlow.Result result) {
+        String comments = result.lostComments + " comment(s) will be dropped";
+        if (result.modifiedOutside && result.losesComments()) {
+            return comments + " and the file changed outside; press s again to confirm";
+        }
+        if (result.losesComments()) {
+            return comments + "; press s again to confirm";
+        }
+        return "file changed outside; press s again to overwrite";
     }
 
     private void focusFirst(List<Violation> violations) {
