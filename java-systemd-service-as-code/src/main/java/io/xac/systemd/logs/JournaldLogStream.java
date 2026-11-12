@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import io.xac.systemd.core.LogSourceException;
 import io.xac.systemd.exec.CommandRunner;
@@ -27,6 +28,8 @@ import io.xac.systemd.systemd.UnitNaming;
  */
 public final class JournaldLogStream implements LogStream {
 
+    private static final long JOIN_TIMEOUT_MILLIS = 2000L;
+
     private final CommandRunner runner;
     private final ServiceSpec spec;
     private final boolean follow;
@@ -36,11 +39,12 @@ public final class JournaldLogStream implements LogStream {
     private RunningCommand command;
     private Thread stdoutPump;
     private Thread stderrPump;
+    private boolean started;
     private boolean closed;
 
-    /** 便捷入口：默认跟随（与简报的两参签名一致）。 */
+    /** 便捷入口：默认不跟随，与 {@code ServicePackage.logs(int)} 的语义一致。 */
     public JournaldLogStream(CommandRunner runner, ServiceSpec spec) {
-        this(runner, spec, true);
+        this(runner, spec, false);
     }
 
     public JournaldLogStream(CommandRunner runner, ServiceSpec spec, boolean follow) {
@@ -56,12 +60,26 @@ public final class JournaldLogStream implements LogStream {
     }
 
     @Override
-    public void start(int lines, final LogSink sink) {
+    public void start(int lines, LogSink sink) {
+        start(lines, sink, sink);
+    }
+
+    @Override
+    public void start(int lines, final LogSink stdoutSink, final LogSink stderrSink) {
         if (lines <= 0) {
             throw new LogSourceException("-n must be a positive integer");
         }
-        if (sink == null) {
-            throw new NullPointerException("sink");
+        if (stdoutSink == null) {
+            throw new NullPointerException("stdoutSink");
+        }
+        if (stderrSink == null) {
+            throw new NullPointerException("stderrSink");
+        }
+        synchronized (lock) {
+            if (started) {
+                throw new IllegalStateException("log stream already started");
+            }
+            started = true;
         }
         List<String> argv = new ArrayList<String>(Arrays.asList(
                 "journalctl", "-u", UnitNaming.unitName(spec), "--no-pager", "-n",
@@ -70,28 +88,28 @@ public final class JournaldLogStream implements LogStream {
             argv.add("--follow");
         }
 
-        RunningCommand started;
+        RunningCommand command;
         try {
-            started = runner.start(argv);
+            command = runner.start(argv);
         } catch (IllegalStateException e) {
-            throw new LogSourceException(e.getMessage());
+            throw new LogSourceException(e.getMessage(), e);
         }
 
         synchronized (lock) {
-            command = started;
+            this.command = command;
             if (closed) {
-                started.destroy();
+                command.destroy();
             }
         }
         Thread hook = follow ? registerShutdownHook() : null;
-        LogSink stderrSink = follow ? sink : new LogSink() {
+        LogSink journalStderr = follow ? stderrSink : new LogSink() {
             @Override
             public void accept(String line) {
                 stderrText.append(line).append('\n');
             }
         };
-        Thread out = newPump("xac-journald-stdout", started, true, sink);
-        Thread err = newPump("xac-journald-stderr", started, false, stderrSink);
+        Thread out = newPump("xac-journald-stdout", command, true, stdoutSink);
+        Thread err = newPump("xac-journald-stderr", command, false, journalStderr);
         synchronized (lock) {
             stdoutPump = out;
             stderrPump = err;
@@ -103,12 +121,12 @@ public final class JournaldLogStream implements LogStream {
                 join(out);
                 join(err);
                 try {
-                    started.waitFor();
+                    command.waitFor();
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
             } else {
-                int exitCode = awaitExit(started);
+                int exitCode = awaitExit(command);
                 join(out);
                 join(err);
                 if (exitCode != 0 && !isClosed()) {
@@ -118,6 +136,11 @@ public final class JournaldLogStream implements LogStream {
         } finally {
             removeShutdownHook(hook);
         }
+    }
+
+    @Override
+    public boolean isFollow() {
+        return follow;
     }
 
     @Override
@@ -134,11 +157,19 @@ public final class JournaldLogStream implements LogStream {
             out = stdoutPump;
             err = stderrPump;
         }
-        if (running != null) {
-            running.destroy();
+        if (running == null) {
+            join(out, JOIN_TIMEOUT_MILLIS);
+            join(err, JOIN_TIMEOUT_MILLIS);
+            return;
         }
-        join(out);
-        join(err);
+        running.destroy();
+        boolean outDone = join(out, JOIN_TIMEOUT_MILLIS);
+        boolean errDone = join(err, JOIN_TIMEOUT_MILLIS);
+        if (!outDone || !errDone) {
+            running.destroyForcibly();
+            join(out, JOIN_TIMEOUT_MILLIS);
+            join(err, JOIN_TIMEOUT_MILLIS);
+        }
     }
 
     private static int awaitExit(RunningCommand command) {
@@ -197,6 +228,30 @@ public final class JournaldLogStream implements LogStream {
         if (interrupted) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    /** 最多等待 {@code timeoutMillis}，返回线程是否已经退出。 */
+    private static boolean join(Thread thread, long timeoutMillis) {
+        if (thread == null || thread == Thread.currentThread()) {
+            return true;
+        }
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
+        boolean interrupted = false;
+        while (thread.isAlive()) {
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0L) {
+                break;
+            }
+            try {
+                thread.join(Math.max(1L, TimeUnit.NANOSECONDS.toMillis(remaining)));
+            } catch (InterruptedException e) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
+        return !thread.isAlive();
     }
 
     private boolean isClosed() {

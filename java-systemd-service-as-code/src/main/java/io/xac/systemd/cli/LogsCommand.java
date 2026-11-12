@@ -60,19 +60,30 @@ public final class LogsCommand implements Callable<Integer> {
         }
 
         final StringBuilder collected = new StringBuilder();
-        LogSink sink = new LogSink() {
+        LogSink stdoutSink = new LogSink() {
             @Override
             public void accept(String line) {
                 if (follow) {
                     out.print(line);
                     out.print('\n');
+                    out.flush();
                 } else {
                     collected.append(line).append('\n');
                 }
             }
         };
+        LogSink stderrSink = new LogSink() {
+            @Override
+            public void accept(String line) {
+                if (follow) {
+                    err.print(line);
+                    err.print('\n');
+                    err.flush();
+                }
+            }
+        };
         try (LogStream stream = pkg.logs(lines, follow)) {
-            stream.start(lines, sink);
+            stream.start(lines, stdoutSink, stderrSink);
         } catch (LogSourceException e) {
             err.println(e.getMessage().trim());
             return 2;

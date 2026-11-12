@@ -52,6 +52,24 @@ class FileLogStreamTest {
     }
 
     @Test
+    void reportsMissingFileWithConfiguredText() {
+        Path missing = dir.resolve("missing.log");
+
+        LogSourceException failure = assertThrows(LogSourceException.class,
+                () -> new FileLogStream(missing, "/raw//missing.log", 20L, false));
+
+        assertEquals("log file not found: /raw//missing.log", failure.getMessage());
+    }
+
+    @Test
+    void defaultsToNonFollow() throws IOException {
+        FileLogStream stream = new FileLogStream(file("a\n"), 20L);
+
+        assertFalse(stream.isFollow());
+        stream.close();
+    }
+
+    @Test
     void nonFollowReadsTailAndReturns() throws IOException {
         Path log = file("one\ntwo\nthree\n");
         final List<String> lines = new ArrayList<String>();
@@ -65,6 +83,15 @@ class FileLogStreamTest {
         });
 
         assertEquals(Arrays.asList("two", "three"), lines);
+        stream.close();
+    }
+
+    @Test
+    void startIsSingleUse() throws IOException {
+        FileLogStream stream = new FileLogStream(file("a\n"), 20L, false);
+        stream.start(1, new NoopSink());
+
+        assertThrows(IllegalStateException.class, () -> stream.start(1, new NoopSink()));
         stream.close();
     }
 
@@ -107,6 +134,38 @@ class FileLogStreamTest {
         worker.join(3000L);
         assertFalse(worker.isAlive(), "start() must return after close()");
         assertEquals(3, lines.size(), lines.toString());
+    }
+
+    @Test
+    void flushPendingEmitsTrailingPartialLine() throws Exception {
+        Path log = file("two\nthree");
+        final List<String> lines = Collections.synchronizedList(new ArrayList<String>());
+        final FileLogStream stream = new FileLogStream(log, 20L, true);
+        Thread worker = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                stream.start(2, new LogSink() {
+                    @Override
+                    public void accept(String line) {
+                        lines.add(line);
+                    }
+                });
+            }
+        });
+        worker.start();
+        waitFor(new Condition() {
+            @Override
+            public boolean holds() {
+                return lines.size() >= 1;
+            }
+        });
+        assertEquals(Arrays.asList("two"), new ArrayList<String>(lines));
+
+        stream.close();
+        worker.join(3000L);
+
+        assertFalse(worker.isAlive(), "start() must return after close()");
+        assertEquals(Arrays.asList("two", "three"), new ArrayList<String>(lines));
     }
 
     @Test

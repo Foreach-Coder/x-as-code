@@ -120,7 +120,7 @@ public final class ServicePackage {
             throw new LogSourceException("-n must be a positive integer");
         }
         if (spec.logFile != null) {
-            return new FileLogStream(Paths.get(spec.logFile), 200L, follow);
+            return new FileLogStream(Paths.get(spec.logFile), spec.logFile, 200L, follow);
         }
         return new JournaldLogStream(runner, spec, follow);
     }

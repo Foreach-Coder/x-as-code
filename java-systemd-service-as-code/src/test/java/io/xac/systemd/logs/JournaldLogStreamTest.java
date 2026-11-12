@@ -16,6 +16,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -61,6 +63,23 @@ class JournaldLogStreamTest {
 
         assertEquals(argv, runner.startedCalls().get(0));
         assertEquals(Arrays.asList("one", "two"), lines);
+        stream.close();
+    }
+
+    @Test
+    void followRoutesStdoutAndStderrToSeparateSinks() {
+        ServiceSpec spec = spec();
+        List<String> argv = journalArgv(10, true);
+        RecordingRunner runner = new RecordingRunner();
+        runner.addStartedOutput(argv, "out1\nout2\n", "err1\nerr2\n", false);
+        final List<String> stdoutLines = new ArrayList<String>();
+        final List<String> stderrLines = new ArrayList<String>();
+        JournaldLogStream stream = new JournaldLogStream(runner, spec, true);
+
+        stream.start(10, collector(stdoutLines), collector(stderrLines));
+
+        assertEquals(Arrays.asList("out1", "out2"), stdoutLines);
+        assertEquals(Arrays.asList("err1", "err2"), stderrLines);
         stream.close();
     }
 
@@ -130,11 +149,13 @@ class JournaldLogStreamTest {
             }
         };
         final JournaldLogStream stream = new JournaldLogStream(runner, spec, false);
+        final List<String> stderrSinkLines = new ArrayList<String>();
 
         LogSourceException failure = assertThrows(LogSourceException.class,
-                () -> stream.start(3, new NoopSink()));
+                () -> stream.start(3, new NoopSink(), collector(stderrSinkLines)));
 
         assertEquals("boom\n", failure.getMessage());
+        assertTrue(stderrSinkLines.isEmpty(), stderrSinkLines.toString());
         stream.close();
     }
 
@@ -162,6 +183,22 @@ class JournaldLogStreamTest {
                 () -> stream.start(10, new NoopSink()));
 
         assertEquals("cannot execute journalctl: no such file", failure.getMessage());
+        assertTrue(failure.getCause() instanceof IllegalStateException,
+                String.valueOf(failure.getCause()));
+        stream.close();
+    }
+
+    @Test
+    void startIsSingleUse() {
+        ServiceSpec spec = spec();
+        List<String> argv = journalArgv(5, false);
+        RecordingRunner runner = new RecordingRunner();
+        runner.addStartedOutput(argv, "hello\n", "", false);
+        JournaldLogStream stream = new JournaldLogStream(runner, spec, false);
+
+        stream.start(5, new NoopSink());
+
+        assertThrows(IllegalStateException.class, () -> stream.start(5, new NoopSink()));
         stream.close();
     }
 
@@ -172,7 +209,10 @@ class JournaldLogStreamTest {
         RecordingRunner recording = new RecordingRunner();
         recording.addStartedOutput(argv, "one\n", "warning\n", true);
         final CapturingRunner runner = new CapturingRunner(recording);
-        final List<String> lines = Collections.synchronizedList(new ArrayList<String>());
+        final List<String> stdoutLines = Collections.synchronizedList(new ArrayList<String>());
+        final List<String> stderrLines = Collections.synchronizedList(new ArrayList<String>());
+        final CountDownLatch stdoutReady = new CountDownLatch(1);
+        final CountDownLatch stderrReady = new CountDownLatch(1);
         final JournaldLogStream stream = new JournaldLogStream(runner, spec, true);
         Thread worker = new Thread(new Runnable() {
             @Override
@@ -180,18 +220,24 @@ class JournaldLogStreamTest {
                 stream.start(10, new LogSink() {
                     @Override
                     public void accept(String line) {
-                        lines.add(line);
+                        stdoutLines.add(line);
+                        stdoutReady.countDown();
+                    }
+                }, new LogSink() {
+                    @Override
+                    public void accept(String line) {
+                        stderrLines.add(line);
+                        stderrReady.countDown();
                     }
                 });
             }
         });
         worker.start();
 
-        long deadline = System.currentTimeMillis() + 3000L;
-        while (lines.size() < 2 && System.currentTimeMillis() < deadline) {
-            Thread.sleep(20L);
-        }
-        assertEquals(Arrays.asList("one", "warning"), new ArrayList<String>(lines));
+        assertTrue(stdoutReady.await(3, TimeUnit.SECONDS), "stdout line must arrive");
+        assertTrue(stderrReady.await(3, TimeUnit.SECONDS), "stderr line must arrive");
+        assertEquals(Arrays.asList("one"), new ArrayList<String>(stdoutLines));
+        assertEquals(Arrays.asList("warning"), new ArrayList<String>(stderrLines));
         assertTrue(runner.command.isAlive(), "process should still be alive while streaming");
 
         stream.close();
@@ -203,6 +249,15 @@ class JournaldLogStreamTest {
             assertFalse(thread.isAlive() && thread.getName().startsWith("xac-journald-"),
                     "residual thread: " + thread.getName());
         }
+    }
+
+    private static LogSink collector(final List<String> lines) {
+        return new LogSink() {
+            @Override
+            public void accept(String line) {
+                lines.add(line);
+            }
+        };
     }
 
     private static final class CapturingRunner implements CommandRunner {

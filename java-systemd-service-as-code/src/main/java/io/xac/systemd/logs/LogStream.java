@@ -18,6 +18,20 @@ public interface LogStream extends AutoCloseable {
      */
     void start(int lines, LogSink sink);
 
+    /**
+     * 分别接收 stdout 与 stderr 的入口。默认实现把两路合成一路，供只关心合并日志的
+     * 调用方（如 TUI 日志窗）使用；journald 实现会覆写它以保留 stderr 通道。
+     *
+     * <p>约定与 {@link #start(int, LogSink)} 相同：阻塞到来源结束或 {@link #close()}。
+     * 非 follow 模式下 stderr 通常只用于构造失败消息，不应逐行输出。
+     */
+    default void start(int lines, LogSink stdoutSink, LogSink stderrSink) {
+        start(lines, stdoutSink);
+    }
+
+    /** 构造时选择的模式；{@code true} 表示来源结束后继续跟随。 */
+    boolean isFollow();
+
     @Override
     void close();
 }

@@ -83,6 +83,7 @@ class LogsCommandTest {
     @Test
     void missingLogFilePrintsExactStderrAndExitsTwo() throws Exception {
         Path missing = pkg.resolve("missing.log");
+        String configured = missing.toString().replace("\\", "/");
         writeSpecWithLogFile(missing);
         ByteArrayOutputStream outBuffer = new ByteArrayOutputStream();
         ByteArrayOutputStream errBuffer = new ByteArrayOutputStream();
@@ -92,7 +93,7 @@ class LogsCommandTest {
 
         assertEquals(2, code);
         assertEquals("", outBuffer.toString("UTF-8"));
-        assertEquals("log file not found: " + missing + EOL, errBuffer.toString("UTF-8"));
+        assertEquals("log file not found: " + configured + EOL, errBuffer.toString("UTF-8"));
         assertTrue(runner.startedCalls().isEmpty(), runner.startedCalls().toString());
     }
 
@@ -144,6 +145,37 @@ class LogsCommandTest {
         assertEquals("", errBuffer.toString("UTF-8"));
         assertEquals(journaldArgv(10, true), runner.startedCalls().get(0));
         assertTrue(runner.calls().isEmpty(), runner.calls().toString());
+    }
+
+    @Test
+    void journalFollowSendsStderrToErr() throws Exception {
+        writeSpec();
+        ByteArrayOutputStream outBuffer = new ByteArrayOutputStream();
+        ByteArrayOutputStream errBuffer = new ByteArrayOutputStream();
+        RecordingRunner runner = new RecordingRunner();
+        runner.addStartedOutput(journaldArgv(10, true), "out\n", "warn\n", false);
+
+        int code = run(runner, 10, true, outBuffer, errBuffer);
+
+        assertEquals(0, code);
+        assertEquals("out\n", outBuffer.toString("UTF-8"));
+        assertEquals("warn\n", errBuffer.toString("UTF-8"));
+        assertEquals(journaldArgv(10, true), runner.startedCalls().get(0));
+    }
+
+    @Test
+    void journalNonFollowSuccessDiscardsStderr() throws Exception {
+        writeSpec();
+        ByteArrayOutputStream outBuffer = new ByteArrayOutputStream();
+        ByteArrayOutputStream errBuffer = new ByteArrayOutputStream();
+        RecordingRunner runner = new RecordingRunner();
+        runner.addStartedOutput(journaldArgv(10, false), "out\n", "warn\n", false);
+
+        int code = run(runner, 10, false, outBuffer, errBuffer);
+
+        assertEquals(0, code);
+        assertEquals("out\n", outBuffer.toString("UTF-8"));
+        assertEquals("", errBuffer.toString("UTF-8"));
     }
 
     @Test

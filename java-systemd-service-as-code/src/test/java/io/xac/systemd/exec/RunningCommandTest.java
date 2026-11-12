@@ -50,6 +50,21 @@ class RunningCommandTest {
     }
 
     @Test
+    void destroyForciblyTerminatesProcess() {
+        assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
+            RunningCommand command = new ProcessRunner()
+                    .start(ExecFixtures.java(ExecFixtures.Waiter.class.getName()));
+            int first = command.stdout().read();
+            assertEquals('R', first);
+            assertTrue(command.isAlive());
+            command.destroyForcibly();
+            command.waitFor();
+            assertFalse(command.isAlive());
+            return null;
+        });
+    }
+
+    @Test
     void recordingRunnerScriptsStartedCommands() {
         assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
             RecordingRunner runner = new RecordingRunner();

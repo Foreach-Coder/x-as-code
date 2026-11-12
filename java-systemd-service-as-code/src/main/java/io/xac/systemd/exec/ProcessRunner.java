@@ -77,6 +77,11 @@ public final class ProcessRunner implements CommandRunner {
             }
 
             @Override
+            public void destroyForcibly() {
+                process.destroyForcibly();
+            }
+
+            @Override
             public boolean isAlive() {
                 return process.isAlive();
             }

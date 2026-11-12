@@ -350,7 +350,11 @@ class ServicePackageTest {
         LogStream stream = opened.logs(10);
 
         assertTrue(stream instanceof JournaldLogStream, stream.getClass().getName());
+        assertFalse(stream.isFollow(), "logs(int) must be non-follow");
+        LogStream following = opened.logs(10, true);
+        assertTrue(following.isFollow(), "logs(int, true) must follow");
         stream.close();
+        following.close();
     }
 
     @Test
@@ -370,6 +374,7 @@ class ServicePackageTest {
         LogStream stream = opened.logs(10);
 
         assertTrue(stream instanceof FileLogStream, stream.getClass().getName());
+        assertFalse(stream.isFollow(), "logs(int) must be non-follow");
         stream.close();
     }
 }

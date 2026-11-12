@@ -133,6 +133,11 @@ public final class RecordingRunner implements CommandRunner {
         }
 
         @Override
+        public void destroyForcibly() {
+            destroy();
+        }
+
+        @Override
         public boolean isAlive() {
             return !destroyed && (script.blockUntilDestroyed || !stdout.eofReached());
         }

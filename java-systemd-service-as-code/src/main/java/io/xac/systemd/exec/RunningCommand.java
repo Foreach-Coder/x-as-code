@@ -24,6 +24,11 @@ public interface RunningCommand {
     /** 请求结束子进程（{@link Process#destroy()} 语义）。 */
     void destroy();
 
+    /** 强制结束子进程（{@link Process#destroyForcibly()} 语义）；默认退化为 {@link #destroy()}。 */
+    default void destroyForcibly() {
+        destroy();
+    }
+
     /** 子进程是否仍在运行。 */
     boolean isAlive();
 }

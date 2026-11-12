@@ -25,22 +25,29 @@ public final class FileLogStream implements LogStream {
     private final Object lock = new Object();
 
     private FileTail tail;
+    private boolean started;
     private boolean closed;
 
-    /** 便捷入口：默认跟随（与简报的两参签名一致）。 */
+    /** 便捷入口：默认不跟随，与 {@code ServicePackage.logs(int)} 的语义一致。 */
     public FileLogStream(Path file, long pollMillis) {
-        this(file, pollMillis, true);
+        this(file, file == null ? null : file.toString(), pollMillis, false);
     }
 
     public FileLogStream(Path file, long pollMillis, boolean follow) {
+        this(file, file == null ? null : file.toString(), pollMillis, follow);
+    }
+
+    /** {@code displayPath} 用于错误文案，保留 {@code xac.yaml} 里写的原始字符串。 */
+    public FileLogStream(Path file, String displayPath, long pollMillis, boolean follow) {
         if (file == null) {
             throw new NullPointerException("file");
         }
+        String shown = displayPath == null ? file.toString() : displayPath;
         if (!Files.exists(file)) {
-            throw new LogSourceException("log file not found: " + file);
+            throw new LogSourceException("log file not found: " + shown);
         }
         if (!Files.isReadable(file)) {
-            throw new LogSourceException("log file is not readable: " + file);
+            throw new LogSourceException("log file is not readable: " + shown);
         }
         this.file = file;
         this.pollMillis = pollMillis;
@@ -54,6 +61,12 @@ public final class FileLogStream implements LogStream {
         }
         if (sink == null) {
             throw new NullPointerException("sink");
+        }
+        synchronized (lock) {
+            if (started) {
+                throw new IllegalStateException("log stream already started");
+            }
+            started = true;
         }
         try {
             if (!follow) {
@@ -74,10 +87,15 @@ public final class FileLogStream implements LogStream {
                 out.flushPending();
             }
         } catch (IOException e) {
-            throw new LogSourceException("cannot read log file: " + e.getMessage());
+            throw new LogSourceException("cannot read log file: " + e.getMessage(), e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    @Override
+    public boolean isFollow() {
+        return follow;
     }
 
     @Override
