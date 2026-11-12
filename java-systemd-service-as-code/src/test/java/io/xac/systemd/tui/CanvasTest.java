@@ -209,4 +209,36 @@ class CanvasTest {
         assertEquals(' ', canvas.charAt(0, 0));
         assertEquals('x', canvas.charAt(1, 0));
     }
+
+    @Test
+    void puttingOverSecondColumnOfCjkGlyphClearsTheWholeGlyph() {
+        Canvas canvas = new Canvas(4, 1);
+        canvas.text(0, 0, "中");
+        canvas.put(1, 0, 'x');
+        // 覆盖宽字形的占位格时，字形本身必须一起消失，不能留下半个「中」。
+        assertEquals(' ', canvas.charAt(0, 0));
+        assertEquals('x', canvas.charAt(1, 0));
+        assertEquals(" x  ", canvas.line(0));
+    }
+
+    @Test
+    void putIgnoresIsolatedSurrogates() {
+        Canvas canvas = new Canvas(3, 1);
+        canvas.put(0, 0, '\uD83D');
+        canvas.put(1, 0, '\uDE00');
+        // 孤立代理无法单独成字，写进去只会留下半个代理对。
+        assertEquals("   ", canvas.line(0));
+    }
+
+    @Test
+    void hlineRejectsCellsThatWouldBreakColumnInvariants() {
+        Canvas canvas = new Canvas(4, 2);
+        IllegalArgumentException wide = assertThrows(IllegalArgumentException.class,
+                () -> canvas.hline(0, '中'));
+        assertEquals("hline does not accept double-width cells", wide.getMessage());
+        assertThrows(IllegalArgumentException.class, () -> canvas.hline(1, '\uD83D'));
+        // 拒绝发生在填充之前，画布保持原样。
+        assertEquals("    ", canvas.line(0));
+        assertEquals("    ", canvas.line(1));
+    }
 }

@@ -52,10 +52,11 @@ public final class Canvas {
     }
 
     /**
-     * 在 (x, y) 写一个字符。宽字符会再占一格占位；越界忽略。
+     * 在 (x, y) 写一个字符。宽字符会再占一格占位；越界、占位符与孤立代理忽略。
      */
     public void put(int x, int y, char c) {
-        if (x < 0 || x >= width || y < 0 || y >= height || c == PLACEHOLDER) {
+        if (x < 0 || x >= width || y < 0 || y >= height
+                || c == PLACEHOLDER || Character.isSurrogate(c)) {
             return;
         }
         eraseGlyphAt(y, x);
@@ -128,10 +129,21 @@ public final class Canvas {
         }
     }
 
-    /** 用字符填满第 y 行；y 越界忽略。 */
+    /**
+     * 用字符填满第 y 行；y 越界忽略。
+     *
+     * @throws IllegalArgumentException c 是宽字符或孤立代理时：逐格填充会让一个字形
+     *         只占一格，破坏「宽字符占两列」的列宽不变量。
+     */
     public void hline(int y, char c) {
         if (y < 0 || y >= height) {
             return;
+        }
+        if (displayWidth(c) == 2) {
+            throw new IllegalArgumentException("hline does not accept double-width cells");
+        }
+        if (Character.isSurrogate(c)) {
+            throw new IllegalArgumentException("hline does not accept isolated surrogates");
         }
         Arrays.fill(cells[y], c);
     }
