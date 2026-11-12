@@ -4,10 +4,15 @@ import io.xac.systemd.spec.Comments;
 import io.xac.systemd.spec.Lifecycle;
 import io.xac.systemd.spec.Schema;
 import io.xac.systemd.spec.ServiceSpec;
+import io.xac.systemd.spec.SpecLoader;
+import io.xac.systemd.spec.SpecWriter;
 import io.xac.systemd.spec.Violation;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -63,6 +68,19 @@ class EditorModelTest {
     private static String message(IllegalArgumentException e) {
         String message = e.getMessage();
         return message == null ? "" : message;
+    }
+
+    /** 写 yaml 到包目录，返回写入的文本。 */
+    private String writeYaml(ServiceSpec spec) throws IOException {
+        String text = SpecWriter.render(spec);
+        Files.write(pkg.resolve("xac.yaml"), text.getBytes(StandardCharsets.UTF_8));
+        return text;
+    }
+
+    private ServiceSpec reload() throws IOException {
+        SpecLoader.Result result = SpecLoader.load(pkg);
+        assertTrue(result.ok(), String.valueOf(result.violations));
+        return result.spec;
     }
 
     // ---------------------------------------------------------------- tests
@@ -313,5 +331,135 @@ class EditorModelTest {
                         Collections.<String, List<String>>emptyMap(),
                         Collections.<String>emptyList())).field("logs.file").help);
         assertEquals("", model.field("artifact.jar").help);
+    }
+
+    // ------------------------------------------------- fix round 1 regressions
+
+    @Test
+    void preservesRawWhitespaceThroughRenderAndReload() throws IOException {
+        ServiceSpec spec = ServiceSpec.builder(pkg)
+                .name("demo")
+                .jar(" app.jar")
+                .java("/usr/bin/java")
+                .opts(list(" -Xmx1g "))
+                .env(map("FOO", "bar "))
+                .properties(map("k ", " v "))
+                .pathLinks(list(" ./conf:/opt/x "))
+                .logFile("/var/log/x.log ")
+                .build();
+        String text = writeYaml(spec);
+        ServiceSpec loaded = reload();
+        EditorModel model = EditorModel.from(loaded, Comments.empty());
+
+        assertEquals(list(" app.jar"), model.field("artifact.jar").values);
+        assertEquals(list(" -Xmx1g "), model.field("runtime.opts").values);
+        assertEquals(list("FOO=bar "), model.field("env").values);
+        assertEquals(list("k = v "), model.field("properties").values);
+        assertEquals(list(" ./conf:/opt/x "), model.field("path-links").values);
+        assertEquals(list("/var/log/x.log "), model.field("logs.file").values);
+
+        ServiceSpec back = model.toSpec();
+        assertEquals(spec.jar, back.jar);
+        assertEquals(list(" -Xmx1g "), back.opts);
+        assertEquals("bar ", back.env.get("FOO"));
+        assertEquals(" v ", back.properties.get("k "));
+        assertEquals(list(" ./conf:/opt/x "), back.pathLinks);
+        assertEquals("/var/log/x.log ", back.logFile);
+
+        // 再次渲染逐字节相同，且没有改写磁盘上的文件。
+        assertEquals(text, SpecWriter.render(back));
+        assertEquals(text, new String(
+                Files.readAllBytes(pkg.resolve("xac.yaml")), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void rejectsMapKeyContainingEquals() throws IOException {
+        ServiceSpec spec = ServiceSpec.builder(pkg)
+                .name("demo")
+                .jar("app.jar")
+                .java("/usr/bin/java")
+                .properties(map("a=b", "v2"))
+                .build();
+        writeYaml(spec);
+        EditorModel model = EditorModel.from(reload(), Comments.empty());
+
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                model::toSpec);
+        assertTrue(message(e).contains("properties"), message(e));
+        assertTrue(message(e).contains("a=b"), message(e));
+
+        // validate 不抛异常，而是把冲突折成 violation。
+        List<Violation> violations = model.validate();
+        boolean conflict = false;
+        for (Violation violation : violations) {
+            if ("properties".equals(violation.path)
+                    && violation.message.contains("a=b")) {
+                conflict = true;
+            }
+        }
+        assertTrue(conflict, String.valueOf(violations));
+
+        // 用户重写该字段后即可保存。
+        ServiceSpec fixed = model.with("properties", list("a=v2")).toSpec();
+        assertEquals("v2", fixed.properties.get("a"));
+    }
+
+    @Test
+    void validateReportsRequiredEmptiesInsteadOfThrowing() {
+        EditorModel model = EditorModel.from(ServiceSpec.builder(pkg).build(),
+                Comments.empty());
+
+        List<Violation> violations = model.validate();
+        assertEquals(3, violations.size(), String.valueOf(violations));
+        assertEquals("name", violations.get(0).path);
+        assertEquals("artifact.jar", violations.get(1).path);
+        assertEquals("runtime.java", violations.get(2).path);
+        for (Violation violation : violations) {
+            assertEquals("must not be empty", violation.message);
+        }
+    }
+
+    @Test
+    void validateTurnsDraftErrorsIntoViolations() {
+        EditorModel base = EditorModel.from(fullSpec(), Comments.empty());
+
+        List<Violation> integer = base.with("lifecycle.restart-sec", list("12x")).validate();
+        assertEquals(1, integer.size(), String.valueOf(integer));
+        assertEquals("lifecycle.restart-sec", integer.get(0).path);
+        assertTrue(integer.get(0).message.contains("12x"), integer.get(0).message);
+
+        List<Violation> map = base.with("env", list("NOEQUALS")).validate();
+        assertEquals(1, map.size(), String.valueOf(map));
+        assertEquals("env", map.get(0).path);
+        assertTrue(map.get(0).message.contains("line 1"), map.get(0).message);
+    }
+
+    @Test
+    void keepsEmptyMapKeyAndRoundTripsIt() throws IOException {
+        ServiceSpec spec = ServiceSpec.builder(pkg)
+                .name("demo")
+                .jar("app.jar")
+                .java("/usr/bin/java")
+                .properties(map("", "v"))
+                .build();
+        String text = writeYaml(spec);
+        EditorModel model = EditorModel.from(reload(), Comments.empty());
+
+        assertEquals(list("=v"), model.field("properties").values);
+        ServiceSpec back = model.toSpec();
+        assertEquals("v", back.properties.get(""));
+        assertEquals(text, SpecWriter.render(back));
+    }
+
+    @Test
+    void leavesTheFileUntouchedWhenNothingChanged() throws IOException {
+        String text = writeYaml(fullSpec());
+        byte[] before = Files.readAllBytes(pkg.resolve("xac.yaml"));
+
+        ServiceSpec back = EditorModel.from(reload(), Comments.empty()).toSpec();
+
+        assertEquals(text, SpecWriter.render(back));
+        assertEquals(new String(before, StandardCharsets.UTF_8),
+                new String(Files.readAllBytes(pkg.resolve("xac.yaml")), StandardCharsets.UTF_8));
     }
 }

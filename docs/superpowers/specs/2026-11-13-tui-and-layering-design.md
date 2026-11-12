@@ -265,16 +265,27 @@ final class ApplyResult { String text; int kept; int dropped; }
 
 `name` 行尾提示：`改名等于换服务，请新建包目录`。
 
+字段顺序固定为 14 个，与 `Schema` 的声明顺序一致：`name`（只读）、`description`、
+`artifact.jar`、`runtime.java`、`runtime.opts`、`env`、`properties`、`workdir`、
+`path-links`、`logs.file`、`lifecycle.auto-start`、`lifecycle.restart`、
+`lifecycle.restart-sec`、`lifecycle.timeout-stop-sec`。行标签用英文，帮助文本取
+`Comments` 中同路径的注释：连续前置注释优先（多行以 `\n` 连接），否则用同行注释，
+都没有则空。空列表 / 空 map 显示 0 行，不插入占位空行（空白行本身是非法输入）。
+
 ### 7.2 校验
 
 - 失焦校验：用草稿构建 `ServiceSpec`，跑 `ValidationRunner`，取路径前缀匹配当前字段的 `Violation` 显示在行尾；不阻塞编辑。
 - 保存前全量校验：有错则停留，底部列错误，光标跳到第一条。
+- `EditorModel.validate()` 是**不抛异常**的全量入口：先检查 `name`、`artifact.jar`、
+  `runtime.java` 非空（`Violation(path, "must not be empty")`），再做草稿到 spec 的
+  转换，最后跑 `ValidationRunner`；转换失败的 `IllegalArgumentException` 折成
+  该字段的 `Violation`，与其他错误一起显示。因此 UI 可以用同一个调用渲染行尾错误。
 - 跨字段规则沿用现有 Validator：`${VAR}` 必须在 `env` 存在；`path-links` 目标护栏；绝对路径；换行注入拒绝。
 
 ### 7.3 保存
 
 ```
-s → 草稿 spec → Schema + ValidationRunner
+s → 草稿 spec → EditorModel.validate（必填非空 + Schema + ValidationRunner）
    ├─ 错误 → 停留、列错、跳第一条
    └─ 通过 → SpecWriter 生成规范文本（含保留注释）
         → diff 面板（逐行对比）

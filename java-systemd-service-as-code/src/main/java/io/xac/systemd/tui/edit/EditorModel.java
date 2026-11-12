@@ -5,12 +5,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import io.xac.systemd.spec.Comments;
 import io.xac.systemd.spec.Lifecycle;
-import io.xac.systemd.spec.PathLink;
 import io.xac.systemd.spec.Schema;
 import io.xac.systemd.spec.ServiceSpec;
 import io.xac.systemd.spec.ValidationRunner;
@@ -20,9 +21,10 @@ import io.xac.systemd.spec.Violation;
  * Schema 驱动的编辑草稿：固定 14 个字段，在文本值与 {@link ServiceSpec} 之间双向转换。
  *
  * <p>模型不可变：{@link #with(String, List)} 返回副本，原对象与原先读到的
- * {@link EditorField} 都不受影响。{@link #toSpec()} 只做结构转换，非法文本抛
- * {@link IllegalArgumentException}（消息带字段路径与行号/值）；语义校验交给
- * {@link #validate()}，其路径与文案与 CLI 完全一致。</p>
+ * {@link EditorField} 都不受影响。文本值是<strong>用户原文</strong>：不 trim、
+ * 不改写外层空白，只有判空时才用 {@code trim().isEmpty()}。{@link #toSpec()} 只做
+ * 结构转换，非法文本抛 {@link IllegalArgumentException}（消息以字段路径开头）；
+ * {@link #validate()} 不抛异常，把必填缺失与转换失败都收敛成 {@link Violation}。</p>
  */
 public final class EditorModel {
 
@@ -54,7 +56,14 @@ public final class EditorModel {
     private final List<EditorField> fields;
     private final Map<String, EditorField> byPath;
 
-    private EditorModel(Path packageDir, List<EditorField> fields) {
+    /**
+     * 载入时无法用 {@code KEY=VALUE} 行表示的 map 键（含 {@code =}）。
+     * 路径 → 说明；用户重写该字段后清除。
+     */
+    private final Map<String, String> mapConflicts;
+
+    private EditorModel(Path packageDir, List<EditorField> fields,
+                        Map<String, String> mapConflicts) {
         this.packageDir = packageDir;
         this.fields = Collections.unmodifiableList(new ArrayList<EditorField>(fields));
         LinkedHashMap<String, EditorField> index = new LinkedHashMap<String, EditorField>();
@@ -62,6 +71,8 @@ public final class EditorModel {
             index.put(field.path, field);
         }
         this.byPath = Collections.unmodifiableMap(index);
+        this.mapConflicts = Collections.unmodifiableMap(
+                new LinkedHashMap<String, String>(mapConflicts));
     }
 
     // ------------------------------------------------------------ construction
@@ -117,7 +128,11 @@ public final class EditorModel {
         out.add(field("lifecycle.timeout-stop-sec", Schema.Type.INTEGER, false,
                 single(lifecycle.timeoutStopSec == null ? "" : lifecycle.timeoutStopSec.toString()),
                 Collections.<String>emptyList(), source));
-        return new EditorModel(spec.packageDir, out);
+
+        LinkedHashMap<String, String> conflicts = new LinkedHashMap<String, String>();
+        detectMapConflicts(conflicts, "env", spec.env);
+        detectMapConflicts(conflicts, "properties", spec.properties);
+        return new EditorModel(spec.packageDir, out, conflicts);
     }
 
     private static EditorField field(String path, Schema.Type type, boolean readOnly,
@@ -168,6 +183,21 @@ public final class EditorModel {
         return out;
     }
 
+    /** {@code KEY=VALUE} 行无法表示含 {@code =} 的键：载入时记下，写回时拒绝而不是静默拆键。 */
+    private static void detectMapConflicts(Map<String, String> conflicts, String path,
+                                           Map<String, String> map) {
+        if (map == null) {
+            return;
+        }
+        for (String key : map.keySet()) {
+            if (key != null && key.indexOf('=') >= 0) {
+                conflicts.put(path, "key '" + key
+                        + "' contains '=', so it cannot be written as KEY=VALUE");
+                return;
+            }
+        }
+    }
+
     /** 包目录内用相对路径（正斜杠），包目录外保留绝对路径。 */
     private static String pathText(Path path, Path packageDir) {
         if (path == null) {
@@ -212,7 +242,9 @@ public final class EditorModel {
                 copy.add(field);
             }
         }
-        return new EditorModel(packageDir, copy);
+        LinkedHashMap<String, String> conflicts = new LinkedHashMap<String, String>(mapConflicts);
+        conflicts.remove(path);
+        return new EditorModel(packageDir, copy, conflicts);
     }
 
     private static void checkArity(EditorField target, List<String> values) {
@@ -233,24 +265,24 @@ public final class EditorModel {
         ServiceSpec.Builder builder = ServiceSpec.builder(packageDir);
         builder.name(value("name"));
         builder.description(value("description"));
-        String jar = value("artifact.jar").trim();
-        if (!jar.isEmpty()) {
+        String jar = value("artifact.jar");
+        if (!isBlank(jar)) {
             builder.jar(jar);
         }
-        String java = value("runtime.java").trim();
-        if (!java.isEmpty()) {
+        String java = value("runtime.java");
+        if (!isBlank(java)) {
             builder.java(java);
         }
         builder.opts(listValue("runtime.opts"));
         builder.env(mapValue("env"));
         builder.properties(mapValue("properties"));
-        String workdir = value("workdir").trim();
-        if (!workdir.isEmpty()) {
+        String workdir = value("workdir");
+        if (!isBlank(workdir)) {
             builder.workdir(workdir);
         }
         builder.pathLinks(linkValue("path-links"));
-        String logFile = value("logs.file").trim();
-        if (!logFile.isEmpty()) {
+        String logFile = value("logs.file");
+        if (!isBlank(logFile)) {
             builder.logFile(logFile);
         }
         builder.lifecycle(new Lifecycle(
@@ -261,8 +293,59 @@ public final class EditorModel {
         return builder.build();
     }
 
+    /**
+     * 保存前全量校验：必填非空 + {@link ValidationRunner}。
+     * 与 {@link #toSpec()} 不同，任何非法文本都转成 {@link Violation}，不抛异常。
+     */
     public List<Violation> validate() {
-        return ValidationRunner.run(toSpec());
+        List<Violation> out = new ArrayList<Violation>();
+        Set<String> requiredEmpties = new LinkedHashSet<String>();
+        required(out, requiredEmpties, "name");
+        required(out, requiredEmpties, "artifact.jar");
+        required(out, requiredEmpties, "runtime.java");
+
+        ServiceSpec spec;
+        try {
+            spec = toSpec();
+        } catch (IllegalArgumentException e) {
+            String message = e.getMessage() == null ? "" : e.getMessage();
+            String path = pathOf(message);
+            out.add(new Violation(path, path.isEmpty() ? message : detailOf(message)));
+            return out;
+        }
+        for (Violation violation : ValidationRunner.run(spec)) {
+            // 空 name 由上面的必填检查负责，避免同一条错误出现两次。
+            if (!requiredEmpties.contains(violation.path)) {
+                out.add(violation);
+            }
+        }
+        return out;
+    }
+
+    private void required(List<Violation> out, Set<String> paths, String path) {
+        if (isBlank(value(path))) {
+            out.add(new Violation(path, "must not be empty"));
+            paths.add(path);
+        }
+    }
+
+    /** 消息以字段路径开头时返回该路径（供 UI 定位），否则返回 {@code ""}。 */
+    private String pathOf(String message) {
+        int colon = message.indexOf(':');
+        if (colon <= 0) {
+            return "";
+        }
+        String head = message.substring(0, colon).trim();
+        return byPath.containsKey(head) ? head : "";
+    }
+
+    private static String detailOf(String message) {
+        int colon = message.indexOf(':');
+        return message.substring(colon + 1).trim();
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
     }
 
     private String value(String path) {
@@ -271,32 +354,34 @@ public final class EditorModel {
     }
 
     private String enumValue(String path) {
-        String raw = value(path).trim();
-        return raw.isEmpty() ? null : raw;
+        String raw = value(path);
+        return isBlank(raw) ? null : raw.trim();
     }
 
     private Boolean booleanValue(String path) {
-        String raw = value(path).trim();
-        if (raw.isEmpty()) {
+        String raw = value(path);
+        if (isBlank(raw)) {
             return null;
         }
-        if ("true".equals(raw)) {
+        String text = raw.trim();
+        if ("true".equals(text)) {
             return Boolean.TRUE;
         }
-        if ("false".equals(raw)) {
+        if ("false".equals(text)) {
             return Boolean.FALSE;
         }
         throw new IllegalArgumentException(path + ": expected true or false, got '" + raw + "'");
     }
 
     private Integer integerValue(String path) {
-        String raw = value(path).trim();
-        if (raw.isEmpty()) {
+        String raw = value(path);
+        if (isBlank(raw)) {
             return null;
         }
+        String text = raw.trim();
         int parsed;
         try {
-            parsed = Integer.parseInt(raw);
+            parsed = Integer.parseInt(text);
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException(path + ": expected an integer, got '" + raw + "'");
         }
@@ -311,21 +396,28 @@ public final class EditorModel {
         List<String> out = new ArrayList<String>(rows.size());
         for (int i = 0; i < rows.size(); i++) {
             String raw = rows.get(i);
-            String item = raw == null ? "" : raw.trim();
-            if (item.isEmpty()) {
-                throw new IllegalArgumentException(path + " line " + (i + 1)
+            if (isBlank(raw)) {
+                throw new IllegalArgumentException(path + ": line " + (i + 1)
                         + ": must not be empty");
             }
-            out.add(item);
+            out.add(raw);
         }
         return out;
     }
 
+    /**
+     * 只做词法形状检查（最后一个冒号 + 绝对目标），不构造 {@link Path}：
+     * 用户原文可能带 Windows 上非法的尾随空格，保存前由 {@code PathLinksValidator} 复核。
+     */
     private List<String> linkValue(String path) {
         List<String> links = listValue(path);
         for (int i = 0; i < links.size(); i++) {
-            if (PathLink.parse(links.get(i), packageDir) == null) {
-                throw new IllegalArgumentException(path + " line " + (i + 1)
+            String raw = links.get(i);
+            int colon = raw.lastIndexOf(':');
+            boolean shaped = colon > 0 && colon < raw.length() - 1
+                    && raw.substring(colon + 1).startsWith("/");
+            if (!shaped) {
+                throw new IllegalArgumentException(path + ": line " + (i + 1)
                         + ": must be source:target, with an absolute target starting with /");
             }
         }
@@ -333,24 +425,23 @@ public final class EditorModel {
     }
 
     private LinkedHashMap<String, String> mapValue(String path) {
+        String conflict = mapConflicts.get(path);
+        if (conflict != null) {
+            throw new IllegalArgumentException(path + ": " + conflict);
+        }
         List<String> rows = field(path).values;
         LinkedHashMap<String, String> out = new LinkedHashMap<String, String>();
         for (int i = 0; i < rows.size(); i++) {
             int line = i + 1;
-            String raw = rows.get(i);
-            String row = raw == null ? "" : raw.trim();
-            int equals = row.indexOf('=');
+            String row = rows.get(i);
+            int equals = row == null ? -1 : row.indexOf('=');
             if (equals < 0) {
-                throw new IllegalArgumentException(path + " line " + line
-                        + ": expected KEY=VALUE, got '" + (raw == null ? "" : raw) + "'");
+                throw new IllegalArgumentException(path + ": line " + line
+                        + ": expected KEY=VALUE, got '" + (row == null ? "" : row) + "'");
             }
-            String key = row.substring(0, equals).trim();
-            if (key.isEmpty()) {
-                throw new IllegalArgumentException(path + " line " + line
-                        + ": key must not be empty");
-            }
+            String key = row.substring(0, equals);
             if (out.containsKey(key)) {
-                throw new IllegalArgumentException(path + " line " + line
+                throw new IllegalArgumentException(path + ": line " + line
                         + ": duplicate key '" + key + "'");
             }
             out.put(key, row.substring(equals + 1));
