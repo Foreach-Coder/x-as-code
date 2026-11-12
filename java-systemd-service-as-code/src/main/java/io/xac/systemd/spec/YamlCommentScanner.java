@@ -10,10 +10,10 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Pattern;
 
 /**
  * 扫描既有 {@code xac.yaml} 中的注释，并把它们挂回 {@link SpecWriter#render} 产出的规范文本。
@@ -44,7 +44,6 @@ public final class YamlCommentScanner {
     private static final String LEADING_PREFIX = "# ";
     private static final String TEMPLATE_RESOURCE = "/xac.yaml.template";
     private static final String DUPLICATE_PREFIX = "duplicate comment for ";
-    private static volatile List<String> TEMPLATE_TEXTS;
 
     private YamlCommentScanner() {
     }
@@ -139,10 +138,10 @@ public final class YamlCommentScanner {
      * 路径锚点：锚点前的散文注释挂到该路径，锚点自身与被注释掉的示例行不进入结果。模板中的空行
      * 不打断注释块，这样文件头与段说明都能挂到紧随其后的字段/段上。</p>
      *
-     * <p>返回的注释仍带 {@code {{name}}} 占位符；实际写盘请用
+     * <p>返回的注释仍带 {@code {{name}}} 占位符；它只供包内测试使用，实际写盘请用
      * {@link #scanTemplate(String)} 让注释里的路径与服务名一致。</p>
      */
-    public static Comments scanTemplate() {
+    static Comments scanTemplate() {
         return scanTemplateText(readTemplate());
     }
 
@@ -164,6 +163,7 @@ public final class YamlCommentScanner {
         Map<String, String> inline = new LinkedHashMap<String, String>();
         Map<String, List<String>> leading = new LinkedHashMap<String, List<String>>();
         List<String> orphans = new ArrayList<String>();
+        Set<String> templateLines = new LinkedHashSet<String>();
         List<Pending> block = new ArrayList<Pending>();
         Deque<Frame> stack = new ArrayDeque<Frame>();
         int skipBelowAnchor = -1;
@@ -181,6 +181,7 @@ public final class YamlCommentScanner {
                     body = body.substring(1);
                 }
                 body = body.trim();
+                templateLines.add(sanitizeComment(body));
                 if (skipBelowAnchor >= 0) {
                     if (indent > skipBelowAnchor || isExampleLine(body)) {
                         continue;
@@ -213,7 +214,7 @@ public final class YamlCommentScanner {
             }
         }
         flushOrphans(block, orphans);
-        return new Comments(inline, leading, orphans);
+        return new Comments(inline, leading, orphans, templateLines);
     }
 
     /**
@@ -241,7 +242,9 @@ public final class YamlCommentScanner {
         }
         List<String> orphans = new ArrayList<String>(base.orphans);
         orphans.addAll(override.orphans);
-        return new Comments(inline, leading, orphans);
+        Set<String> templateLines = new LinkedHashSet<String>(base.templateLines);
+        templateLines.addAll(override.templateLines);
+        return new Comments(inline, leading, orphans, templateLines);
     }
 
     /**
@@ -334,20 +337,20 @@ public final class YamlCommentScanner {
         } else {
             dropped = 0;
             for (String orphan : userComments.orphans) {
-                if (template == null || !coveredByTemplate(orphanText(orphan))) {
+                if (template == null || !coveredByTemplate(orphanText(orphan), template)) {
                     dropped++;
                 }
             }
             for (Map.Entry<String, String> entry : userComments.inline.entrySet()) {
                 if (!keptInline.contains(entry.getKey())
-                        && (template == null || !coveredByTemplate(entry.getValue()))) {
+                        && (template == null || !coveredByTemplate(entry.getValue(), template))) {
                     dropped++;
                 }
             }
             for (Map.Entry<String, List<String>> entry : userComments.leading.entrySet()) {
                 if (!keptLeading.contains(entry.getKey())) {
                     for (String line : entry.getValue()) {
-                        if (template == null || !coveredByTemplate(line)) {
+                        if (template == null || !coveredByTemplate(line, template)) {
                             dropped++;
                         }
                     }
@@ -411,54 +414,20 @@ public final class YamlCommentScanner {
 
     /**
      * 用户文件里无法挂回的注释，如果只是模板原文（init 生成的注释块被空行冲散后就是这种形态），
-     * 不算用户丢注释：模板打底会把它重新写出来。
+     * 不算用户丢注释：模板打底会把它重新写出来。只做逐字比较，用户改动过的行一律算 dropped。
+     *
+     * <p>以 {@code key:} 开头的注释（例如文件末尾自写的 {@code # workdir: /opt/prod/work}）是
+     * 被注释掉的字段示例，不是丢失的散文；它保留在 {@link Comments#orphans} 里供 UI 展示，
+     * 但不计入 {@code dropped}。</p>
      */
-    private static boolean coveredByTemplate(String text) {
+    private static boolean coveredByTemplate(String text, Comments template) {
         if (text == null) {
             return false;
         }
-        for (String raw : templateTexts()) {
-            if (raw.equals(text)) {
-                return true;
-            }
-            if (raw.indexOf("{{name}}") >= 0 && matchesPlaceholder(raw, text)) {
-                return true;
-            }
+        if (template.templateLines.contains(text)) {
+            return true;
         }
-        return false;
-    }
-
-    private static boolean matchesPlaceholder(String pattern, String candidate) {
-        String[] parts = pattern.split("\\{\\{name\\}\\}", -1);
-        StringBuilder regex = new StringBuilder();
-        for (int i = 0; i < parts.length; i++) {
-            if (i > 0) {
-                regex.append(".*");
-            }
-            regex.append(Pattern.quote(parts[i]));
-        }
-        return candidate.matches(regex.toString());
-    }
-
-    private static List<String> templateTexts() {
-        List<String> texts = TEMPLATE_TEXTS;
-        if (texts == null) {
-            List<String> built = new ArrayList<String>();
-            for (String line : splitLines(stripBom(readTemplate()))) {
-                String trimmed = line.trim();
-                if (trimmed.isEmpty() || trimmed.charAt(0) != '#') {
-                    continue;
-                }
-                String body = trimmed.substring(1);
-                if (body.startsWith(" ")) {
-                    body = body.substring(1);
-                }
-                built.add(sanitizeComment(body.trim()));
-            }
-            texts = built;
-            TEMPLATE_TEXTS = texts;
-        }
-        return texts;
+        return anchorKey(text) != null;
     }
 
     private static String orphanText(String orphan) {

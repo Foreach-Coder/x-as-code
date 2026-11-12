@@ -630,6 +630,39 @@ class YamlCommentScannerTest {
         assertSameSpec(rendered, second.text);
     }
 
+    @Test
+    void editedTemplateExampleLineIsCountedAsDropped() {
+        String initYaml = templateWith("demo", "app.jar", "/usr/bin/java")
+                .replace("/opt/demo/conf", "/opt/prod/conf");
+        Comments source = YamlCommentScanner.scan(initYaml);
+        String rendered = SpecWriter.render(fullSpec());
+
+        YamlCommentScanner.ApplyResult result = YamlCommentScanner.apply(
+                rendered, source, YamlCommentScanner.scanTemplate("demo"));
+
+        assertEquals(1, result.dropped, result.text);
+        assertFalse(result.text.contains("/opt/prod/conf"), result.text);
+        assertTrue(result.text.contains("Environment variables"), result.text);
+        assertSameSpec(rendered, result.text);
+    }
+
+    @Test
+    void fileEndCommentedFieldStaysVisibleAsOrphanWithoutFalseDropped() {
+        Comments source = YamlCommentScanner.scan(
+                "name: demo\n# workdir: /opt/prod/work\n");
+        String rendered = SpecWriter.render(fullSpec());
+
+        assertEquals(1, source.orphans.size(), source.orphans.toString());
+        assertTrue(source.orphans.get(0).contains("workdir: /opt/prod/work"),
+                source.orphans.toString());
+
+        YamlCommentScanner.ApplyResult result = YamlCommentScanner.apply(
+                rendered, source, YamlCommentScanner.scanTemplate("demo"));
+
+        assertEquals(0, result.dropped, result.text);
+        assertSameSpec(rendered, result.text);
+    }
+
     // ------------------------------------------------------- duplicate values
 
     @Test

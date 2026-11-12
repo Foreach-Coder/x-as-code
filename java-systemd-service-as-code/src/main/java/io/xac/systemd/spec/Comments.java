@@ -3,8 +3,10 @@ package io.xac.systemd.spec;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 从既有 {@code xac.yaml} 中抽取出的注释，按规范化路径索引。
@@ -31,9 +33,23 @@ public final class Comments {
     /** 无法归属的注释，含 1 起的行号前缀。 */
     public final List<String> orphans;
 
+    /**
+     * 模板解析时的原始注释行（含锚点与示例行，占位符已按服务名替换）。
+     * 包内可见，仅用于三参 {@link YamlCommentScanner#apply} 判断用户文件里的哪一行
+     * 只是模板原文；普通 {@link YamlCommentScanner#scan} 结果为空。
+     */
+    final Set<String> templateLines;
+
     public Comments(Map<String, String> inline,
                     Map<String, List<String>> leading,
                     List<String> orphans) {
+        this(inline, leading, orphans, Collections.<String>emptySet());
+    }
+
+    Comments(Map<String, String> inline,
+             Map<String, List<String>> leading,
+             List<String> orphans,
+             Set<String> templateLines) {
         this.inline = Collections.unmodifiableMap(new LinkedHashMap<String, String>(inline));
         LinkedHashMap<String, List<String>> leadingCopy =
                 new LinkedHashMap<String, List<String>>();
@@ -43,6 +59,8 @@ public final class Comments {
         }
         this.leading = Collections.unmodifiableMap(leadingCopy);
         this.orphans = Collections.unmodifiableList(new ArrayList<String>(orphans));
+        this.templateLines = Collections.unmodifiableSet(
+                new LinkedHashSet<String>(templateLines));
     }
 
     /** 没有任何注释的扫描结果。 */

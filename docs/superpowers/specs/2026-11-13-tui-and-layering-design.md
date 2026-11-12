@@ -224,8 +224,8 @@ void save(Path file, String yaml) throws IOException
 
 ```java
 Comments scan(String yaml)                                  // 扫描既有文件
-Comments scanTemplate()                                     // 读 /xac.yaml.template 作默认注释
-Comments scanTemplate(String name)                          // 同上，注释里的 {{name}} 替换为服务名
+static Comments scanTemplate()                              // 包内测试用；读 /xac.yaml.template 原文
+Comments scanTemplate(String name)                          // 读模板并替换 {{name}}，写盘用
 Comments merge(Comments base, Comments override)            // 同路径 override 覆盖 base
 ApplyResult apply(String rendered, Comments comments)
 ApplyResult apply(String rendered, Comments source, Comments template)  // 模板打底、用户覆盖
@@ -233,7 +233,7 @@ ApplyResult apply(String rendered, Comments source, Comments template)  // 模�
 final class ApplyResult { String text; int kept; int dropped; }
 ```
 
-`apply` 不重排、不重写任何配置行，只在目标行前插入注释行、在行尾追加同行注释，因此结果仍能被 `SpecLoader` 读回与 `render` 等价的 spec。`kept` 是实际写入的注释条数，`dropped` 是未能挂回的用户注释条数，供 §6.5 的 “N 条注释无法定位” 使用；三参重载只统计用户注释，模板里没有对应字段的默认注释不算丢失。用户文件里逐字等于模板原文的注释（`init` 文件首次保存时被空行冲散的模板注释块）也不算丢失，因为模板打底会重新写出它们。
+`apply` 不重排、不重写任何配置行，只在目标行前插入注释行、在行尾追加同行注释，因此结果仍能被 `SpecLoader` 读回与 `render` 等价的 spec。`kept` 是实际写入的注释条数，`dropped` 是未能挂回的用户注释条数，供 §6.5 的 “N 条注释无法定位” 使用；三参重载只统计用户注释，模板里没有对应字段的默认注释不算丢失。用户文件里逐字等于模板原文的注释（`init` 文件首次保存时被空行冲散的模板注释块）也不算丢失，因为模板打底会重新写出它们；比较是逐字相等，用户改动过的模板示例行会被明确计为 `dropped`。以 `key:` 开头的被注释字段（如文件末尾自写的 `# workdir: /opt/prod/work`）属于示例而非丢失的散文，保留在 `orphans` 里但同样不计入 `dropped`。模板打底只回写散文注释：`# env:`、`#   GREETING: hello world` 这类列表/字段示例行按 §7.4 只作路径锚点，首次保存后不会重新出现。
 
 注释文本写入前必须同行化转义：`\n` → `\\n`、`\r` → `\\r`、NEL/LS/PS → `\\x85`/`\\u2028`/`\\u2029`，保证程序化构造的 `Comments` 不能用换行注入配置行。
 
@@ -296,7 +296,7 @@ s → 草稿 spec → Schema + ValidationRunner
 - `path → List<String> leading`（紧邻上一行）
 - `orphans`：文件末尾游离、被空行隔开的注释块、重复列表值的第二份注释（格式 `duplicate comment for <path>: <text>`），带行号前缀
 
-列表项以**值**而不是下标作键（`path-links[./conf:/opt/conf]`），编辑器重排后注释仍跟随原元素；同一个值出现多次时第一条注释保留，其余进入 `orphans` 并计入 `dropped`。重复判定按路径的**出现次数**，不区分同行/前置形态：一条 inline 加一条 leading 挂在同一个重复值上时，第二条同样进 `orphans`。
+列表项以**值**而不是下标作键（`path-links[./conf:/opt/conf]`），编辑器重排后注释仍跟随原元素；同一个值出现多次时保留第一次出现的元素的注释，其余进入 `orphans` 并计入 `dropped`。重复判定按路径的**出现次数**，不区分同行/前置形态：一条 inline 加一条 leading 挂在同一个重复值上时，第二条同样进 `orphans`。
 
 挂回规则：
 

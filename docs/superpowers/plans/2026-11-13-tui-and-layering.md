@@ -826,8 +826,8 @@ public final class Comments {
 
 public final class YamlCommentScanner {
     public static Comments scan(String yaml);
-    public static Comments scanTemplate();                // /xac.yaml.template 作默认注释
-    public static Comments scanTemplate(String name);     // 同上，替换注释里的 {{name}}
+    static Comments scanTemplate();                // 包内测试用；读取模板原文
+    public static Comments scanTemplate(String name);     // 写盘用；替换注释里的 {{name}}
     public static Comments merge(Comments base, Comments override);
     public static ApplyResult apply(String rendered, Comments comments);
     public static ApplyResult apply(String rendered, Comments source, Comments template);
@@ -854,11 +854,11 @@ Expected: COMPILATION ERROR。
 
 - [ ] **Step 3: 最小实现**
 
-逐行扫描：维护 `Deque<IndentNode>`（缩进 → 路径段）；空行把“待挂”注释块冲进 `orphans`；行内 `#` 只有在引号外且前面是空白时才算注释；`- ` 开头按值生成 `key[value]` 段；重复值按路径出现次数判定（inline 与 leading 合并看待），第一条保留、其余进 `orphans`。`apply(String rendered, Comments comments)` 在 `SpecWriter.render(spec)` 的输出上插入前置注释行、追加行尾注释，返回 `ApplyResult{text, kept, dropped}`；三参重载用 `scanTemplate(name)` 打底、用户注释覆盖，用户文件里逐字等于模板原文的注释不计入 `dropped`。`SpecWriter` 本身不消费 `Comments`；注释文本做换行转义。
+逐行扫描：维护 `Deque<IndentNode>`（缩进 → 路径段）；空行把“待挂”注释块冲进 `orphans`；行内 `#` 只有在引号外且前面是空白时才算注释；`- ` 开头按值生成 `key[value]` 段；重复值按路径出现次数判定（inline 与 leading 合并看待），保留第一次出现的元素、其余进 `orphans`。`apply(String rendered, Comments comments)` 在 `SpecWriter.render(spec)` 的输出上插入前置注释行、追加行尾注释，返回 `ApplyResult{text, kept, dropped}`；三参重载用 `scanTemplate(name)` 打底、用户注释覆盖，用户文件里逐字等于模板原文的注释、以及 `key:` 开头的被注释字段示例不计入 `dropped`；模板示例行只作锚点，不重新写出。`SpecWriter` 本身不消费 `Comments`；注释文本做换行转义。
 
 - [ ] **Step 4: 跑测试确认通过**
 
-Run: `MVN test -Dtest=YamlCommentScannerTest` → Expected: 33 tests, 0 failures。
+Run: `MVN test -Dtest=YamlCommentScannerTest` → Expected: 35 tests, 0 failures。
 
 - [ ] **Step 5: 提交**
 
