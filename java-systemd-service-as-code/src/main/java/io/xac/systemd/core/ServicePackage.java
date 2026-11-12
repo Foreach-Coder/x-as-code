@@ -1,6 +1,7 @@
 package io.xac.systemd.core;
 
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -17,6 +18,9 @@ import io.xac.systemd.apply.RealEnvironmentProbe;
 import io.xac.systemd.apply.StepPlan;
 import io.xac.systemd.exec.CommandRunner;
 import io.xac.systemd.exec.ProcessRunner;
+import io.xac.systemd.logs.FileLogStream;
+import io.xac.systemd.logs.JournaldLogStream;
+import io.xac.systemd.logs.LogStream;
 import io.xac.systemd.spec.ServiceSpec;
 import io.xac.systemd.spec.SpecLoader;
 import io.xac.systemd.spec.ValidationRunner;
@@ -99,6 +103,26 @@ public final class ServicePackage {
             plans.add(new StepPlan(action.describe(ctx), false));
         }
         return Collections.unmodifiableList(plans);
+    }
+
+    /** 非 follow 的日志来源：默认 journald，配置了 {@code logs.file} 时读文件。 */
+    public LogStream logs(int lines) {
+        return logs(lines, false);
+    }
+
+    /**
+     * 只读：不预检、不要求 root、不执行任何动作，只返回可消费的日志来源。
+     *
+     * @throws LogSourceException 行数非正，或日志文件不存在/不可读
+     */
+    public LogStream logs(int lines, boolean follow) {
+        if (lines <= 0) {
+            throw new LogSourceException("-n must be a positive integer");
+        }
+        if (spec.logFile != null) {
+            return new FileLogStream(Paths.get(spec.logFile), 200L, follow);
+        }
+        return new JournaldLogStream(runner, spec, follow);
     }
 
     public ApplyOutcome apply(boolean dryRun) throws InvalidSpecException {

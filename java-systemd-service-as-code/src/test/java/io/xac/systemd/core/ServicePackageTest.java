@@ -6,6 +6,9 @@ import io.xac.systemd.apply.EnvironmentProbe;
 import io.xac.systemd.apply.StepPlan;
 import io.xac.systemd.exec.ExecResult;
 import io.xac.systemd.exec.RecordingRunner;
+import io.xac.systemd.logs.FileLogStream;
+import io.xac.systemd.logs.JournaldLogStream;
+import io.xac.systemd.logs.LogStream;
 import io.xac.systemd.spec.Violation;
 import io.xac.systemd.systemd.SystemdTarget;
 import io.xac.systemd.systemd.UnitNaming;
@@ -325,5 +328,48 @@ class ServicePackageTest {
 
         assertTrue(plan.willRemove.isEmpty(), plan.willRemove.toString());
         assertNull(plan.failed);
+    }
+
+    @Test
+    void logsRejectNonPositiveLineCount() throws Exception {
+        writePlainSpec();
+        ServicePackage opened = open();
+
+        LogSourceException failure = assertThrows(LogSourceException.class,
+                () -> opened.logs(0));
+
+        assertEquals("-n must be a positive integer", failure.getMessage());
+        assertTrue(runner.startedCalls().isEmpty(), runner.startedCalls().toString());
+    }
+
+    @Test
+    void logsDefaultToJournald() throws Exception {
+        writePlainSpec();
+        ServicePackage opened = open();
+
+        LogStream stream = opened.logs(10);
+
+        assertTrue(stream instanceof JournaldLogStream, stream.getClass().getName());
+        stream.close();
+    }
+
+    @Test
+    void logsUseFileStreamWhenConfigured() throws Exception {
+        Path log = pkg.resolve("app.log");
+        Files.write(log, "a\n".getBytes(StandardCharsets.UTF_8));
+        write("name: demo",
+                "artifact:",
+                "  jar: app.jar",
+                "runtime:",
+                "  java: /usr/bin/java",
+                "logs:",
+                "  file: " + log.toString().replace("\\", "/"),
+                "");
+        ServicePackage opened = open();
+
+        LogStream stream = opened.logs(10);
+
+        assertTrue(stream instanceof FileLogStream, stream.getClass().getName());
+        stream.close();
     }
 }

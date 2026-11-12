@@ -11,9 +11,11 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -63,6 +65,51 @@ class RunningCommandTest {
             assertFalse(command.isAlive());
             assertEquals(1, runner.startedCalls().size());
             assertEquals(argv, runner.startedCalls().get(0));
+            return null;
+        });
+    }
+
+    @Test
+    void blockingStdoutEndsAtDestroyAndStderrIsReadable() throws Exception {
+        assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
+            RecordingRunner runner = new RecordingRunner();
+            List<String> argv = Arrays.asList("journalctl", "-u", "xac.demo.service", "--follow");
+            runner.addStartedOutput(argv, "A\nB\n", "warning\n", true);
+
+            RunningCommand command = runner.start(argv);
+            final BufferedReader stdout = new BufferedReader(
+                    new InputStreamReader(command.stdout(), StandardCharsets.UTF_8));
+            assertEquals("A", stdout.readLine());
+            assertEquals("B", stdout.readLine());
+            assertTrue(command.isAlive(), "blocking stdout keeps the process alive");
+
+            final AtomicReference<String> next = new AtomicReference<String>("unset");
+            Thread reader = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        next.set(stdout.readLine());
+                    } catch (IOException e) {
+                        next.set("error: " + e.getMessage());
+                    }
+                }
+            });
+            reader.start();
+            reader.join(200L);
+            assertTrue(reader.isAlive(), "readLine() must block until the command is destroyed");
+            assertEquals("unset", next.get());
+
+            command.destroy();
+            reader.join(3000L);
+            assertFalse(reader.isAlive(), "destroy() must release the blocked readLine()");
+            assertNull(next.get(), "destroy() must turn the blocked read into EOF");
+            assertFalse(command.isAlive());
+
+            BufferedReader stderr = new BufferedReader(
+                    new InputStreamReader(command.stderr(), StandardCharsets.UTF_8));
+            assertEquals("warning", stderr.readLine());
+            assertNull(stderr.readLine());
+            assertEquals(0, command.waitFor());
             return null;
         });
     }

@@ -8,11 +8,12 @@ import java.util.concurrent.Callable;
 import io.xac.systemd.apply.EnvironmentProbe;
 import io.xac.systemd.apply.RealEnvironmentProbe;
 import io.xac.systemd.core.InvalidSpecException;
+import io.xac.systemd.core.LogSourceException;
 import io.xac.systemd.core.ServicePackage;
 import io.xac.systemd.exec.CommandRunner;
-import io.xac.systemd.exec.ExecResult;
 import io.xac.systemd.exec.ProcessRunner;
-import io.xac.systemd.logs.LogsRunner;
+import io.xac.systemd.logs.LogSink;
+import io.xac.systemd.logs.LogStream;
 import io.xac.systemd.spec.Violation;
 import io.xac.systemd.systemd.SystemdTarget;
 import picocli.CommandLine.Command;
@@ -41,10 +42,13 @@ public final class LogsCommand implements Callable<Integer> {
                 SystemdTarget.defaults(), lines, follow, System.out, System.err);
     }
 
-    /** 日志读取仍在 LogsRunner（Task 6 才换成 LogStream）；门面只负责加载与校验。 */
+    /**
+     * 日志读取由 {@link LogStream} 负责；门面只负责加载、校验、输出与退出码。
+     * 非 follow 先收集再一次性输出，保持旧实现的「末尾无换行则补一个」行为。
+     */
     static int run(Path packageDir, CommandRunner runner, EnvironmentProbe probe,
                    SystemdTarget target, int lines, boolean follow,
-                   PrintStream out, PrintStream err) {
+                   final PrintStream out, PrintStream err) {
         ServicePackage pkg;
         try {
             pkg = ServicePackage.open(packageDir, runner, probe, target);
@@ -54,16 +58,28 @@ public final class LogsCommand implements Callable<Integer> {
             }
             return 2;
         }
-        ExecResult result = new LogsRunner().run(pkg.spec(), runner, lines, follow);
-        if (!result.ok()) {
-            err.println(result.stderr.trim());
-        } else if (!follow) {
-            String text = result.stdout;
-            out.print(text);
-            if (!text.isEmpty() && !text.endsWith("\n")) {
-                out.println();
+
+        final StringBuilder collected = new StringBuilder();
+        LogSink sink = new LogSink() {
+            @Override
+            public void accept(String line) {
+                if (follow) {
+                    out.print(line);
+                    out.print('\n');
+                } else {
+                    collected.append(line).append('\n');
+                }
             }
+        };
+        try (LogStream stream = pkg.logs(lines, follow)) {
+            stream.start(lines, sink);
+        } catch (LogSourceException e) {
+            err.println(e.getMessage().trim());
+            return 2;
         }
-        return result.ok() ? 0 : 2;
+        if (!follow) {
+            out.print(collected.toString());
+        }
+        return 0;
     }
 }
