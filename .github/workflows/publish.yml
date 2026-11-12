@@ -113,6 +113,14 @@ jobs:
           echo "wrapper reports version: $version"
           test "$version" = "${TAG#v}"
 
+          # install/uninstall: link into PATH, verify through PATH, then remove it
+          "$root/bin/java-systemd-service-cli" install --dry-run | grep -q 'would link'
+          sudo "$root/bin/java-systemd-service-cli" install
+          test -L /usr/local/bin/java-systemd-service-cli
+          java-systemd-service-cli --version | grep -qx "${TAG#v}"
+          sudo "$root/bin/java-systemd-service-cli" uninstall
+          test ! -e /usr/local/bin/java-systemd-service-cli
+
       - name: create or update GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
