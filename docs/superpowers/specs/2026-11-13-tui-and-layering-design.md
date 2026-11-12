@@ -386,3 +386,46 @@ notice 用 `N comment(s) were dropped`（示例同样以 `; M commented-out exam
 - 注释保留为尽力而为，不保证逐字节还原原文排版。
 - `path-links` 目标被真实路径占用时，TUI 只能展示并提示，修复仍需人工处理。
 - 不支持 Windows 终端。
+
+## 12. 实现落点
+
+本章记录设计各节最终落在哪些类上，以及实现与设计稿的已知偏差。
+
+### 12.1 分层与 core 门面（§4、§5）
+
+| 设计落点 | 实际类 |
+|---|---|
+| 唯一门面 | `io.xac.systemd.core.ServicePackage`（`open` / `spec` / `isRoot` / `status` / `plan` / `logs` / `apply` / `restart` / `destroyPlan` / `destroy`） |
+| 状态聚合 | `io.xac.systemd.core.StatusReport`（`StatusResult` + 漂移/查询结果） |
+| 日志接缝 | `io.xac.systemd.logs.LogStream`，实现 `JournaldLogStream`、`FileLogStream`（文件跟随用 `FileTail`） |
+| 入口 | `cli/RootCommand` 与各 `*Command`、`tui/TuiCommand` 都只依赖 `ServicePackage`（`tui` 不依赖 `cli`） |
+
+### 12.2 TUI（§6）
+
+| 设计落点 | 实际类 |
+|---|---|
+| 主循环、轮询、动作 | `io.xac.systemd.tui.TuiApp` |
+| 终端接缝 | `tui/Display` + `tui/LanternaDisplay`；`tui/KeySource` + `tui/LanternaKeySource`（`NavKey` / `KeyEvent` 为平台无关键位） |
+| 状态区 | `tui/StatusView` + `tui/TuiState` |
+| 日志区 | `tui/LogPane`（滚动、follow、容量上限） |
+| 动作确认 | `tui/actions/ActionOverlay` + `tui/actions/ActionKind` |
+| 命令与非 TTY 判定 | `tui/TuiCommand`（`isInteractiveTerminal`） |
+
+### 12.3 编辑与保存（§7）
+
+| 设计落点 | 实际类 |
+|---|---|
+| 字段树与校验 | `tui/edit/EditorModel` + `EditorField`（不可变模型，`with` 返回副本） |
+| 编辑屏 | `tui/edit/EditScreen`（浏览 / 行列表 / 标量三种模式） |
+| 保存流程 | `tui/edit/SaveFlow`（校验 → 渲染 → 注释合并 → 二次确认 → 原子写） |
+| 文件指纹 | `tui/edit/FileStamp`（保存前发现外部改动） |
+| yaml 文本 | `spec/SpecWriter`、`spec/YamlCommentScanner`、`spec/Comments`、`spec/LineDiff` |
+
+### 12.4 与设计稿的偏差
+
+- **diff 面板未渲染**：`LineDiff` 已在 `SaveFlow` 内用于判断保存会不会丢注释，但编辑屏没有逐行 diff 预览；本轮只靠「按两次 `s`」的确认文案（§7.3 描述的 diff 面板留作后续）。
+- **失焦校验实现为全量刷新**：`EditorModel.validate()` 在每次 `with(...)` 变更后整份重跑，而不是只校验失焦字段；效果等价，代价是每次按键多一次全量校验（字段数量小，未做增量优化）。
+- **TUI 动作不提供 detached 执行**：`apply` / `restart` / `destroy` 都在 TUI 进程的前台动作线程里执行；执行中退出会放弃等待，只有当前外部命令可能自行跑完，剩余步骤不再执行（notice `left running; current step may finish, remaining steps will not; re-run apply/destroy`）。没有「脱离终端继续跑」的模式。
+- **帮助面板未实现**：`?` 只设置 notice `help is not implemented yet`，没有覆盖式帮助画面；键位仍显示在底栏和本文档中。
+- **没有真实 PTY 冒烟**：§8 测试表与 §10 第 5 项提到的真实 PTY `tui` 冒烟没有落地；e2e 只有 `SmokeIT#tuiRefusesToStartWithoutATty`，验证非 TTY 时退 2。TUI 行为由 `Display` / `KeySource` 注入的单元测试覆盖。
+- **测试数字**：§8 与 §10 中的「180 单测」「11 例 e2e」是写作时的历史值；0.2.0 实际为 504 个单测（`mvn test`）与 11 个 e2e（`mvn -Pe2e verify`，其中 1 个是 `tui` 非 TTY 退 2）。

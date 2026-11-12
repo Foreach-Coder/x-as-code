@@ -25,7 +25,7 @@
 - **Java 8**：`maven.compiler.release=8`。禁止 record、`var`、switch 表达式、文本块、
   `List.of`/`Map.of`、`Optional.isEmpty()`、`ProcessorHandle`/`ProcessHandle`、`Stream.toList()`。
   测试代码同样按 `--release 8` 编译。
-- 运行期依赖只有 picocli 4.7.6、snakeyaml 2.2 与 Lanterna 3.1.5
+- 依赖白名单（0.2.0 现状）：运行期只有 picocli 4.7.6、snakeyaml 2.2 与 Lanterna 3.1.5
   （`com.googlecode.lanterna:lanterna`，仅 `tui` 命令使用；shade 不得声明
   filters/includes 过滤 Lanterna 资源（3.1.5 无 terminfo，Linux 走 stty））；
   测试用 JUnit 5.10.2 与 Testcontainers
@@ -36,6 +36,22 @@
 - 渲染必须确定性：同样的 `xac.yaml` 产出逐字节相同的 unit 与 env 文件。
 - 运行时输出（stdout/stderr、`--help`、校验与警告）统一英文 ASCII；注释与文档正文不限。
 
+## 分层
+
+代码分三层，依赖只能向下：
+
+- **入口层**：`cli`（picocli 命令、文案、退出码）与 `tui`（Lanterna 画面、键位、视图模型）。
+  两者都只依赖 `core`；`cli` 与 `tui` 之间零依赖。
+- **门面层**：`core`。`ServicePackage` 是唯一门面，只返回数据与英文事实描述；
+  不出现 `System.out`/`PrintStream`、退出码或中文用户文案。`core` 只依赖
+  `spec`、`systemd`、`exec`、`apply`、`status`、`logs`。
+- **基础层**：`spec`（解析、Schema、校验、注释与 yaml 文本）、`systemd`（unit/env 渲染与路径）、
+  `exec`（进程执行）。`spec` / `systemd` / `exec` 不得反向依赖 `cli`、`tui` 或 `core`。
+
+`apply` / `status` / `logs` 依赖 `spec` / `systemd` / `exec`，不依赖 `cli` / `tui` / `core`。
+新入口只允许依赖 `core`；需要新能力时加在 `core` 或更下层，不要复制编排，也不要让
+`core` 反向依赖入口层。渲染保持纯函数、确定性输出。
+
 ## 命令
 
 ```bash
@@ -44,21 +60,29 @@ mvn -f java-systemd-service-as-code/pom.xml test
 
 # 打包：fat jar + 发行包
 mvn -f java-systemd-service-as-code/pom.xml -DskipTests package
-#   → java-systemd-service-as-code/target/java-systemd-service-cli-0.1.3.jar
-#   → java-systemd-service-as-code/target/java-systemd-service-cli-0.1.3.tar.gz
-#      解压后 java-systemd-service-cli-0.1.3/{bin/java-systemd-service-cli, libs/*.jar}
+#   → java-systemd-service-as-code/target/java-systemd-service-cli-0.2.0.jar
+#   → java-systemd-service-as-code/target/java-systemd-service-cli-0.2.0.tar.gz
+#      解压后 java-systemd-service-cli-0.2.0/{bin/java-systemd-service-cli, libs/*.jar}
 
 # 挂到 PATH（root；只操作 /usr/local/bin 下自己那条软链）
-sudo java-systemd-service-cli-0.1.3/bin/java-systemd-service-cli install
-sudo java-systemd-service-cli-0.1.3/bin/java-systemd-service-cli uninstall
+sudo java-systemd-service-cli-0.2.0/bin/java-systemd-service-cli install
+sudo java-systemd-service-cli-0.2.0/bin/java-systemd-service-cli uninstall
 
 # 交互式生成 xac.yaml 模板（父目录 → <父目录>/<服务名>/xac.yaml；不需要 root，不覆盖已有文件）
-java -jar java-systemd-service-as-code/target/java-systemd-service-cli-0.1.3.jar init /tmp
+java -jar java-systemd-service-as-code/target/java-systemd-service-cli-0.2.0.jar init /tmp
+
+# 交互式终端界面（需要真实 TTY，仅 Linux/SSH 终端；非 TTY 一行提示并退 2）
+java -jar java-systemd-service-as-code/target/java-systemd-service-cli-0.2.0.jar tui /opt/demo
 
 # 真 systemd e2e（Testcontainers；需要 Docker + 镜像 xac-e2e:24.04，见 e2e/README.md）
 mvn -f java-systemd-service-as-code/pom.xml -Pe2e verify
 #   镜像缺失时先构建：cd java-systemd-service-as-code && docker build -t xac-e2e:24.04 e2e
 ```
+
+TUI 测试不启动真实终端：单测通过 `Display` / `KeySource` 抽象注入假实现（见
+`tui/RecordingDisplay`、`tui/ScriptedKeySource`），Lanterna 适配层用 `DefaultVirtualTerminal`
+验证，不需要 TTY。e2e 里的 `tui` 冒烟只验证非 TTY 退 2
+（`SmokeIT#tuiRefusesToStartWithoutATty`），不做真实 PTY 全屏驱动。
 
 ## 安全语义（改代码前先读）
 
