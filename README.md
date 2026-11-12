@@ -60,7 +60,14 @@ mvn -f java-systemd-service-as-code/pom.xml -DskipTests package
 └── libs/java-systemd-service-cli-0.1.1.jar
 ```
 
-可选：`ln -s /opt/xac/bin/java-systemd-service-cli /usr/local/bin/java-systemd-service-cli`，之后直接敲 `java-systemd-service-cli`。
+想直接敲 `java-systemd-service-cli`，用脚本自带的子命令把它挂到 PATH（需要 root）：
+
+```bash
+sudo /opt/xac/bin/java-systemd-service-cli install
+java-systemd-service-cli --version
+```
+
+`install` 会把发行包里那个 `bin/java-systemd-service-cli` 软链到 `/usr/local/bin/java-systemd-service-cli`，并用 `--version` 校验；升级时解压新版本、在新目录里再跑一次 `install` 即可改指，旧目录随后可以删除。`sudo /opt/xac/bin/java-systemd-service-cli uninstall` 只删这条指向 xac 启动器的软链，遇到外来文件或陌生软链会拒绝并退出 2。
 
 `xac.yaml` 示例：
 

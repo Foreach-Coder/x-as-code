@@ -45,6 +45,10 @@ mvn -f java-systemd-service-as-code/pom.xml -DskipTests package
 #   → java-systemd-service-as-code/target/java-systemd-service-cli-0.1.1.tar.gz
 #      解压后 java-systemd-service-cli-0.1.1/{bin/java-systemd-service-cli, libs/*.jar}
 
+# 挂到 PATH（root；只操作 /usr/local/bin 下自己那条软链）
+sudo java-systemd-service-cli-0.1.1/bin/java-systemd-service-cli install
+sudo java-systemd-service-cli-0.1.1/bin/java-systemd-service-cli uninstall
+
 # 真 systemd e2e（Testcontainers；需要 Docker + 镜像 xac-e2e:24.04，见 e2e/README.md）
 mvn -f java-systemd-service-as-code/pom.xml -Pe2e verify
 #   镜像缺失时先构建：cd java-systemd-service-as-code && docker build -t xac-e2e:24.04 e2e
@@ -57,6 +61,8 @@ mvn -f java-systemd-service-as-code/pom.xml -Pe2e verify
 - 写 unit / env 前：路径必须是普通文件或不存在；文件首行不是管理头就拒绝覆盖。
 - `apply` 前查同名 unit 是否由系统提供（`systemctl show` 的 `FragmentPath`），是则拒绝。
 - `destroy` 只对自己拥有的 unit（普通文件 + 管理头）执行 `stop`/`disable`，只删指向配置源的软链接。
+- `install` / `uninstall`（启动脚本里）只动 `/usr/local/bin/java-systemd-service-cli` 这一条软链，
+  且目标必须是带 `# xac-launcher` 标记的启动器；外来文件或陌生软链退 2。
 - 破坏性分支一律返回退出码 2（什么都没改动），不要用 1。
 
 ## 提交

@@ -22,6 +22,7 @@
 11. `--dry-run` 先过预检再打印（§6.2）：预检不通过按输入错误退 2
 12. `destroy` 的 `stop`/`disable`/`reload` 失败只记警告（§6.5）：destroy 的目标是文件消失
 13. 交付形态改为 **`tar.gz` 发行包**（`bin/` 启动脚本 + `libs/` fat jar），release 只发这个包（§8）
+14. 启动脚本自带 **`install` / `uninstall`**：把自己软链进 `/usr/local/bin`，只有脚本知道自己的真实路径（§8）
 
 ## 1. 背景与目标
 
@@ -281,10 +282,12 @@ LinkedHashMap），输出以单个 `\n` 结尾。
 否则退出码 2。
 
 ```
-xac apply   [<package-dir>] [--dry-run]
-xac status  [<package-dir>]
-xac logs    [<package-dir>] [-n <行数>] [-f]
-xac destroy [<package-dir>] [--dry-run] [--yes]
+xac apply     [<package-dir>] [--dry-run]
+xac status    [<package-dir>]
+xac logs      [<package-dir>] [-n <行数>] [-f]
+xac destroy   [<package-dir>] [--dry-run] [--yes]
+xac install   [--dry-run]      # 由发行包的启动脚本处理，见 §8
+xac uninstall [--dry-run]      # 由发行包的启动脚本处理，见 §8
 ```
 
 包目录会被绝对化（`toAbsolutePath().normalize()`），之后所有相对路径（`artifact.jar`、`workdir`、
@@ -608,6 +611,10 @@ CMD：本机缓存的镜像元数据可能是 `ENTRYPOINT ["/bin/sh"]`，不覆�
     `libs/java-systemd-service-cli-<ver>.jar`（`0644`）
 - 入口脚本按 `XAC_JAVA` → `$JAVA_HOME/bin/java` → `PATH` 选 JVM，按自身真实路径定位 `../libs/*.jar`，
   再 `exec java -jar ... "$@"`；启动器自身的失败（找不到 jar 或 JVM）退出 1，其余退出码透传 CLI
+- 启动脚本先于 jar 拦截 `install` / `uninstall`：把自身真实路径软链到
+  `/usr/local/bin/java-systemd-service-cli`（固定位置，无参数），需要 root。只替换或删除带
+  `# xac-launcher` 标记的启动器；普通文件、指向别处的软链一律拒绝（退出 2）。建链后跑一次
+  `--version` 与 jar 自己的输出比对，不一致就回滚：新建的删除，升级的恢复旧指向。
 - release 只发布 `tar.gz`；`--version` 必须等于 tag 去掉 `v` 前缀（CI 里解压后实际跑一次校验）
 - 仓库：`D:\Develop\xac` 为 monorepo 根，`.git` 初始化在根
 
