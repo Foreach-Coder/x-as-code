@@ -1138,13 +1138,29 @@ class TuiAppTest {
     /** 动作卡在后台时，q 必须能退出 UI；动作线程完成后不能再回写界面。 */
     @Test
     void quitAbandonsRunningActionWithoutTouchingTheDisplay() throws Exception {
+        assertAbandonsRunningAction(KeyEvent.character('q'));
+    }
+
+    /** ESC 与 q 走同一条放弃路径（N4）。 */
+    @Test
+    void escapeAbandonsRunningActionWithoutTouchingTheDisplay() throws Exception {
+        assertAbandonsRunningAction(KeyEvent.of(NavKey.ESC));
+    }
+
+    /** Ctrl-C 在 LanternaKeySource 里映射成 NavKey.QUIT，也必须能放弃（N4）。 */
+    @Test
+    void ctrlCAbandonsRunningActionWithoutTouchingTheDisplay() throws Exception {
+        assertAbandonsRunningAction(KeyEvent.of(NavKey.QUIT));
+    }
+
+    private void assertAbandonsRunningAction(KeyEvent abandonKey) throws Exception {
         prepareActionPackage();
         BlockingActionRunner blocking = new BlockingActionRunner(runner);
         RecordingDisplay display = new RecordingDisplay(80, 24);
         FakeLogStream logs = new FakeLogStream();
         logs.blockUntilClosed = true;
         TuiApp app = actionApp(openPackage(blocking), display,
-                new QuitAfterActionSource(blocking), logs);
+                new AbandonAfterActionSource(blocking, abandonKey), logs);
 
         int code = assertDoesNotThrow(new ThrowingSupplier<Integer>() {
             @Override
@@ -1154,8 +1170,10 @@ class TuiAppTest {
         });
 
         assertEquals(0, code);
-        assertFalse(app.running(), "q must exit the UI even while an action is running");
-        assertEquals("action still running in background", app.statusNote());
+        assertFalse(app.running(), "abandon key must exit the UI even while an action is running");
+        assertTrue(app.statusNote().contains("remaining steps will not"),
+                app.statusNote());
+        assertTrue(app.statusNote().contains("re-run apply/destroy"), app.statusNote());
         int showsAtExit = display.shows();
 
         blocking.release();
@@ -1164,21 +1182,78 @@ class TuiAppTest {
                 "the action thread must not write the display after the UI exits");
     }
 
-    /** 先按 a/y 启动 apply，等它真的阻塞在 restart 上，再吐 q；保证放弃路径被命中。 */
-    private static final class QuitAfterActionSource implements KeySource {
+    /**
+     * N2：动作中按 q 放弃等待时，退出这一 tick 不能再发状态查询。
+     * 状态查询阻塞 10 秒；若退出前仍 poll，UI 会为一条即将消失的结果最多等 3 秒。
+     */
+    @Test
+    void abandonDoesNotWaitForABlockedStatusQuery() throws Exception {
+        prepareActionPackage();
+        BlockingRunner status = new BlockingRunner(runner);
+        BlockingActionRunner blocking = new BlockingActionRunner(status);
+        RecordingDisplay display = new RecordingDisplay(80, 24);
+        FakeLogStream logs = new FakeLogStream();
+        logs.blockUntilClosed = true;
+        TuiApp app = actionApp(openPackage(blocking), display,
+                new AbandonAfterActionSource(blocking, 'r', KeyEvent.character('q'),
+                        new Runnable() {
+                            @Override
+                            public void run() {
+                                status.blocking = true;
+                            }
+                        }), logs);
+
+        long startedAt = System.nanoTime();
+        int code = assertDoesNotThrow(new ThrowingSupplier<Integer>() {
+            @Override
+            public Integer get() {
+                return app.run();
+            }
+        });
+        long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+
+        assertEquals(0, code);
+        assertFalse(app.running());
+        assertEquals(1L, status.entered.getCount(),
+                "abandon must not start a status query on the way out");
+        assertTrue(elapsedMillis < 1500L,
+                "abandon must not wait for a status query, took " + elapsedMillis + " ms");
+
+        // 先解除阻塞再放行动作线程，避免它在后台 sleep 10 秒。
+        status.blocking = false;
+        blocking.release();
+        assertTrue(app.awaitAction(5000), "background action did not finish");
+    }
+
+    /**
+     * 先按动作键再 y 启动动作，等它真的阻塞在 restart 上，再吐放弃键；
+     * 保证放弃路径被命中而不是动作已完成。
+     */
+    private static final class AbandonAfterActionSource implements KeySource {
 
         private final BlockingActionRunner runner;
+        private final char actionKey;
+        private final KeyEvent abandonKey;
+        private final Runnable afterEntered;
         private int step;
 
-        QuitAfterActionSource(BlockingActionRunner runner) {
+        AbandonAfterActionSource(BlockingActionRunner runner, KeyEvent abandonKey) {
+            this(runner, 'a', abandonKey, null);
+        }
+
+        AbandonAfterActionSource(BlockingActionRunner runner, char actionKey, KeyEvent abandonKey,
+                Runnable afterEntered) {
             this.runner = runner;
+            this.actionKey = actionKey;
+            this.abandonKey = abandonKey;
+            this.afterEntered = afterEntered;
         }
 
         @Override
         public KeyEvent next(long timeoutMillis) {
             step++;
             if (step == 1) {
-                return KeyEvent.character('a');
+                return KeyEvent.character(actionKey);
             }
             if (step == 2) {
                 return KeyEvent.character('y');
@@ -1186,13 +1261,16 @@ class TuiAppTest {
             if (step == 3) {
                 try {
                     if (!runner.entered.await(5, TimeUnit.SECONDS)) {
-                        throw new IllegalStateException("apply did not start");
+                        throw new IllegalStateException("action did not start");
+                    }
+                    if (afterEntered != null) {
+                        afterEntered.run();
                     }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
-                    throw new IllegalStateException("interrupted while waiting for apply");
+                    throw new IllegalStateException("interrupted while waiting for the action");
                 }
-                return KeyEvent.character('q');
+                return abandonKey;
             }
             return null;
         }
@@ -1424,5 +1502,30 @@ class TuiAppTest {
         String panel = screen(display);
         assertTrue(panel.contains("warning: unit is not managed by xac"), panel);
         assertTrue(panel.contains("... (3 more lines)"), panel);
+    }
+
+    /**
+     * N3：80×7 放不下面板正文，只画一条 "y destroy" 提示会误导用户；
+     * 这种情况下宁可不画面板，保留普通状态行。
+     */
+    @Test
+    void tinyScreenDoesNotPaintDestroyPanelOrHint() throws Exception {
+        prepareActionPackage();
+        Files.write(unitPath(), "[Unit]\nDescription=foreign\n"
+                .getBytes(StandardCharsets.UTF_8));
+        RecordingDisplay display = new RecordingDisplay(80, 7);
+        FakeLogStream logs = new FakeLogStream();
+        logs.blockUntilClosed = true;
+        QueuedKeySource keys = new QueuedKeySource();
+        TuiApp app = actionApp(openPackage(), display, keys, logs);
+
+        keys.enqueue(KeyEvent.character('d'));
+        assertTrue(app.tick(0));
+
+        String panel = screen(display);
+        assertFalse(panel.contains("y destroy"), panel);
+        assertFalse(panel.contains("will remove:"), panel);
+        // 有面板时第 1 行会被面板边框的 "┌" 覆盖；没有面板时应仍是状态行的 "│"。
+        assertTrue(display.line(1).startsWith("│"), display.line(1));
     }
 }

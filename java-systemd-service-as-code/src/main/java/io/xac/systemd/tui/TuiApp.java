@@ -54,6 +54,12 @@ public final class TuiApp {
     private static final String FULL_KEY_BAR =
             "a apply  r restart  d destroy  e edit  ? help  q quit";
     private static final String NARROW_KEY_BAR = "? help";
+    /**
+     * 放弃等待后的 notice：本进程随 TUI 退出，daemon 动作线程会被一起杀掉，
+     * 所以只有当前这条外部命令可能自行跑完，剩余步骤不会再执行（design §6.6）。
+     */
+    private static final String ABANDON_NOTICE =
+            "left running; current step may finish, remaining steps will not; re-run apply/destroy";
 
     /** 日志源工厂：显式带走 follow 参数，测试可断言 TUI 请求的是跟随模式。 */
     interface LogStreamFactory {
@@ -288,7 +294,9 @@ public final class TuiApp {
     }
 
     private void pollStatus(long nowMillis) {
-        if (overlayOpen || actionRunning) {
+        // 放弃等待后进程马上退出：退出这一 tick 不再发状态查询，
+        // 否则可能为一条即将消失的结果阻塞 STATUS_TIMEOUT_MILLIS（N2）。
+        if (overlayOpen || actionRunning || abandoned) {
             return;
         }
         if (!statusPollDue) {
@@ -442,7 +450,7 @@ public final class TuiApp {
         }
         if (actionRunning) {
             // 动作执行期间忽略其它按键，但 q/esc/ctrl-c 可以放弃等待退出：
-            // 动作在后台继续，UI 立即退出（design §6.6）。
+            // UI 立即退出，进程随即结束，daemon 动作线程也会被杀（design §6.6）。
             if (isAbandonKey(event)) {
                 abandonAction();
             }
@@ -668,14 +676,17 @@ public final class TuiApp {
     }
 
     /**
-     * 用户按 q/esc/ctrl-c 放弃等待：UI 立即退出，动作线程继续在后台跑完。
+     * 用户按 q/esc/ctrl-c 放弃等待：UI 立即退出，进程随后结束，daemon 动作线程
+     * 会被一起杀掉——只有正在执行的单条外部命令可能自行跑完，剩余步骤不会执行。
      * 完成后因为 {@code abandoned} 已置位，不会再写任何界面状态。
      */
     private void abandonAction() {
         abandoned = true;
         actionRunning = false;
-        notice = "action still running in background";
+        notice = ABANDON_NOTICE;
         running = false;
+        // 不再补查状态：这一 tick 的 pollStatus 也会因 abandoned 直接返回（N2）。
+        statusPollDue = false;
         dirty = true;
     }
 
@@ -807,7 +818,9 @@ public final class TuiApp {
     private void paintOverlay(Canvas canvas) {
         int width = canvas.width();
         int height = canvas.height();
-        if (width < 8 || height < 6) {
+        // 少于 8 行时面板放不下正文（最多只剩提示行），宁可不画，避免
+        // 出现只有 "y destroy" 却没有内容的确认面板（N3）。
+        if (width < 8 || height < 8) {
             return;
         }
         List<String> lines = overlay.lines();
