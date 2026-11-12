@@ -379,7 +379,7 @@ git add -A && git commit -m "refactor: DestroyRunner 返回结构化的 DestroyO
 
 **Files:**
 - Create: `core/ServicePackage.java`、`core/InvalidSpecException.java`、`core/StatusReport.java`
-- Modify: `cli/ApplyCommand.java`、`cli/StatusCommand.java`、`cli/DestroyCommand.java`、`cli/SpecCommands.java`（删除）
+- Modify: `cli/ApplyCommand.java`、`cli/StatusCommand.java`、`cli/DestroyCommand.java`、`cli/LogsCommand.java`（改走 `ServicePackage.open`，仍调用旧 `LogsRunner`）、`cli/SpecCommands.java`（删除）
 - Create: `src/test/java/io/xac/systemd/core/ServicePackageTest.java`
 - Modify: `cli/CliTest.java`（断言不变，若内部夹具引用 `SpecCommands` 则改为 facade）
 
@@ -467,7 +467,7 @@ public DestroyOutcome destroy(boolean dryRun) throws InvalidSpecException {
 }
 ```
 
-CLI 三个命令改为：`ServicePackage pkg = ServicePackage.open(dir);`，捕获 `InvalidSpecException` → 逐条 `System.err.println(v)` → 返回 2。删除 `cli/SpecCommands.java`；`cli/LogsCommand` 先保留原实现（Task 6 再改）。
+CLI 四个命令改为：`ServicePackage pkg = ServicePackage.open(dir);`，捕获 `InvalidSpecException` → 逐条 `System.err.println(v)` → 返回 2。`LogsCommand` 只把加载换成 `open`，日志读取仍用旧 `LogsRunner`（Task 6 再改成 `LogStream`）。删除 `cli/SpecCommands.java`。
 
 - [ ] **Step 4: 跑测试确认通过**
 
