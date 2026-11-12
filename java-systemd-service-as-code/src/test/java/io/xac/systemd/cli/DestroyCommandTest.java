@@ -1,7 +1,12 @@
 package io.xac.systemd.cli;
 
+import io.xac.systemd.apply.Action;
+import io.xac.systemd.apply.ActionFailure;
+import io.xac.systemd.apply.ApplyContext;
 import io.xac.systemd.apply.DestroyRunner;
 import io.xac.systemd.apply.EnvironmentProbe;
+import io.xac.systemd.apply.actions.DisableAction;
+import io.xac.systemd.apply.actions.StopAction;
 import io.xac.systemd.exec.RecordingRunner;
 import io.xac.systemd.spec.Lifecycle;
 import io.xac.systemd.spec.ServiceSpec;
@@ -98,12 +103,17 @@ class DestroyCommandTest {
     }
 
     private Captured capture(boolean dryRun, boolean yes, RecordingRunner runner) throws IOException {
+        return capture(dryRun, yes, runner, new DestroyRunner());
+    }
+
+    private Captured capture(boolean dryRun, boolean yes, RecordingRunner runner,
+                             DestroyRunner destroyRunner) throws IOException {
         writeSpec();
         ByteArrayOutputStream outBuffer = new ByteArrayOutputStream();
         ByteArrayOutputStream errBuffer = new ByteArrayOutputStream();
         int code = DestroyCommand.run(root, dryRun, yes, new FakeProbe(), runner, target(),
                 new PrintStream(outBuffer, true, "UTF-8"),
-                new PrintStream(errBuffer, true, "UTF-8"));
+                new PrintStream(errBuffer, true, "UTF-8"), destroyRunner);
         return new Captured(code, outBuffer.toString("UTF-8"), errBuffer.toString("UTF-8"));
     }
 
@@ -313,6 +323,48 @@ class DestroyCommandTest {
             assertFalse(call.contains("stop"), call.toString());
             assertFalse(call.contains("disable"), call.toString());
         }
+    }
+
+    /** 失败分支：第三步抛 ActionFailure 时，前两步已经打印，随后 failed: 并退出 1。 */
+    @Test
+    void failureOnThirdActionPrintsPriorStepsThenFailedAndExitsOne() throws IOException {
+        ServiceSpec spec = spec();
+        install(spec, target());
+        Path unit = UnitNaming.unitPath(spec, target());
+        Path env = UnitNaming.envPath(spec, target());
+        RecordingRunner runner = unusedRunner();
+        Action boom = new Action() {
+            @Override
+            public String describe(ApplyContext ctx) {
+                return "explode";
+            }
+
+            @Override
+            public void run(ApplyContext ctx) {
+                throw new ActionFailure("boom");
+            }
+        };
+        DestroyRunner destroyRunner = new DestroyRunner(Arrays.<Action>asList(
+                new StopAction(), new DisableAction(), boom));
+
+        Captured captured = capture(false, true, runner, destroyRunner);
+
+        String expected = String.join(System.lineSeparator(),
+                "will remove:",
+                "  " + unit,
+                "  " + env,
+                keepLine(spec),
+                "systemctl stop xac.demo.service",
+                "systemctl disable xac.demo.service",
+                "explode",
+                "failed: boom") + System.lineSeparator();
+
+        assertEquals(1, captured.code);
+        assertEquals(expected, captured.out);
+        assertEquals("", captured.err);
+        assertTrue(Files.exists(unit));
+        assertTrue(Files.exists(env));
+        assertEquals(2, runner.calls().size(), runner.calls().toString());
     }
 
     private static boolean supportsSymlinks(Path dir) {

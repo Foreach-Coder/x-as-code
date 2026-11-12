@@ -23,6 +23,18 @@ import io.xac.systemd.systemd.UnitNaming;
 
 public final class DestroyRunner {
 
+    /** 非 null 时替代 {@link #actions()}，供测试注入动作序列。 */
+    private final List<Action> configuredActions;
+
+    public DestroyRunner() {
+        this(null);
+    }
+
+    /** 用给定的动作序列执行 destroy（主要供测试与嵌入方使用）。 */
+    public DestroyRunner(List<Action> actions) {
+        this.configuredActions = actions;
+    }
+
     /** 顺序（设计文档 §6.5）：先停服务，再删文件，最后移除链接。 */
     public static List<Action> actions() {
         return Arrays.<Action>asList(
@@ -38,6 +50,8 @@ public final class DestroyRunner {
     /**
      * 只读地算出 destroy 会删什么、会保留什么。不改文件、不调用 systemctl；
      * 与 {@link #run(ApplyContext)} 使用同一套归属判断。
+     *
+     * @throws ActionFailure 当 unit 首行不可读，或某个 path-link 无法读取时
      */
     public DestroyOutcome plan(ServiceSpec spec, SystemdTarget target) {
         Inspection inspection = inspect(spec, target);
@@ -54,6 +68,10 @@ public final class DestroyRunner {
      * 只返回步骤而不执行。
      */
     public DestroyOutcome run(ApplyContext ctx) {
+        return run(ctx, configuredActions == null ? actions() : configuredActions);
+    }
+
+    DestroyOutcome run(ApplyContext ctx, List<Action> actions) {
         Inspection inspection = inspect(ctx.spec, ctx.target);
         List<String> willRemove = willRemove(ctx.spec, inspection);
         List<String> willKeep = willKeep(ctx.spec);
@@ -75,7 +93,7 @@ public final class DestroyRunner {
                     "unit is not managed by xac, skipped stop/disable/remove: " + inspection.unitPath));
         }
 
-        for (Action action : actions()) {
+        for (Action action : actions) {
             if (skipUnitActions && isUnitAction(action)) {
                 continue;
             }
@@ -90,7 +108,8 @@ public final class DestroyRunner {
             } catch (ActionFailure e) {
                 StepResult failed = new StepResult(stepPlan, false, e.getMessage());
                 steps.add(failed);
-                warnings.addAll(ctx.warnings);
+                // 失败前累积的 warning 不进入汇总：CLI 没打印它们，TUI 也不该看到
+                // 与「按打印顺序」矛盾的额外文本。
                 ctx.warnings.clear();
                 return new DestroyOutcome(willRemove, willKeep, steps, warnings, failed);
             }

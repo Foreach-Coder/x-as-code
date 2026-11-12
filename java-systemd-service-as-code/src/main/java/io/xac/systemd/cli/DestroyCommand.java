@@ -44,12 +44,17 @@ public final class DestroyCommand implements Callable<Integer> {
     static int run(Path packageDir, boolean dryRun, boolean yes, EnvironmentProbe probe,
                    CommandRunner runner, SystemdTarget target, PrintStream out, PrintStream err)
             throws IOException {
+        return run(packageDir, dryRun, yes, probe, runner, target, out, err, new DestroyRunner());
+    }
+
+    static int run(Path packageDir, boolean dryRun, boolean yes, EnvironmentProbe probe,
+                   CommandRunner runner, SystemdTarget target, PrintStream out, PrintStream err,
+                   DestroyRunner destroyRunner) throws IOException {
         SpecCommands.Loaded loaded = SpecCommands.loadForDestroy(packageDir, probe);
         if (loaded.spec == null) {
             SpecCommands.report(loaded.violations);
             return 2;
         }
-        DestroyRunner destroyRunner = new DestroyRunner();
         DestroyOutcome plan = destroyRunner.plan(loaded.spec, target);
         printPlan(plan, out);
         if (!yes && !dryRun && !confirm(loaded.spec.name, err)) {

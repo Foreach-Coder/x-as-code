@@ -18,10 +18,16 @@ public final class DestroyOutcome {
     /** 会保留的内容，形如 {@code package directory …, workdir …, logs}。 */
     public final List<String> willKeep;
 
-    /** 执行过的步骤；warning-only 步骤的 {@code plan} 为 null。 */
+    /**
+     * 执行过的步骤；warning-only 步骤的 {@code plan} 为 null，只携带 {@code message}。
+     * 消费方必须判空：只有 {@code plan != null} 的步骤才有动作描述。
+     */
     public final List<StepResult> steps;
 
-    /** 所有警告的汇总，按打印顺序排列。 */
+    /**
+     * 所有已打印警告的汇总，按输出顺序排列。失败即停止：失败前未打印的
+     * {@code ApplyContext.warnings} 不会进入这里。
+     */
     public final List<String> warnings;
 
     /** 失败的那一步；全部成功时为 null。 */

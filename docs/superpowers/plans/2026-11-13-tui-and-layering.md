@@ -356,12 +356,15 @@ if (plan.willRemove.isEmpty()) out.println("  (none)");
 out.println("keep: " + String.join(", ", plan.willKeep));   // Java 8 有 String.join
 // 确认后
 DestroyOutcome outcome = runner.run(ctx);
-for (StepResult step : outcome.steps) out.println(ctx.dryRun ? "would " + step.plan.description : step.plan.description);
+for (StepResult step : outcome.steps) {
+    if (step.plan == null) continue;   // warning-only 步骤：只有 message，没有动作描述
+    out.println(ctx.dryRun ? "would " + step.plan.description : step.plan.description);
+}
 for (String w : outcome.warnings) out.println("warning: " + w);
 return outcome.failed == null ? 0 : 1;
 ```
 
-注意：原实现把 warning 打在**该步描述之后**、下一步之前。新实现用 `StepResult.message` 承载：`ok=false` 时是失败原因；`ok=true` 且 `message != null` 时是“完成但有话要说”，CLI 在该行后打印 `warning: <message>`。`DestroyOutcome.warnings` 只保留汇总视图（供 TUI 面板与最终摘要），不再单独驱动 CLI 打印。
+注意：原实现把 warning 打在**该步描述之后**、下一步之前。新实现用 `StepResult.message` 承载：`ok=false` 时是失败原因；`ok=true` 且 `message != null` 时是“完成但有话要说”，CLI 在该行后打印 `warning: <message>`。`DestroyOutcome.warnings` 只保留汇总视图（供 TUI 面板与最终摘要），不再单独驱动 CLI 打印。warning-only 步骤的 `plan` 为 `null`（destroy 用它保留循环前 warning 的位置），消费方必须判空。
 
 - [ ] **Step 4: 跑测试确认通过**
 
