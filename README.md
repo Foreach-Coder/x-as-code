@@ -4,7 +4,7 @@
 
 | 子项目 | 状态 | 一句话 |
 |---|---|---|
-| [`java-systemd-service-as-code`](java-systemd-service-as-code) | **v0.1.1** | 用一个 `xac.yaml` 描述跑在 systemd 上的 Java 服务，用 `xac` 命令管它的全生命周期 |
+| [`java-systemd-service-as-code`](java-systemd-service-as-code) | **v0.1.2** | 用一个 `xac.yaml` 描述跑在 systemd 上的 Java 服务，用 `xac` 命令管它的全生命周期 |
 
 ## 这是什么
 
@@ -22,10 +22,10 @@ sudo java -jar xac.jar apply .
 
 | 项 | 值 |
 |---|---|
-| 版本 | `v0.1.1` |
+| 版本 | `v0.1.2` |
 | 目标平台 | Ubuntu 24.04 + systemd 255（不支持 CentOS 7 / systemd 219） |
 | 运行要求 | root、systemd；目标机只需 JRE 8+ |
-| 产物 | 发行包 `java-systemd-service-cli-0.1.1.tar.gz`（`bin/` 启动脚本 + `libs/` fat jar，约 `0.75 MB`） |
+| 产物 | 发行包 `java-systemd-service-cli-0.1.2.tar.gz`（`bin/` 启动脚本 + `libs/` fat jar，约 `0.75 MB`） |
 | 测试 | 156 个单元/集成测试；9 个 Testcontainers 端到端用例（真 systemd 255） |
 
 ## 快速开始
@@ -34,8 +34,8 @@ sudo java -jar xac.jar apply .
 
 ```bash
 mvn -f java-systemd-service-as-code/pom.xml -DskipTests package
-# → java-systemd-service-as-code/target/java-systemd-service-cli-0.1.1.tar.gz
-#    解压后：java-systemd-service-cli-0.1.1/{bin/java-systemd-service-cli, libs/java-systemd-service-cli-0.1.1.jar}
+# → java-systemd-service-as-code/target/java-systemd-service-cli-0.1.2.tar.gz
+#    解压后：java-systemd-service-cli-0.1.2/{bin/java-systemd-service-cli, libs/java-systemd-service-cli-0.1.2.jar}
 #    同目录仍有可直接 java -jar 的 fat jar
 ```
 
@@ -71,7 +71,7 @@ java-systemd-service-cli init /opt
 ```
 /opt/xac/
 ├── bin/java-systemd-service-cli      # 0755
-└── libs/java-systemd-service-cli-0.1.1.jar
+└── libs/java-systemd-service-cli-0.1.2.jar
 ```
 
 想直接敲 `java-systemd-service-cli`，用脚本自带的子命令把它挂到 PATH（需要 root）：
@@ -209,8 +209,8 @@ $env:GITCODE_TOKEN = '<token>'
 git push --prune "https://foreach1991:$env:GITCODE_TOKEN@gitcode.com/foreach1991/x-as-code.git" `
   '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'
 pwsh -NoProfile -File .github/scripts/sync-gitcode-release.ps1 `
-  -Owner foreach1991 -Repo x-as-code -Tag v0.1.1 `
-  -Asset java-systemd-service-as-code/target/java-systemd-service-cli-0.1.1.tar.gz
+  -Owner foreach1991 -Repo x-as-code -Tag v0.1.2 `
+  -Asset java-systemd-service-as-code/target/java-systemd-service-cli-0.1.2.tar.gz
 ```
 
 ## 文档
