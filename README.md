@@ -4,7 +4,7 @@
 
 | 子项目 | 状态 | 一句话 |
 |---|---|---|
-| [`java-systemd-service-as-code`](java-systemd-service-as-code) | **v0.1.2** | 用一个 `xac.yaml` 描述跑在 systemd 上的 Java 服务，用 `java-systemd-service-cli` 管它的全生命周期 |
+| [`java-systemd-service-as-code`](java-systemd-service-as-code) | **v0.1.3** | 用一个 `xac.yaml` 描述跑在 systemd 上的 Java 服务，用 `java-systemd-service-cli` 管它的全生命周期 |
 
 ## 这是什么
 
@@ -25,9 +25,9 @@ sudo java-systemd-service-cli apply /opt/demo
 从 [Releases](https://github.com/Foreach-Coder/x-as-code/releases) 下载发行包，解压到任意目录（下文用 `/opt/xac`），再把启动脚本挂到 PATH：
 
 ```bash
-curl -LO https://github.com/Foreach-Coder/x-as-code/releases/download/v0.1.2/java-systemd-service-cli-0.1.2.tar.gz
-tar -xzf java-systemd-service-cli-0.1.2.tar.gz
-sudo mkdir -p /opt/xac && sudo cp -r java-systemd-service-cli-0.1.2/* /opt/xac/
+curl -LO https://github.com/Foreach-Coder/x-as-code/releases/download/v0.1.3/java-systemd-service-cli-0.1.3.tar.gz
+tar -xzf java-systemd-service-cli-0.1.3.tar.gz
+sudo mkdir -p /opt/xac && sudo cp -r java-systemd-service-cli-0.1.3/* /opt/xac/
 
 sudo /opt/xac/bin/java-systemd-service-cli install
 java-systemd-service-cli --version

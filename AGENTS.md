@@ -41,16 +41,16 @@ mvn -f java-systemd-service-as-code/pom.xml test
 
 # 打包：fat jar + 发行包
 mvn -f java-systemd-service-as-code/pom.xml -DskipTests package
-#   → java-systemd-service-as-code/target/java-systemd-service-cli-0.1.2.jar
-#   → java-systemd-service-as-code/target/java-systemd-service-cli-0.1.2.tar.gz
-#      解压后 java-systemd-service-cli-0.1.2/{bin/java-systemd-service-cli, libs/*.jar}
+#   → java-systemd-service-as-code/target/java-systemd-service-cli-0.1.3.jar
+#   → java-systemd-service-as-code/target/java-systemd-service-cli-0.1.3.tar.gz
+#      解压后 java-systemd-service-cli-0.1.3/{bin/java-systemd-service-cli, libs/*.jar}
 
 # 挂到 PATH（root；只操作 /usr/local/bin 下自己那条软链）
-sudo java-systemd-service-cli-0.1.2/bin/java-systemd-service-cli install
-sudo java-systemd-service-cli-0.1.2/bin/java-systemd-service-cli uninstall
+sudo java-systemd-service-cli-0.1.3/bin/java-systemd-service-cli install
+sudo java-systemd-service-cli-0.1.3/bin/java-systemd-service-cli uninstall
 
 # 交互式生成 xac.yaml 模板（父目录 → <父目录>/<服务名>/xac.yaml；不需要 root，不覆盖已有文件）
-java -jar java-systemd-service-as-code/target/java-systemd-service-cli-0.1.2.jar init /tmp
+java -jar java-systemd-service-as-code/target/java-systemd-service-cli-0.1.3.jar init /tmp
 
 # 真 systemd e2e（Testcontainers；需要 Docker + 镜像 xac-e2e:24.04，见 e2e/README.md）
 mvn -f java-systemd-service-as-code/pom.xml -Pe2e verify
