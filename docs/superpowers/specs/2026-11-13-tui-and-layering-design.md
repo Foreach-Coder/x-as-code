@@ -188,10 +188,10 @@ java-systemd-service-cli tui [<package-dir>]
 ### 6.4 线程与刷新
 
 - UI 线程：50ms 轮询按键，脏标记才刷新；状态查询不在这里执行。
-- 状态 worker：单线程 daemon 执行器，每 2 秒 `ServicePackage.status()`；UI 侧 `Future.get(3s)`，预算 3 秒，超时或异常显示 `unknown` 并 `cancel(true)`，**UI 不阻塞**；**覆盖层/编辑中暂停提交**，关闭后恢复；`run()` 退出时 `shutdownNow()`。
+- 状态 worker：单线程 daemon 执行器，每 2 秒 `ServicePackage.status()`；UI 侧 `Future.get(3s)`，预算 3 秒，超时或异常显示 `unknown` 并 `cancel(true)`，**UI 最多阻塞 3 秒**（本轮取结果，不跨 tick 异步收）；**覆盖层/编辑中暂停提交**，关闭后恢复；`run()` 退出时 `shutdownNow()`。
 - 日志线程：`LogStream.start` 阻塞；`close()` 停止；切换来源或保存成功后重建。TUI 请求 follow 模式；流正常结束置 `logsEnded`，表头显示 `follow (ended)`，通知行提示 `log stream ended`。
 - 日志关闭：`close()` 放到独立 daemon 线程，UI 最多 `join(250ms)`；超时放弃等待，daemon 线程不阻塞 JVM 退出。
-- 线程间只传不可变值；窗口部件只在 UI 线程触碰。
+- 线程间只传不可变值；绘制只在 UI 线程发生，`LogPane` 的读写由自身锁保护（日志线程可 `append`）。
 
 ### 6.5 状态呈现
 
