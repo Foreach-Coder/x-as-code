@@ -310,7 +310,7 @@ s → 草稿 spec → Schema + ValidationRunner
 
 块标量（`|`/`>`）内部的 `#` 是标量内容，既不是注释，也不计入 `dropped`。`apply` 只增注释行，不重排配置行；对 `scan` 结果 apply 是幂等的，对已合并文本再次 apply 也不会重复插入。
 
-无法定位的注释（文件末尾游离、多余注释块、重复值注释）由 `ApplyResult.dropped` 在 diff 前提示条数，不静默丢弃。
+无法定位的注释（文件末尾游离、多余注释块、重复值注释）由 `ApplyResult.dropped` 在 diff 前提示条数，不静默丢弃；`Comments.orphans` 里另有一类被注释掉的字段示例（`# workdir: /opt/prod/work`），它们不计入 `dropped`，但保存前的 diff 面板必须同时显示 `orphans` 条数，避免这类用户手写内容无声消失。
 
 ### 7.5 限制
 
