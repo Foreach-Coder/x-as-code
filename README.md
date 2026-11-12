@@ -162,10 +162,10 @@ e2e 用 Testcontainers 起一个 `--privileged` 的 Ubuntu 24.04 容器，`syste
 
 `push master` 只做第 3 步（镜像），不发版。
 
-需要的唯一凭据是 GitHub 仓库 secret `GITCODE_TOKEN`（GitCode 个人访问令牌，勾选 repo 读写）：
+需要的唯一凭据是 GitHub 仓库 secret `GITCODE_FOREACH1991`（GitCode 个人访问令牌，勾选 repo 读写）：
 
 1. 打开 <https://gitcode.com/setting/token-classic>，生成令牌，复制（只显示一次）；
-2. 打开 <https://github.com/Foreach-Coder/x-as-code/settings/secrets/actions>，`New repository secret`，名字填 `GITCODE_TOKEN`，粘贴令牌。
+2. 打开 <https://github.com/Foreach-Coder/x-as-code/settings/secrets/actions>，`New repository secret`，名字填 `GITCODE_FOREACH1991`，粘贴令牌。
 
 本地手动补发某个版本（等价于 workflow 第 3、4 步）：
 

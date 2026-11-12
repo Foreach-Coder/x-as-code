@@ -36,11 +36,11 @@ jobs:
           ref: master
       - name: push branches and tags
         env:
-          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+          GITCODE_TOKEN: ${{ secrets.GITCODE_FOREACH1991 }}
         run: |
           set -euo pipefail
           if [ -z "${GITCODE_TOKEN:-}" ]; then
-            echo "GITCODE_TOKEN secret is not configured" >&2
+            echo "GITCODE_FOREACH1991 secret is not configured" >&2
             exit 1
           fi
           git fetch --prune origin \
@@ -116,7 +116,7 @@ jobs:
 
       - name: sync GitCode release and asset
         env:
-          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+          GITCODE_TOKEN: ${{ secrets.GITCODE_FOREACH1991 }}
         run: |
           set -euo pipefail
           jar=$(ls dist/*.jar | head -n 1)
