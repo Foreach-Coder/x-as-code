@@ -306,9 +306,8 @@ class EditScreenTest {
         List<String> lines = screen.lines(120, 0);
         assertTrue(anyContains(lines, "! 1 comment(s) will be dropped; press s again to confirm"),
                 lines.toString());
-        assertTrue(screen.saveNote().contains(
-                        "1 commented-out field examples will not be kept"),
-                screen.saveNote().toString());
+        assertTrue(screen.saveNote().isEmpty(),
+                "prose-only loss carries no extra classification line: " + screen.saveNote());
         assertArrayEqualsQuiet(before, Files.readAllBytes(file));
 
         screen.handle(NavKey.CHAR, 's');
@@ -318,7 +317,68 @@ class EditScreenTest {
         String text = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
         assertTrue(text.contains("description: demo service plus"), text);
         assertFalse(text.contains("stray tail note"), text);
-        assertFalse(screen.saveNote().isEmpty());
+        assertTrue(screen.saveNote().contains("1 comment(s) were dropped"),
+                screen.saveNote().toString());
+    }
+
+    @Test
+    void navigationKeepsThePendingConfirmation() throws Exception {
+        Path file = write();
+        Files.write(file, "\n# stray tail note\n".getBytes(StandardCharsets.UTF_8),
+                StandardOpenOption.APPEND);
+        EditScreen screen = new EditScreen(model(), file);
+        press(screen, NavKey.ENTER);
+        type(screen, " plus");
+        press(screen, NavKey.ENTER);
+
+        screen.handle(NavKey.CHAR, 's');
+        assertFalse(screen.closed());
+        // 只看不动：TAB/方向键不该悄悄撤销「已经确认」的状态。
+        screen.handle(NavKey.TAB, '\0');
+        screen.handle(NavKey.UP, '\0');
+        screen.handle(NavKey.CHAR, 's');
+
+        assertTrue(screen.closed(), "confirmation must survive navigation");
+        assertTrue(screen.saved());
+    }
+
+    @Test
+    void externalChangeWhileConfirmingCommentsIsNotSwallowed() throws Exception {
+        Path file = write();
+        Files.write(file, "\n# stray tail note\n".getBytes(StandardCharsets.UTF_8),
+                StandardOpenOption.APPEND);
+        EditScreen screen = new EditScreen(model(), file);
+        press(screen, NavKey.ENTER);
+        type(screen, " plus");
+        press(screen, NavKey.ENTER);
+
+        // 第一次 s：只因为注释将丢失进入确认。
+        screen.handle(NavKey.CHAR, 's');
+        assertFalse(screen.closed());
+        assertTrue(anyContains(screen.lines(120, 0),
+                "! 1 comment(s) will be dropped; press s again to confirm"),
+                screen.lines(120, 0).toString());
+
+        // 确认之后再有人改文件：第二次 s 必须重新提示外部改动，且不写盘。
+        Files.write(file, "\n# EXTERNAL LATE EDIT\n".getBytes(StandardCharsets.UTF_8),
+                StandardOpenOption.APPEND);
+        byte[] afterExternal = Files.readAllBytes(file);
+        screen.handle(NavKey.CHAR, 's');
+
+        assertFalse(screen.closed(), "late external edit must not be overwritten");
+        List<String> lines = screen.lines(120, 0);
+        assertTrue(anyContains(lines, "file changed outside"), lines.toString());
+        assertTrue(anyContains(lines, "press s again to confirm"), lines.toString());
+        assertArrayEqualsQuiet(afterExternal, Files.readAllBytes(file));
+
+        // 第三次 s：两个原因都已确认，才写规范文本。
+        screen.handle(NavKey.CHAR, 's');
+        assertTrue(screen.closed());
+        assertTrue(screen.saved());
+        String text = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+        assertFalse(text.contains("EXTERNAL LATE EDIT"), text);
+        assertFalse(text.contains("stray tail note"), text);
+        assertTrue(text.contains("description: demo service plus"), text);
     }
 
     @Test

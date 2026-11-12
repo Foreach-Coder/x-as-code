@@ -1157,8 +1157,46 @@ class TuiAppTest {
 
         assertTrue(app.statusNote().startsWith("saved"),
                 app.statusNote());
-        assertTrue(app.statusNote().contains("1 commented-out field examples will not be kept"),
+        assertTrue(app.statusNote().contains("1 comment(s) were dropped"),
                 app.statusNote());
+        String noticeRow = display.line(22);
+        assertTrue(noticeRow.contains("notice: saved"), noticeRow);
+        assertTrue(noticeRow.contains("1 comment(s) were dropped"), noticeRow);
+    }
+
+    @Test
+    void editOpensWhenSpecHasRuntimeValidationErrors() throws Exception {
+        RecordingDisplay display = new RecordingDisplay(80, 24);
+        TuiApp app = new TuiApp(openPackage(), display,
+                new ScriptedKeySource(KeyEvent.character('e')),
+                FIXED_CLOCK,
+                new TuiApp.LogStreamFactory() {
+                    @Override
+                    public LogStream open(int lines, boolean follow) {
+                        FakeLogStream stream = new FakeLogStream();
+                        stream.blockUntilClosed = true;
+                        return stream;
+                    }
+                },
+                new TuiApp.PackageOpener() {
+                    @Override
+                    public ServicePackage open(Path packageDir) throws InvalidSpecException {
+                        return ServicePackage.open(packageDir, runner, probe,
+                                new SystemdTarget(packageDir.resolve("units"),
+                                        packageDir.resolve("env")));
+                    }
+                });
+        // ${MISSING} 是部署期校验错误：编辑器必须仍然进得去，用户才能补 env。
+        Path file = pkg.resolve("xac.yaml");
+        String text = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+        Files.write(file, text.replace("    - -Xmx512m", "    - ${MISSING}")
+                .getBytes(StandardCharsets.UTF_8));
+
+        assertTrue(app.tick(0));
+
+        String screen = screen(display);
+        assertTrue(screen.contains("${MISSING}"), screen);
+        assertFalse(screen.contains("cannot edit"), screen);
     }
 
     @Test

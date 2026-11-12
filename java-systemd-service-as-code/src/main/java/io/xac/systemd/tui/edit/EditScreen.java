@@ -31,7 +31,7 @@ public final class EditScreen {
     private static final int MAX_ROW_WINDOW = 10;
 
     private final Path yamlFile;
-    private final FileStamp baseline;
+    private FileStamp baseline;
     private final List<EditorModel> undoStack = new ArrayList<EditorModel>();
 
     private EditorModel model;
@@ -44,8 +44,13 @@ public final class EditScreen {
     private boolean closed;
     private boolean saved;
     private boolean confirmDiscard;
-    /** 用户已经被提示过一次（外部改动或注释将丢失），下一次 s 直接落地。 */
-    private boolean confirmArmed;
+    /**
+     * 上一次确认时的文件指纹与已确认的原因。确认只对当时看到的那份文件有效：文件再变，
+     * 旧确认就作废，必须重新提示。
+     */
+    private FileStamp confirmedStamp;
+    private boolean confirmLostComments;
+    private boolean confirmExternal;
     private List<Violation> saveError = Collections.emptyList();
     private List<String> saveNote = Collections.emptyList();
 
@@ -382,7 +387,7 @@ public final class EditScreen {
         undoStack.add(model);
         model = model.with(path, values);
         dirty = true;
-        confirmArmed = false;
+        clearConfirm();
         saveError = Collections.emptyList();
         saveNote = Collections.emptyList();
     }
@@ -394,12 +399,19 @@ public final class EditScreen {
         }
         model = undoStack.remove(undoStack.size() - 1);
         dirty = !undoStack.isEmpty();
-        confirmArmed = false;
+        clearConfirm();
         saveError = Collections.emptyList();
         saveNote = Collections.emptyList();
         if (focus >= model.fields().size()) {
             focus = firstEditable();
         }
+    }
+
+    /** 放弃上一次确认：文件指纹变了或用户又改了模型，旧确认不再覆盖新情况。 */
+    private void clearConfirm() {
+        confirmedStamp = null;
+        confirmLostComments = false;
+        confirmExternal = false;
     }
 
     private void requestClose() {
@@ -413,55 +425,106 @@ public final class EditScreen {
 
     /** 保存：校验 → 渲染/合并注释 → （必要时二次确认）→ 原子写入。 */
     private void save() {
+        if (baseline == null) {
+            try {
+                baseline = FileStamp.of(yamlFile);
+            } catch (IOException e) {
+                saveError = Collections.singletonList(
+                        new Violation("", "cannot read file: " + messageOf(e)));
+                saveNote = Collections.emptyList();
+                return;
+            }
+        }
         SaveFlow.Result result;
         try {
             result = SaveFlow.prepare(model, yamlFile, baseline);
         } catch (IOException e) {
+            clearConfirm();
             saveError = Collections.singletonList(new Violation("", "cannot read file: " + messageOf(e)));
             saveNote = Collections.emptyList();
-            confirmArmed = false;
             return;
         }
         if (!result.ok()) {
+            clearConfirm();
             saveError = result.violations;
             saveNote = Collections.emptyList();
-            confirmArmed = false;
             focusFirst(result.violations);
             return;
         }
-        if ((result.modifiedOutside || result.losesComments()) && !confirmArmed) {
-            confirmArmed = true;
-            saveError = Collections.singletonList(new Violation("", confirmPrompt(result)));
+
+        FileStamp current;
+        try {
+            current = FileStamp.of(yamlFile);
+        } catch (IOException e) {
+            clearConfirm();
+            saveError = Collections.singletonList(new Violation("", "cannot read file: " + messageOf(e)));
+            saveNote = Collections.emptyList();
+            return;
+        }
+
+        boolean outside = !baseline.matches(current);
+        boolean loses = result.losesComments();
+        boolean stampStale = confirmedStamp != null && !confirmedStamp.matches(current);
+        boolean needComments = loses && !confirmLostComments;
+        boolean needOutside = outside && (!confirmExternal || stampStale);
+        if (needComments || needOutside) {
+            // 确认只覆盖「此刻看到的这份文件」：记下指纹，外部改动确认后把 baseline 前移，
+            // 下一次 s 会重新读文件、重新出 diff；再变则 stampStale 让提示重来。
+            confirmedStamp = current;
+            confirmLostComments = loses;
+            confirmExternal = outside;
+            if (outside) {
+                baseline = current;
+            }
+            saveError = Collections.singletonList(
+                    new Violation("", confirmPrompt(loses, outside, result.lostComments)));
             saveNote = result.orphanNotes;
             return;
         }
+
         saveError = Collections.emptyList();
-        // 已经确认要覆盖外部改动时，baseline 必然对不上，不能再拿它拦自己；
-        // 正常路径仍然在写前验一次指纹，堵住 prepare 到 commit 之间的改动。
-        FileStamp stamp = result.modifiedOutside ? null : baseline;
         try {
-            SaveFlow.commit(yamlFile, result.newText, stamp);
+            // 始终带 baseline：写前再验一次，堵住确认之后、落盘之前的改动。
+            SaveFlow.commit(yamlFile, result.newText, baseline);
         } catch (IOException e) {
-            confirmArmed = false;
-            saveError = Collections.singletonList(new Violation("", "save failed: " + messageOf(e)));
+            clearConfirm();
+            saveError = Collections.singletonList(new Violation("", "cannot save: " + messageOf(e)));
             return;
         }
-        saveNote = result.orphanNotes;
+        saveNote = successNote(result);
         dirty = false;
-        confirmArmed = false;
+        clearConfirm();
         saved = true;
         closed = true;
     }
 
-    private static String confirmPrompt(SaveFlow.Result result) {
-        String comments = result.lostComments + " comment(s) will be dropped";
-        if (result.modifiedOutside && result.losesComments()) {
+    private static String confirmPrompt(boolean loses, boolean outside, int lostComments) {
+        String comments = lostComments + " comment(s) will be dropped";
+        if (loses && outside) {
             return comments + " and the file changed outside; press s again to confirm";
         }
-        if (result.losesComments()) {
+        if (loses) {
             return comments + "; press s again to confirm";
         }
         return "file changed outside; press s again to overwrite";
+    }
+
+    private static List<String> successNote(SaveFlow.Result result) {
+        if (result.lostComments <= 0) {
+            return Collections.emptyList();
+        }
+        StringBuilder note = new StringBuilder();
+        note.append(result.lostComments).append(" comment(s) were dropped");
+        if (result.exampleComments > 0) {
+            note.append("; ");
+            if (result.exampleComments == result.lostComments) {
+                note.append("all were commented-out field examples");
+            } else {
+                note.append(result.exampleComments)
+                        .append(" were commented-out field examples");
+            }
+        }
+        return Collections.singletonList(note.toString());
     }
 
     private void focusFirst(List<Violation> violations) {

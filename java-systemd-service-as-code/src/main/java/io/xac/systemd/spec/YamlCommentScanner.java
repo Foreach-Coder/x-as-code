@@ -331,33 +331,40 @@ public final class YamlCommentScanner {
             out.add(merged);
         }
 
-        int dropped;
-        if (userComments == null) {
-            dropped = comments.total() - kept;
-        } else {
-            dropped = 0;
-            for (String orphan : userComments.orphans) {
-                if (template == null || !coveredByTemplate(orphanText(orphan), template)) {
+        int dropped = 0;
+        int examplesDropped = 0;
+        Comments counted = userComments != null ? userComments : comments;
+        for (String orphan : counted.orphans) {
+            int kind = lostKind(orphanText(orphan), template);
+            if (kind == LOST_PROSE) {
+                dropped++;
+            } else if (kind == LOST_EXAMPLE) {
+                examplesDropped++;
+            }
+        }
+        for (Map.Entry<String, String> entry : counted.inline.entrySet()) {
+            if (!keptInline.contains(entry.getKey())) {
+                int kind = lostKind(entry.getValue(), template);
+                if (kind == LOST_PROSE) {
                     dropped++;
+                } else if (kind == LOST_EXAMPLE) {
+                    examplesDropped++;
                 }
             }
-            for (Map.Entry<String, String> entry : userComments.inline.entrySet()) {
-                if (!keptInline.contains(entry.getKey())
-                        && (template == null || !coveredByTemplate(entry.getValue(), template))) {
-                    dropped++;
-                }
-            }
-            for (Map.Entry<String, List<String>> entry : userComments.leading.entrySet()) {
-                if (!keptLeading.contains(entry.getKey())) {
-                    for (String line : entry.getValue()) {
-                        if (template == null || !coveredByTemplate(line, template)) {
-                            dropped++;
-                        }
+        }
+        for (Map.Entry<String, List<String>> entry : counted.leading.entrySet()) {
+            if (!keptLeading.contains(entry.getKey())) {
+                for (String line : entry.getValue()) {
+                    int kind = lostKind(line, template);
+                    if (kind == LOST_PROSE) {
+                        dropped++;
+                    } else if (kind == LOST_EXAMPLE) {
+                        examplesDropped++;
                     }
                 }
             }
         }
-        return new ApplyResult(join(out), kept, dropped);
+        return new ApplyResult(join(out), kept, dropped, examplesDropped);
     }
 
     private static boolean alreadyPresent(List<String> out, int indent, List<String> block) {
@@ -412,22 +419,22 @@ public final class YamlCommentScanner {
         return DUPLICATE_PREFIX + path + ": " + text;
     }
 
+    private static final int LOST_NONE = 0;
+    private static final int LOST_PROSE = 1;
+    private static final int LOST_EXAMPLE = 2;
+
     /**
-     * 用户文件里无法挂回的注释，如果只是模板原文（init 生成的注释块被空行冲散后就是这种形态），
-     * 不算用户丢注释：模板打底会把它重新写出来。只做逐字比较，用户改动过的行一律算 dropped。
-     *
-     * <p>以 {@code key:} 开头的注释（例如文件末尾自写的 {@code # workdir: /opt/prod/work}）是
-     * 被注释掉的字段示例，不是丢失的散文；它保留在 {@link Comments#orphans} 里供 UI 展示，
-     * 但不计入 {@code dropped}。</p>
+     * 用户文件里无法挂回的注释分三类：与模板逐字相同的（模板打底会重新写出来，不算丢失）、
+     * 被注释掉的字段示例（{@code key: value} 形态，单列计数），以及其余散文注释（真正丢失）。
      */
-    private static boolean coveredByTemplate(String text, Comments template) {
+    private static int lostKind(String text, Comments template) {
         if (text == null) {
-            return false;
+            return LOST_PROSE;
         }
-        if (template.templateLines.contains(text)) {
-            return true;
+        if (template != null && template.templateLines.contains(text)) {
+            return LOST_NONE;
         }
-        return anchorKey(text) != null;
+        return anchorKey(text) != null ? LOST_EXAMPLE : LOST_PROSE;
     }
 
     private static String orphanText(String orphan) {
@@ -863,26 +870,33 @@ public final class YamlCommentScanner {
 
     // ------------------------------------------------------------------ values
 
-    /** {@link #apply} 的结果：合并后的文本、成功挂回的注释行数、无法挂回的注释行数。 */
+    /**
+     * {@link #apply} 的结果：合并后的文本、成功挂回的注释行数，以及无法挂回的注释行数。
+     * {@code dropped} 只统计散文注释；{@code examplesDropped} 单列被注释掉的字段示例，
+     * 两者互斥，调用方用 {@code dropped + examplesDropped} 得到总丢失数。
+     */
     public static final class ApplyResult {
 
         public final String text;
         public final int kept;
         public final int dropped;
+        public final int examplesDropped;
 
-        ApplyResult(String text, int kept, int dropped) {
+        ApplyResult(String text, int kept, int dropped, int examplesDropped) {
             this.text = text;
             this.kept = kept;
             this.dropped = dropped;
+            this.examplesDropped = examplesDropped;
         }
 
         public boolean hasDropped() {
-            return dropped > 0;
+            return dropped > 0 || examplesDropped > 0;
         }
 
         @Override
         public String toString() {
-            return "ApplyResult{kept=" + kept + ", dropped=" + dropped + '}';
+            return "ApplyResult{kept=" + kept + ", dropped=" + dropped
+                    + ", examplesDropped=" + examplesDropped + '}';
         }
     }
 

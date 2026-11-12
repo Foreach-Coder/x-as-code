@@ -102,17 +102,16 @@ class SaveFlowTest {
     }
 
     @Test
-    void reportsOrphanNotesWithCounts() throws IOException {
+    void reportsProseCommentLossCount() throws IOException {
         Path file = write(SpecWriter.render(fullSpec()) + "\n# stray tail note\n");
 
         SaveFlow.Result result = SaveFlow.prepare(model(), file);
 
         assertTrue(result.ok(), String.valueOf(result.violations));
-        assertFalse(result.orphanNotes.isEmpty(), "losing a comment must be reported");
-        assertTrue(result.orphanNotes.contains(
-                        "1 commented-out field examples will not be kept"),
-                result.orphanNotes.toString());
+        assertTrue(result.orphanNotes.isEmpty(),
+                "no example lines: the ! line already carries the count");
         assertEquals(1, result.lostComments, result.orphanNotes.toString());
+        assertEquals(0, result.exampleComments, result.orphanNotes.toString());
         assertTrue(result.losesComments());
         assertFalse(result.newText.contains("stray tail note"), result.newText);
     }
@@ -125,10 +124,75 @@ class SaveFlowTest {
         SaveFlow.Result result = SaveFlow.prepare(model(), file);
 
         assertTrue(result.ok(), String.valueOf(result.violations));
-        assertTrue(result.orphanNotes.contains(
-                        "1 comments could not be placed and will be dropped"),
-                result.orphanNotes.toString());
+        assertTrue(result.orphanNotes.isEmpty(), result.orphanNotes.toString());
+        assertEquals(1, result.lostComments, result.orphanNotes.toString());
+        assertEquals(0, result.exampleComments, result.orphanNotes.toString());
         assertFalse(result.newText.contains("gone comment"), result.newText);
+    }
+
+    @Test
+    void classifiesMixedProseAndExampleCommentsSeparately() throws IOException {
+        // 散文 + 被注释掉的字段示例：都丢失，但只有示例计入 exampleComments，
+        // 提示行只补充分类，不重复总数。
+        Path file = write(SpecWriter.render(fullSpec())
+                + "\n# prose note\n# workdir: /opt/prod/work\n");
+
+        SaveFlow.Result result = SaveFlow.prepare(model(), file);
+
+        assertTrue(result.ok(), String.valueOf(result.violations));
+        assertEquals(2, result.lostComments, result.orphanNotes.toString());
+        assertEquals(1, result.exampleComments, result.orphanNotes.toString());
+        assertEquals(1, result.orphanNotes.size(), result.orphanNotes.toString());
+        assertTrue(result.orphanNotes.get(0).contains(
+                        "1 of them are commented-out field examples"),
+                result.orphanNotes.toString());
+    }
+
+    @Test
+    void countsOnlyCommentedOutFieldExamplesWhenAllLostLinesAreExamples() throws IOException {
+        Path file = write(SpecWriter.render(fullSpec()) + "\n# workdir: /opt/prod/work\n");
+
+        SaveFlow.Result result = SaveFlow.prepare(model(), file);
+
+        assertTrue(result.ok(), String.valueOf(result.violations));
+        assertEquals(1, result.lostComments, result.orphanNotes.toString());
+        assertEquals(1, result.exampleComments, result.orphanNotes.toString());
+        assertEquals(1, result.orphanNotes.size(), result.orphanNotes.toString());
+        assertTrue(result.orphanNotes.get(0).contains(
+                        "all of them are commented-out field examples"),
+                result.orphanNotes.toString());
+    }
+
+    @Test
+    void templateVerbatimOrphanIsNotCountedAsLost() throws IOException {
+        // 与模板逐字相同的注释即使成了 orphan，模板打底也会重新写出来，不算丢失。
+        Path file = write(SpecWriter.render(fullSpec())
+                + "\n# The schema is strict: unknown keys are errors.\n");
+
+        SaveFlow.Result result = SaveFlow.prepare(model(), file);
+
+        assertTrue(result.ok(), String.valueOf(result.violations));
+        assertEquals(0, result.lostComments, result.orphanNotes.toString());
+        assertEquals(0, result.exampleComments, result.orphanNotes.toString());
+        assertFalse(result.losesComments());
+    }
+
+    @Test
+    void scannerFailureBecomesAViolationInsteadOfThrowing() throws IOException {
+        Path file = write(SpecWriter.render(fullSpec()));
+
+        SaveFlow.Result result = SaveFlow.prepare(model(), file, null,
+                new SaveFlow.CommentScanner() {
+                    @Override
+                    public Comments scan(String text) {
+                        throw new IllegalStateException("scanner exploded");
+                    }
+                });
+
+        assertFalse(result.ok());
+        assertEquals(1, result.violations.size(), result.violations.toString());
+        assertTrue(result.violations.get(0).toString().contains("scanner exploded"),
+                result.violations.toString());
     }
 
     @Test
@@ -142,9 +206,8 @@ class SaveFlowTest {
 
         assertTrue(result.ok(), String.valueOf(result.violations));
         assertTrue(result.modifiedOutside);
-        assertTrue(result.orphanNotes.contains(
-                        "1 commented-out field examples will not be kept"),
-                result.orphanNotes.toString());
+        assertEquals(1, result.lostComments, result.orphanNotes.toString());
+        assertEquals(0, result.exampleComments, result.orphanNotes.toString());
     }
 
     @Test

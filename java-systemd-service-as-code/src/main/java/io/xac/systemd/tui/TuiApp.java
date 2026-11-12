@@ -29,6 +29,8 @@ import io.xac.systemd.core.StatusReport;
 import io.xac.systemd.logs.LogSink;
 import io.xac.systemd.logs.LogStream;
 import io.xac.systemd.spec.Comments;
+import io.xac.systemd.spec.SpecLoader;
+import io.xac.systemd.spec.Violation;
 import io.xac.systemd.spec.YamlCommentScanner;
 import io.xac.systemd.systemd.UnitNaming;
 import io.xac.systemd.tui.actions.ActionKind;
@@ -571,9 +573,12 @@ public final class TuiApp {
     // --------------------------------------------------------------- editing
 
     /**
-     * 打开编辑屏：读当前 xac.yaml 的文本与注释。模型必须来自磁盘上最新的 spec，
+     * 打开编辑屏：读当前 xac.yaml 的文本与注释。模型来自磁盘上最新的解析结果，
      * 不能拿 TUI 启动时的快照配新指纹——否则外部先改文件、再按 e/s 就会把别人的修改
-     * 静默覆盖。语法坏到连 spec 都建不起来的包在这里拒绝进入编辑器（design §7.5）。
+     * 静默覆盖。这里只做解析（{@link SpecLoader}），不跑部署期校验：环境类错误
+     * （例如 {@code ${MISSING}} 变量）必须能在编辑器里补 env，而不是被挡在门外；
+     * 真正的校验由 {@link EditorModel#validate()} 在行尾和保存时给出。
+     * 语法坏到连 spec 都建不起来的包在这里拒绝进入编辑器（design §7.5）。
      */
     private void openEditor() {
         if (editor != null) {
@@ -582,18 +587,20 @@ public final class TuiApp {
         Path packageDir = servicePackage.packageDir();
         Path file = packageDir.resolve("xac.yaml");
         try {
-            ServicePackage fresh = opener.open(packageDir);
+            SpecLoader.Result loaded = SpecLoader.load(packageDir);
+            if (!loaded.ok()) {
+                notice = "cannot edit: " + firstViolation(loaded.violations);
+                dirty = true;
+                return;
+            }
             // 先取指纹再读文本：读完到保存之间任何外部改动都能被发现。
             FileStamp stamp = FileStamp.of(file);
             String text = readText(file);
             Comments comments = YamlCommentScanner.scan(text);
-            EditorModel model = EditorModel.from(fresh.spec(), comments);
+            EditorModel model = EditorModel.from(loaded.spec, comments);
             editor = new EditScreen(model, file, stamp);
             setOverlayOpen(true);
             notice = "";
-            dirty = true;
-        } catch (InvalidSpecException e) {
-            notice = "cannot edit: " + firstViolation(e);
             dirty = true;
         } catch (IOException | RuntimeException e) {
             notice = "cannot edit: " + messageOf(e);
@@ -881,6 +888,13 @@ public final class TuiApp {
             return e.violations.get(0).toString();
         }
         return messageOf(e);
+    }
+
+    private static String firstViolation(List<Violation> violations) {
+        if (violations != null && !violations.isEmpty()) {
+            return violations.get(0).toString();
+        }
+        return "invalid xac.yaml";
     }
 
     private static String stepMessage(StepResult step) {

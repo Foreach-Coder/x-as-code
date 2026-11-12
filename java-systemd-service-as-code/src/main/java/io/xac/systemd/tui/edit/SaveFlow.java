@@ -36,15 +36,18 @@ public final class SaveFlow {
         public final List<String> diff;
         public final List<String> orphanNotes;
         public final int lostComments;
+        public final int exampleComments;
         public final boolean modifiedOutside;
 
         Result(List<Violation> violations, String newText, List<String> diff,
-               List<String> orphanNotes, int lostComments, boolean modifiedOutside) {
+               List<String> orphanNotes, int lostComments, int exampleComments,
+               boolean modifiedOutside) {
             this.violations = Collections.unmodifiableList(new ArrayList<Violation>(violations));
             this.newText = newText;
             this.diff = Collections.unmodifiableList(new ArrayList<String>(diff));
             this.orphanNotes = Collections.unmodifiableList(new ArrayList<String>(orphanNotes));
             this.lostComments = lostComments;
+            this.exampleComments = exampleComments;
             this.modifiedOutside = modifiedOutside;
         }
 
@@ -54,15 +57,29 @@ public final class SaveFlow {
         }
 
         /**
-         * 是否有注释将在保存后消失。提示条数非空即为真；调用方在写入前必须让用户确认。
+         * 是否有注释将在保存后消失。{@code lostComments} 为正即为真；调用方在写入前必须让用户确认。
          */
         public boolean losesComments() {
-            return !orphanNotes.isEmpty();
+            return lostComments > 0;
         }
     }
 
+    /**
+     * 注释扫描的包内接缝，方便测试注入会抛异常的扫描器，验证保存流程不会因此崩掉。
+     */
+    interface CommentScanner {
+        Comments scan(String text);
+    }
+
+    private static final CommentScanner DEFAULT_SCANNER = new CommentScanner() {
+        @Override
+        public Comments scan(String text) {
+            return YamlCommentScanner.scan(text);
+        }
+    };
+
     public static Result prepare(EditorModel model, Path yamlFile) throws IOException {
-        return prepare(model, yamlFile, null);
+        return prepare(model, yamlFile, null, null);
     }
 
     /**
@@ -73,12 +90,18 @@ public final class SaveFlow {
      */
     public static Result prepare(EditorModel model, Path yamlFile, FileStamp baseline)
             throws IOException {
+        return prepare(model, yamlFile, baseline, null);
+    }
+
+    static Result prepare(EditorModel model, Path yamlFile, FileStamp baseline,
+                          CommentScanner scanner) throws IOException {
         if (model == null) {
             throw new IllegalArgumentException("model must not be null");
         }
         if (yamlFile == null) {
             throw new IllegalArgumentException("yamlFile must not be null");
         }
+        CommentScanner effective = scanner == null ? DEFAULT_SCANNER : scanner;
         String oldText = read(yamlFile);
         boolean modifiedOutside = baseline != null && !baseline.matches(FileStamp.of(yamlFile));
 
@@ -86,7 +109,7 @@ public final class SaveFlow {
             List<Violation> violations = model.validate();
             if (!violations.isEmpty()) {
                 return new Result(violations, "", Collections.<String>emptyList(),
-                        Collections.<String>emptyList(), 0, modifiedOutside);
+                        Collections.<String>emptyList(), 0, 0, modifiedOutside);
             }
 
             String rendered;
@@ -95,25 +118,27 @@ public final class SaveFlow {
             } catch (IllegalArgumentException e) {
                 Violation violation = new Violation("", messageOf(e));
                 return new Result(Collections.singletonList(violation), "",
-                        Collections.<String>emptyList(), Collections.<String>emptyList(), 0,
+                        Collections.<String>emptyList(), Collections.<String>emptyList(), 0, 0,
                         modifiedOutside);
             }
 
-            Comments source = scanSafely(oldText);
-            Comments template = templateSafely(model.name());
+            Comments source = effective.scan(oldText);
+            Comments template = YamlCommentScanner.scanTemplate(model.name());
             YamlCommentScanner.ApplyResult applied =
                     YamlCommentScanner.apply(rendered, source, template);
 
+            int lost = applied.dropped + applied.examplesDropped;
             return new Result(Collections.<Violation>emptyList(), applied.text,
                     LineDiff.diff(oldText, applied.text),
-                    notes(applied, source),
-                    Math.max(applied.dropped, source.orphans.size()),
+                    notes(applied),
+                    lost,
+                    applied.examplesDropped,
                     modifiedOutside);
         } catch (RuntimeException e) {
             // 扫描/合并/渲染的意外不该把 TUI 带崩；把它降级成一条校验错误留在屏上。
             Violation violation = new Violation("", messageOf(e));
             return new Result(Collections.singletonList(violation), "",
-                    Collections.<String>emptyList(), Collections.<String>emptyList(), 0,
+                    Collections.<String>emptyList(), Collections.<String>emptyList(), 0, 0,
                     modifiedOutside);
         }
     }
@@ -149,33 +174,22 @@ public final class SaveFlow {
         SpecWriter.save(yamlFile, text);
     }
 
-    private static List<String> notes(YamlCommentScanner.ApplyResult applied, Comments source) {
-        int orphans = source.orphans.size();
-        int unplaced = Math.max(0, applied.dropped - orphans);
-        List<String> notes = new ArrayList<String>(2);
-        if (unplaced > 0) {
-            notes.add(unplaced + " comments could not be placed and will be dropped");
+    /**
+     * 丢失提示的分类行。条数由 {@code lostComments} 单独给出，这里只补充「其中多少是被注释掉的
+     * 字段示例」，避免同一行重复同一个数字。
+     */
+    private static List<String> notes(YamlCommentScanner.ApplyResult applied) {
+        List<String> notes = new ArrayList<String>(1);
+        int examples = applied.examplesDropped;
+        if (examples <= 0) {
+            return notes;
         }
-        if (orphans > 0) {
-            notes.add(orphans + " commented-out field examples will not be kept");
+        if (examples == applied.dropped + examples) {
+            notes.add("all of them are commented-out field examples");
+        } else {
+            notes.add(examples + " of them are commented-out field examples");
         }
         return notes;
-    }
-
-    private static Comments scanSafely(String text) {
-        try {
-            return YamlCommentScanner.scan(text);
-        } catch (RuntimeException e) {
-            return Comments.empty();
-        }
-    }
-
-    private static Comments templateSafely(String name) {
-        try {
-            return YamlCommentScanner.scanTemplate(name);
-        } catch (RuntimeException e) {
-            return Comments.empty();
-        }
     }
 
     private static String read(Path file) throws IOException {
