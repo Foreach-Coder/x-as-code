@@ -127,7 +127,7 @@ jobs:
           grep -q 'uninstall' "$helpfile"
 
           # install/uninstall: link into PATH, verify through PATH, then remove it
-          "$root/bin/java-systemd-service-cli" install --dry-run > "$workdir/install-dry-run.txt"
+          sudo "$root/bin/java-systemd-service-cli" install --dry-run > "$workdir/install-dry-run.txt"
           grep -q 'would link' "$workdir/install-dry-run.txt"
           sudo "$root/bin/java-systemd-service-cli" install
           test -L /usr/local/bin/java-systemd-service-cli
