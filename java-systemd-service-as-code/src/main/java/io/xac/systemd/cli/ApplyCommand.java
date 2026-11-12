@@ -16,7 +16,7 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
-@Command(name = "apply", description = "install or update the service: write files, reload, enable, restart")
+@Command(mixinStandardHelpOptions = true, name = "apply", description = "install or update the service: write files, reload, enable, restart")
 public final class ApplyCommand implements Callable<Integer> {
 
     @Parameters(index = "0", arity = "0..1", defaultValue = ".",

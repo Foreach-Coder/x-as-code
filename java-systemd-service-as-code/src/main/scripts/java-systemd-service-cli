@@ -208,9 +208,21 @@ cmd_uninstall() {
     return 0
 }
 
+print_help() {
+    "$java" -jar "$jar" --help
+    cat <<'EOF'
+
+Launcher commands (handled by this script):
+  install     link this distribution into /usr/local/bin
+  uninstall   remove that link
+EOF
+}
+
 case ${1:-} in
     install) shift; cmd_install "$@"; exit $? ;;
     uninstall) shift; cmd_uninstall "$@"; exit $? ;;
+    '') print_help; exit 2 ;;
+    -h|--help|help) print_help; exit 0 ;;
 esac
 
 exec "$java" -jar "$jar" "$@"

@@ -11,7 +11,7 @@ import io.xac.systemd.systemd.SystemdTarget;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Parameters;
 
-@Command(name = "status", description = "report install and runtime status; exit 0 when in sync, 1 on drift")
+@Command(mixinStandardHelpOptions = true, name = "status", description = "report install and runtime status; exit 0 when in sync, 1 on drift")
 public final class StatusCommand implements Callable<Integer> {
 
     @Parameters(index = "0", arity = "0..1", defaultValue = ".",

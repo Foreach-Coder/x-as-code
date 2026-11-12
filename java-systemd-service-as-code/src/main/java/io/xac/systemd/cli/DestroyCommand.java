@@ -21,7 +21,7 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
-@Command(name = "destroy", description = "stop and remove the service (unit, env file and path-links)")
+@Command(mixinStandardHelpOptions = true, name = "destroy", description = "stop and remove the service (unit, env file and path-links)")
 public final class DestroyCommand implements Callable<Integer> {
 
     @Parameters(index = "0", arity = "0..1", defaultValue = ".",

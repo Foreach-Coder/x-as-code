@@ -11,7 +11,7 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
-@Command(name = "logs", description = "show service logs (journalctl)")
+@Command(mixinStandardHelpOptions = true, name = "logs", description = "show service logs (journalctl)")
 public final class LogsCommand implements Callable<Integer> {
 
     @Parameters(index = "0", arity = "0..1", defaultValue = ".",
