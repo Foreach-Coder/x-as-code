@@ -96,6 +96,7 @@ public final class ServicePackage {
     public StatusReport status();
     public List<StepPlan> plan();
     public ApplyOutcome apply(boolean dryRun) throws InvalidSpecException;
+    public StepResult restart() throws InvalidSpecException;
     public DestroyOutcome destroyPlan() throws InvalidSpecException;
     public DestroyOutcome destroy(boolean dryRun) throws InvalidSpecException;
 }
@@ -206,7 +207,7 @@ java-systemd-service-cli tui [<package-dir>]
 - `a`：预览面板列七步；只有 `y` 执行，`enter`/`n`/`esc` 取消；执行期间通知行显示 `running...`、暂停状态轮询，完成后 notice `apply ok` / `apply failed: <msg>` 并立即刷新状态。
 - `r`：确认面板列出 `systemctl restart <unit>`；只有 `y` 执行，`enter`/`n`/`esc` 取消；notice `restart ok` / `restart failed: <msg>`。
 - `d`：面板列出 willRemove/willKeep；只有 `y` 执行，`enter`/`n`/`esc` 取消（不执行，也不需要输入服务名）；notice `destroy ok` / `destroy failed: <msg>`。
-- 动作在独立 daemon 线程执行，UI 不阻塞、每 tick 检查完成标志；执行期间忽略其它动作键并暂停状态轮询，完成后立即刷新状态。
+- 动作在独立 daemon 线程执行，UI 不阻塞、每 tick 检查完成标志；执行期间忽略其它按键，但 `q`/`esc`/`ctrl-c` 可放弃等待并退出（动作在后台继续跑完，结果不再回写 UI，notice 记 `action still running in background`），并暂停状态轮询，完成后立即刷新状态。
 
 ## 7. 编辑
 

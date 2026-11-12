@@ -2,6 +2,8 @@ package io.xac.systemd.tui;
 
 import java.io.IOException;
 import java.time.Clock;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -92,6 +94,8 @@ public final class TuiApp {
     /** 动作执行线程；非 null 表示后台还有一个动作在跑。 */
     private volatile Thread actionThread;
     private volatile boolean actionRunning;
+    /** 用户放弃等待动作：后台线程完成时只丢弃结果，不再回写 UI（design §6.6）。 */
+    private volatile boolean abandoned;
     private volatile ActionKind actionKind;
     private volatile String actionResult;
     private volatile boolean logsEnded;
@@ -437,7 +441,11 @@ public final class TuiApp {
             return;
         }
         if (actionRunning) {
-            // 动作执行期间忽略所有输入（design §6.6）：不重复提交，也不让 UI 状态与落盘竞争。
+            // 动作执行期间忽略其它按键，但 q/esc/ctrl-c 可以放弃等待退出：
+            // 动作在后台继续，UI 立即退出（design §6.6）。
+            if (isAbandonKey(event)) {
+                abandonAction();
+            }
             return;
         }
         if (overlay != null) {
@@ -549,7 +557,18 @@ public final class TuiApp {
         return event.key == NavKey.CHAR && (event.ch == 'n' || event.ch == 'N');
     }
 
+    /** 动作执行期间的退出键：{@code q}、{@code esc} 与 Ctrl-C（映射成 {@link NavKey#QUIT}）。 */
+    private static boolean isAbandonKey(KeyEvent event) {
+        if (event.key == NavKey.QUIT || event.key == NavKey.ESC) {
+            return true;
+        }
+        return event.key == NavKey.CHAR && event.ch == 'q';
+    }
+
     private void openApply() {
+        if (actionsDisabled()) {
+            return;
+        }
         if (!servicePackage.isRoot()) {
             openOverlay(ActionOverlay.rootRequired(ActionKind.APPLY));
             return;
@@ -558,6 +577,9 @@ public final class TuiApp {
     }
 
     private void openRestart() {
+        if (actionsDisabled()) {
+            return;
+        }
         if (!servicePackage.isRoot()) {
             openOverlay(ActionOverlay.rootRequired(ActionKind.RESTART));
             return;
@@ -566,6 +588,9 @@ public final class TuiApp {
     }
 
     private void openDestroy() {
+        if (actionsDisabled()) {
+            return;
+        }
         if (!servicePackage.isRoot()) {
             openOverlay(ActionOverlay.rootRequired(ActionKind.DESTROY));
             return;
@@ -576,6 +601,19 @@ public final class TuiApp {
             notice = "destroy failed: " + firstViolation(e);
             dirty = true;
         }
+    }
+
+    /**
+     * 状态查询失败时 systemd 不可达，动作键一律不开面板（design §6.5）。
+     * 编辑与退出不受影响。
+     */
+    private boolean actionsDisabled() {
+        if (state == null || state.queryOk) {
+            return false;
+        }
+        notice = "actions disabled: systemd is not reachable";
+        dirty = true;
+        return true;
     }
 
     private void openOverlay(ActionOverlay actionOverlay) {
@@ -603,6 +641,7 @@ public final class TuiApp {
     private void startAction(ActionKind kind) {
         actionKind = kind;
         actionResult = null;
+        abandoned = false;
         actionRunning = true;
         dirty = true;
         Thread thread = new Thread(new Runnable() {
@@ -614,6 +653,10 @@ public final class TuiApp {
                 } catch (RuntimeException e) {
                     result = actionKind.label() + " failed: " + messageOf(e);
                 }
+                if (abandoned) {
+                    // UI 已经退出：动作结果无人接收，绝不回写界面（design §6.6）。
+                    return;
+                }
                 actionResult = result;
                 actionRunning = false;
                 dirty = true;
@@ -624,9 +667,21 @@ public final class TuiApp {
         thread.start();
     }
 
+    /**
+     * 用户按 q/esc/ctrl-c 放弃等待：UI 立即退出，动作线程继续在后台跑完。
+     * 完成后因为 {@code abandoned} 已置位，不会再写任何界面状态。
+     */
+    private void abandonAction() {
+        abandoned = true;
+        actionRunning = false;
+        notice = "action still running in background";
+        running = false;
+        dirty = true;
+    }
+
     /** UI 线程收口：动作完成后写 notice、立即刷新状态。 */
     private void completeAction(long nowMillis) {
-        if (actionRunning || actionResult == null) {
+        if (abandoned || actionRunning || actionResult == null) {
             return;
         }
         String result = actionResult;
@@ -634,6 +689,8 @@ public final class TuiApp {
         actionThread = null;
         notice = result;
         lastStatusAt = nowMillis;
+        // 刚刚取过状态，本 tick 不必再因「覆盖层关闭补查」查第二次（M1）。
+        statusPollDue = false;
         state = loadStateSafely();
         dirty = true;
     }
@@ -760,6 +817,10 @@ public final class TuiApp {
         for (String line : lines) {
             inner = Math.max(inner, line.length());
         }
+        if (lines.size() > height - 6) {
+            // 溢出提示可能比正文更长，先按最坏情况留宽，避免提示本身被裁掉。
+            inner = Math.max(inner, ("... (" + lines.size() + " more lines)").length());
+        }
         int boxWidth = Math.min(width - 2, inner + 4);
         int boxHeight = Math.min(height - 2, lines.size() + 4);
         int left = Math.max(0, (width - boxWidth) / 2);
@@ -770,14 +831,55 @@ public final class TuiApp {
         canvas.box(left, top, boxWidth, boxHeight);
         int textX = Math.min(left + 2, width - 1);
         canvas.text(textX, top + 1, title);
-        int row = top + 2;
-        for (String line : lines) {
-            if (row >= top + boxHeight - 2) {
+        int contentTop = top + 2;
+        int contentBottom = top + boxHeight - 3;
+        int capacity = contentBottom - contentTop + 1;
+        List<String> visible = visibleLines(lines, capacity);
+        int row = contentTop;
+        for (String line : visible) {
+            if (row > contentBottom) {
                 break;
             }
             canvas.text(textX, row++, line);
         }
+        if (visible.size() < lines.size() && capacity > 0) {
+            // 纵向溢出：最后一行固定报出被省略的行数，warning 行优先保留（M2）。
+            canvas.text(textX, contentBottom,
+                    "... (" + (lines.size() - visible.size()) + " more lines)");
+        }
         canvas.text(textX, top + boxHeight - 2, hint);
+    }
+
+    /**
+     * 面板内容超出可用行数时，先留一行给溢出提示，再把溢出区里的 {@code warning:}
+     * 行换进可见区：destroy 面板的归属警告是最不能丢的一行（M2）。
+     */
+    private static List<String> visibleLines(List<String> lines, int capacity) {
+        if (capacity <= 0) {
+            return Collections.emptyList();
+        }
+        if (lines.size() <= capacity) {
+            return lines;
+        }
+        int slots = capacity - 1;
+        List<String> tailWarnings = new ArrayList<String>();
+        for (int i = slots; i < lines.size() && tailWarnings.size() < slots; i++) {
+            String line = lines.get(i);
+            if (isWarningLine(line)) {
+                tailWarnings.add(line);
+            }
+        }
+        int head = Math.max(0, slots - tailWarnings.size());
+        List<String> visible = new ArrayList<String>(capacity);
+        for (int i = 0; i < head && i < lines.size(); i++) {
+            visible.add(lines.get(i));
+        }
+        visible.addAll(tailWarnings);
+        return visible;
+    }
+
+    private static boolean isWarningLine(String line) {
+        return line != null && line.startsWith("warning:");
     }
 
     private static int logRows(int height) {

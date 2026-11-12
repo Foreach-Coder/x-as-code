@@ -25,20 +25,31 @@ public final class TuiState {
     public final List<String> statusRows;
     /** 日志区标题里的来源：配置文件路径或 {@code journald}。 */
     public final String logSource;
+    /**
+     * 状态查询本身是否成功。{@code false} 表示 systemd/D-Bus 不可达（design §6.5），
+     * 与「查询成功但 ActiveState 不明」不同：前者必须禁用所有动作键。
+     */
+    public final boolean queryOk;
 
     public TuiState(String service, String activity, boolean autoStart, boolean root,
                     List<String> statusRows) {
-        this(service, activity, autoStart, root, statusRows, "journald");
+        this(service, activity, autoStart, root, statusRows, "journald", true);
     }
 
     public TuiState(String service, String activity, boolean autoStart, boolean root,
                     List<String> statusRows, String logSource) {
+        this(service, activity, autoStart, root, statusRows, logSource, true);
+    }
+
+    public TuiState(String service, String activity, boolean autoStart, boolean root,
+                    List<String> statusRows, String logSource, boolean queryOk) {
         this.service = service;
         this.activity = activity;
         this.autoStart = autoStart;
         this.root = root;
         this.statusRows = statusRows;
         this.logSource = logSource;
+        this.queryOk = queryOk;
     }
 
     public static TuiState load(ServicePackage servicePackage) {
@@ -51,7 +62,7 @@ public final class TuiState {
         StatusResult status = report.status;
         return new TuiState(shortName(UnitNaming.unitName(spec)), StatusView.activity(status),
                 status.wantEnabled, servicePackage.isRoot(), StatusView.lines(report),
-                logSource(spec));
+                logSource(spec), status.queryOk);
     }
 
     /**
@@ -62,7 +73,7 @@ public final class TuiState {
         ServiceSpec spec = servicePackage.spec();
         boolean autoStart = spec.lifecycle == null || spec.lifecycle.autoStartOrDefault();
         return new TuiState(shortName(UnitNaming.unitName(spec)), "unknown", autoStart,
-                servicePackage.isRoot(), StatusView.unknown(reason), logSource(spec));
+                servicePackage.isRoot(), StatusView.unknown(reason), logSource(spec), false);
     }
 
     private static String shortName(String unitName) {

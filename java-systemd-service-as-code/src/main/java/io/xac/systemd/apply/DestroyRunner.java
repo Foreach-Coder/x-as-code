@@ -59,8 +59,23 @@ public final class DestroyRunner {
                 willRemove(spec, inspection),
                 willKeep(spec),
                 Collections.<StepResult>emptyList(),
-                Collections.<String>emptyList(),
+                ownershipWarnings(inspection),
                 null);
+    }
+
+    /**
+     * 只读的归属警告：预览与真跑必须给出同一批 warning，否则用户在面板里看不到
+     * 「同名 unit 不是 xac 的」这类关键提示。
+     */
+    private static List<String> ownershipWarnings(Inspection inspection) {
+        List<String> warnings = new ArrayList<String>();
+        if (inspection.pathExists && !inspection.regularFile) {
+            warnings.add("unit path is not a regular file, skipped: " + inspection.unitPath);
+        } else if (inspection.regularFile && !inspection.managed) {
+            warnings.add("unit is not managed by xac, skipped stop/disable/remove: "
+                    + inspection.unitPath);
+        }
+        return warnings;
     }
 
     /**
