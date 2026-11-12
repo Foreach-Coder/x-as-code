@@ -119,12 +119,16 @@ jobs:
           test -f "$initdir/demo/xac.yaml"
           grep -qx 'name: demo' "$initdir/demo/xac.yaml"
 
-          # launcher help lists the shell-side commands too
-          "$root/bin/java-systemd-service-cli" --help | grep -q 'install'
-          "$root/bin/java-systemd-service-cli" --help | grep -q 'uninstall'
+          # launcher help lists the shell-side commands too; capture to a file first
+          # because grep -q closing the pipe early trips pipefail (SIGPIPE)
+          helpfile="$workdir/help.txt"
+          "$root/bin/java-systemd-service-cli" --help > "$helpfile"
+          grep -q 'install' "$helpfile"
+          grep -q 'uninstall' "$helpfile"
 
           # install/uninstall: link into PATH, verify through PATH, then remove it
-          "$root/bin/java-systemd-service-cli" install --dry-run | grep -q 'would link'
+          "$root/bin/java-systemd-service-cli" install --dry-run > "$workdir/install-dry-run.txt"
+          grep -q 'would link' "$workdir/install-dry-run.txt"
           sudo "$root/bin/java-systemd-service-cli" install
           test -L /usr/local/bin/java-systemd-service-cli
           java-systemd-service-cli --version | grep -qx "${TAG#v}"
