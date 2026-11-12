@@ -27,8 +27,13 @@ public final class ApplyRunner {
     }
 
     public ApplyOutcome run(ApplyContext ctx) {
+        return run(ctx, actions());
+    }
+
+    /** 包级入口：允许测试注入动作，验证警告/失败等 apply 安全语义。 */
+    ApplyOutcome run(ApplyContext ctx, List<Action> actions) {
         List<StepResult> steps = new ArrayList<StepResult>();
-        for (Action action : actions()) {
+        for (Action action : actions) {
             StepPlan plan = new StepPlan(action.describe(ctx), false);
             if (ctx.dryRun) {
                 steps.add(new StepResult(plan, true, null));
@@ -39,7 +44,7 @@ public final class ApplyRunner {
             } catch (ActionFailure e) {
                 StepResult failed = new StepResult(plan, false, e.getMessage());
                 steps.add(failed);
-                return new ApplyOutcome(steps, true, failed);
+                return new ApplyOutcome(steps, !ctx.dryRun, failed);
             }
             steps.add(new StepResult(plan, true, takeWarnings(ctx)));
         }

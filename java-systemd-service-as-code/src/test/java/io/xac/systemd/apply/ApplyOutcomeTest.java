@@ -41,11 +41,12 @@ class ApplyOutcomeTest {
         steps.clear();
 
         assertEquals(1, outcome.steps.size());
+        assertNull(outcome.failed);
         try {
             outcome.steps.add(step("restart", true, null));
             fail("outcome.steps must be unmodifiable");
         } catch (UnsupportedOperationException expected) {
-            assertNull(outcome.failed);
+            // expected: 防御性拷贝
         }
     }
 

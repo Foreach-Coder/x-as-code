@@ -17,7 +17,6 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -231,27 +230,51 @@ class ApplyCommandTest {
         assertFalse(Files.exists(unitPath()));
     }
 
-    /** 红线：dry-run 每个动作一行，前缀 would，共 7 步。 */
+    /** 红线：dry-run 的 7 行输出全文固定，逐字节比对。 */
     @Test
-    void dryRunPrintsWouldPrefixForEveryStep() throws IOException {
+    void dryRunPrintsExactPlan() throws IOException {
         Files.createFile(pkg.resolve("app.jar"));
         writePlainSpec();
         createTargetDirs();
         Captured captured = capture(true, runnerShowing("LoadState=not-found\nFragmentPath=\n"));
 
+        String expected = String.join(System.lineSeparator(),
+                "would create path-links: []",
+                "would skip workdir (not configured)",
+                "would remove " + target().envDir.resolve("xac.demo.env") + " (env is empty)",
+                "would write " + unitPath() + " (0644)",
+                "would systemctl daemon-reload",
+                "would systemctl enable xac.demo.service",
+                "would systemctl restart xac.demo.service") + System.lineSeparator();
+
         assertEquals(0, captured.code);
-        List<String> lines = Arrays.asList(captured.output.split("\n"));
-        assertEquals(7, lines.size(), captured.output);
-        for (String line : lines) {
-            assertTrue(line.startsWith("would "), captured.output);
-        }
-        assertTrue(lines.get(0).contains("path-links"), captured.output);
-        assertTrue(lines.get(6).contains("restart"), captured.output);
+        assertEquals(expected, captured.output);
     }
 
-    /** 红线：失败时先打印已完成步骤，再打印 failed: 与原因，退出 1。 */
+    /** 红线：正常执行的 7 行输出全文固定，逐字节比对。 */
     @Test
-    void failurePrintsStepsThenFailedLineAndExitsOne() throws IOException {
+    void runPrintsExactSteps() throws IOException {
+        Files.createFile(pkg.resolve("app.jar"));
+        writePlainSpec();
+        createTargetDirs();
+        Captured captured = capture(false, runnerShowing("LoadState=not-found\nFragmentPath=\n"));
+
+        String expected = String.join(System.lineSeparator(),
+                "create path-links: []",
+                "skip workdir (not configured)",
+                "remove " + target().envDir.resolve("xac.demo.env") + " (env is empty)",
+                "write " + unitPath() + " (0644)",
+                "systemctl daemon-reload",
+                "systemctl enable xac.demo.service",
+                "systemctl restart xac.demo.service") + System.lineSeparator();
+
+        assertEquals(0, captured.code);
+        assertEquals(expected, captured.output);
+    }
+
+    /** 红线：失败时先打印已完成步骤，再打印 failed: 与原因，退出 1；全文固定。 */
+    @Test
+    void failurePrintsExactLinesAndExitsOne() throws IOException {
         Files.createFile(pkg.resolve("app.jar"));
         writePlainSpec();
         createTargetDirs();
@@ -261,12 +284,15 @@ class ApplyCommandTest {
 
         Captured captured = capture(false, runner);
 
+        String expected = String.join(System.lineSeparator(),
+                "create path-links: []",
+                "skip workdir (not configured)",
+                "remove " + target().envDir.resolve("xac.demo.env") + " (env is empty)",
+                "write " + unitPath() + " (0644)",
+                "systemctl daemon-reload",
+                "failed: systemctl daemon-reload failed (exit 1): boom") + System.lineSeparator();
+
         assertEquals(1, captured.code);
-        List<String> lines = Arrays.asList(captured.output.split("\n"));
-        assertEquals(6, lines.size(), captured.output);
-        assertFalse(lines.get(0).startsWith("would "), captured.output);
-        assertTrue(lines.get(4).contains("daemon-reload"), captured.output);
-        assertTrue(lines.get(5).startsWith("failed: "), captured.output);
-        assertTrue(lines.get(5).contains("boom"), captured.output);
+        assertEquals(expected, captured.output);
     }
 }

@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -151,6 +152,70 @@ class ApplyRunnerTest {
         }
         assertTrue(outcome.steps.get(0).plan.description.contains("path-links"));
         assertTrue(outcome.steps.get(6).plan.description.contains("restart"));
+    }
+
+    /** ok=true + message!=null：动作写出的警告合并进该步结果，取走后 ctx 清空。 */
+    @Test
+    void warningsBecomeTheStepMessage() {
+        Action warns = new Action() {
+            @Override
+            public String describe(ApplyContext ctx) {
+                return "warn step";
+            }
+
+            @Override
+            public void run(ApplyContext ctx) {
+                ctx.warnings.add("first warning");
+                ctx.warnings.add("second warning");
+            }
+        };
+        ApplyContext ctx = new ApplyContext(spec(true, env("BAR", "b")), target(),
+                new RecordingRunner(), false);
+
+        ApplyOutcome outcome = new ApplyRunner().run(ctx, Collections.singletonList(warns));
+
+        assertEquals(1, outcome.steps.size(), outcome.steps.toString());
+        assertTrue(outcome.steps.get(0).ok);
+        assertEquals("first warning; second warning", outcome.steps.get(0).message);
+        assertTrue(ctx.warnings.isEmpty(), ctx.warnings.toString());
+        assertNull(outcome.failed);
+    }
+
+    /** 警告被取走后，下一步开始前 ctx.warnings 必须为空。 */
+    @Test
+    void warningsAreTakenBeforeTheNextStep() {
+        Action warns = new Action() {
+            @Override
+            public String describe(ApplyContext ctx) {
+                return "warn step";
+            }
+
+            @Override
+            public void run(ApplyContext ctx) {
+                ctx.warnings.add("only warning");
+            }
+        };
+        final List<String> seenByNextStep = new ArrayList<String>();
+        Action observes = new Action() {
+            @Override
+            public String describe(ApplyContext ctx) {
+                return "observe step";
+            }
+
+            @Override
+            public void run(ApplyContext ctx) {
+                seenByNextStep.addAll(ctx.warnings);
+            }
+        };
+        ApplyContext ctx = new ApplyContext(spec(true, env("BAR", "b")), target(),
+                new RecordingRunner(), false);
+
+        ApplyOutcome outcome = new ApplyRunner().run(ctx, Arrays.asList(warns, observes));
+
+        assertTrue(seenByNextStep.isEmpty(), seenByNextStep.toString());
+        assertEquals("only warning", outcome.steps.get(0).message);
+        assertNull(outcome.steps.get(1).message);
+        assertNull(outcome.failed);
     }
 
     @Test

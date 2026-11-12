@@ -261,7 +261,7 @@ public ApplyOutcome run(ApplyContext ctx);   // 不再接受 PrintStream
 @Test void stopsAtFirstFailure() { /* RestartAction 抛 ActionFailure → steps 以失败步结尾，failed.message 含原因 */ }
 ```
 
-`CliTest` 保留现有对 stdout 的断言（`would …`、`failed: …`），确保命令层输出不变。
+`ApplyCommandTest` 补三条全文断言（dry-run 7 行、正常 7 行、失败 6 行），确保命令层输出不变。
 
 - [ ] **Step 2: 跑失败**
 
