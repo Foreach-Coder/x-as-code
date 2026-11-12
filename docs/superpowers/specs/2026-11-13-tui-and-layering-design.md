@@ -144,7 +144,7 @@ public interface LogStream extends AutoCloseable {
 - `JournaldLogStream`：`ProcessBuilder` 启动 `journalctl -u <unit> --no-pager -n N`（follow 时追加 `--follow`），stdout 与 stderr 各一个泵线程按行送入对应 sink；非 follow 时 stderr 只用于非零退出的错误消息；`close()` 先 `destroy()`，必要时 `destroyForcibly()` 兜底。follow 模式注册 shutdown hook。
 - `FileLogStream`：`FileTail` + 停止标志；`close()` 置位并唤醒。follow 时最后一行没有换行符的残余只在 `follow()` 正常返回后由 `flushPending()` 补出。
 
-`start` 是阻塞调用，TUI 要放在日志线程里；`close()` 可能等待子进程退出，不要在 UI 线程直接调用。文件 follow 没有 shutdown hook，Ctrl-C 可能丢掉最后一行未换行的残余。
+`start` 是阻塞调用，TUI 要放在日志线程里；`close()` 可能等待子进程退出，不要在 UI 线程直接同步调用。TUI 把 `close()` 交给独立 daemon 线程，UI 最多等 250ms。文件 follow 没有 shutdown hook，Ctrl-C 可能丢掉最后一行未换行的残余。
 
 `exec` 层新增 `RunningCommand`（由 `ProcessRunner.start(argv)` 返回）：暴露 `stdout()`/`stderr()` 读流、`waitFor()`、`destroy()`、`destroyForcibly()`。这是本次唯一新增的基础设施。
 
@@ -187,14 +187,15 @@ java-systemd-service-cli tui [<package-dir>]
 
 ### 6.4 线程与刷新
 
-- UI 线程：50ms 轮询按键，脏标记才刷新。
-- 状态线程：每 2 秒 `ServicePackage.status()`；**覆盖层/编辑中暂停**，关闭后恢复。
-- 日志线程：`LogStream.start` 阻塞；`close()` 停止；切换来源或保存成功后重建。
+- UI 线程：50ms 轮询按键，脏标记才刷新；状态查询不在这里执行。
+- 状态 worker：单线程 daemon 执行器，每 2 秒 `ServicePackage.status()`；UI 侧 `Future.get(3s)`，预算 3 秒，超时或异常显示 `unknown` 并 `cancel(true)`，**UI 不阻塞**；**覆盖层/编辑中暂停提交**，关闭后恢复；`run()` 退出时 `shutdownNow()`。
+- 日志线程：`LogStream.start` 阻塞；`close()` 停止；切换来源或保存成功后重建。TUI 请求 follow 模式；流正常结束置 `logsEnded`，表头显示 `follow (ended)`，通知行提示 `log stream ended`。
+- 日志关闭：`close()` 放到独立 daemon 线程，UI 最多 `join(250ms)`；超时放弃等待，daemon 线程不阻塞 JVM 退出。
 - 线程间只传不可变值；窗口部件只在 UI 线程触碰。
 
 ### 6.5 状态呈现
 
-- 逐项显示 `unit / env / process / links`，各自带状态与原因；漂移行标红并用 `StatusResult.drift()` 的同源判断。
+- 逐项显示 `unit / env / process / links`，各自带状态与原因；漂移行标红并用 `StatusResult.drift()` 的同源判断：unit 行同时覆盖 unit 文件不同步、systemd 未加载（`not-found`）与 auto-start 期望不符；env 行覆盖配置了却不同步以及未配置但文件多余；process 行覆盖查询失败与非 active；links 行覆盖链接问题。
 - `systemctl` 查询失败（无 systemd、D-Bus 不可用）显示 `unknown` + 原因；不阻止退出与编辑，但禁用所有动作键。
 - 非 root：标题栏标 `not root`，动作面板可打开但 `enter` 不可用并提示需要 root。
 - 通知行显示成功/失败/“N 条注释无法定位”，3 秒淡出；错误保留到下次动作。

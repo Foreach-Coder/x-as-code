@@ -17,7 +17,11 @@ public final class LogPane {
 
     private final int capacity;
     private final Deque<String> lines = new ArrayDeque<String>();
-    private int scrollBack;
+    /** 单调递增的行号：容量丢弃旧行后仍能指认「哪一行」在窗口里。 */
+    private long nextSeq;
+    private long firstSeq;
+    /** 暂停时冻结窗口的右边界（不含），绝对行号。 */
+    private long windowEndSeq;
     private boolean following = true;
 
     public LogPane(int capacity) {
@@ -36,18 +40,24 @@ public final class LogPane {
             return;
         }
         lines.addLast(line);
-        if (!following) {
-            // 暂停时窗口钉在原来的绝对位置：新行到达不把画面顶走。
-            scrollBack++;
+        nextSeq++;
+        if (following) {
+            windowEndSeq = nextSeq;
         }
         while (lines.size() > capacity) {
             lines.removeFirst();
-            if (!following && scrollBack > 0) {
-                scrollBack--;
-            }
+            firstSeq++;
         }
         if (!following) {
-            scrollBack = Math.min(scrollBack, lines.size());
+            // 窗口锚在绝对行号上：新行到达、旧行被容量挤掉都不移动；
+            // 只有窗口内容本身被挤光时才夹到剩余的最旧一行。
+            long minEnd = Math.min(nextSeq, firstSeq + 1);
+            if (windowEndSeq < minEnd) {
+                windowEndSeq = minEnd;
+            }
+            if (windowEndSeq > nextSeq) {
+                windowEndSeq = nextSeq;
+            }
         }
     }
 
@@ -61,7 +71,14 @@ public final class LogPane {
 
     /** 当前距离底部多少行；0 表示跟随。 */
     public synchronized int scrollBack() {
-        return scrollBack;
+        if (following) {
+            return 0;
+        }
+        long back = nextSeq - windowEndSeq;
+        if (back < 0L) {
+            back = 0L;
+        }
+        return (int) Math.min(back, Math.max(0, lines.size() - 1));
     }
 
     /** 向上滚动若干行：立即暂停跟随，到达顶部后夹住。 */
@@ -69,37 +86,42 @@ public final class LogPane {
         if (rows <= 0) {
             return;
         }
-        following = false;
-        scrollBack = Math.min(scrollBack + rows, Math.max(0, lines.size() - 1));
+        if (following) {
+            following = false;
+            windowEndSeq = nextSeq;
+        }
+        long minEnd = Math.min(nextSeq, firstSeq + 1);
+        windowEndSeq = Math.max(minEnd, windowEndSeq - rows);
     }
 
     /** 向下滚动若干行：回到底部时恢复跟随。 */
     public synchronized void scrollDown(int rows) {
-        if (rows <= 0) {
+        if (rows <= 0 || following) {
             return;
         }
-        scrollBack = Math.max(0, scrollBack - rows);
-        if (scrollBack == 0) {
-            following = true;
+        windowEndSeq = Math.min(nextSeq, windowEndSeq + rows);
+        if (windowEndSeq >= nextSeq) {
+            toBottom();
         }
     }
 
     /** 跳到最旧一行并暂停跟随。 */
     public synchronized void toTop() {
         following = false;
-        scrollBack = Math.max(0, lines.size() - 1);
+        windowEndSeq = Math.min(nextSeq, firstSeq + 1);
     }
 
     /** 跳到最新一行并恢复跟随。 */
     public synchronized void toBottom() {
         following = true;
-        scrollBack = 0;
+        windowEndSeq = nextSeq;
     }
 
     /** L 键：在跟随与暂停之间切换；恢复时立即贴底。 */
     public synchronized void toggleFollow() {
         if (following) {
             following = false;
+            windowEndSeq = nextSeq;
         } else {
             toBottom();
         }
@@ -119,20 +141,30 @@ public final class LogPane {
         if (height <= 0 || lines.isEmpty()) {
             return new ArrayList<String>();
         }
-        int count = Math.min(height, lines.size());
-        int end = follow ? lines.size() : Math.max(0, lines.size() - scrollBack);
-        int start = Math.max(0, end - count);
-        int windowEnd = Math.min(lines.size(), start + count);
-        List<String> window = new ArrayList<String>(count);
-        int index = 0;
+        long end;
+        if (follow) {
+            end = nextSeq;
+        } else {
+            end = windowEndSeq;
+            if (end < firstSeq + 1) {
+                end = Math.min(nextSeq, firstSeq + 1);
+            }
+            if (end > nextSeq) {
+                end = nextSeq;
+            }
+        }
+        long start = Math.max(firstSeq, end - height);
+        long windowEnd = Math.min(nextSeq, start + height);
+        List<String> window = new ArrayList<String>((int) (windowEnd - start));
+        long seq = firstSeq;
         for (String line : lines) {
-            if (index >= start && index < windowEnd) {
+            if (seq >= start && seq < windowEnd) {
                 window.add(line);
             }
-            if (index >= windowEnd) {
+            if (seq >= windowEnd) {
                 break;
             }
-            index++;
+            seq++;
         }
         return window;
     }

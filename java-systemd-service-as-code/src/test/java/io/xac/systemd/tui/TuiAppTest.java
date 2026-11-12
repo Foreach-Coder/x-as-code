@@ -28,7 +28,6 @@ import java.util.Deque;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -115,9 +114,12 @@ class TuiAppTest {
 
         final CountDownLatch started = new CountDownLatch(1);
         final CountDownLatch closedLatch = new CountDownLatch(1);
+        final CountDownLatch closeStarted = new CountDownLatch(1);
         volatile boolean blockUntilClosed;
         volatile boolean throwOnStart;
         volatile boolean closed;
+        volatile boolean openedWithFollow;
+        volatile long closeDelayMillis;
         volatile int requestedLines = -1;
         volatile LogSink stdout;
         volatile LogSink stderr;
@@ -148,13 +150,22 @@ class TuiAppTest {
 
         @Override
         public boolean isFollow() {
-            return false;
+            return openedWithFollow;
         }
 
         @Override
         public void close() {
             closed = true;
+            closeStarted.countDown();
             closedLatch.countDown();
+            long delay = closeDelayMillis;
+            if (delay > 0L) {
+                try {
+                    Thread.sleep(delay);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
         }
 
         void awaitStarted() throws InterruptedException {
@@ -237,6 +248,43 @@ class TuiAppTest {
         }
     }
 
+    /** 阻塞状态查询，直到被中断或 10 秒超时，用来验证 UI 不等待状态。 */
+    private static final class BlockingRunner implements CommandRunner {
+
+        private final CommandRunner delegate;
+        final CountDownLatch entered = new CountDownLatch(1);
+        volatile boolean blocking;
+
+        BlockingRunner(CommandRunner delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public ExecResult run(List<String> argv) {
+            if (blocking) {
+                entered.countDown();
+                try {
+                    Thread.sleep(10000L);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("status interrupted");
+                }
+                return new ExecResult(0, "", "");
+            }
+            return delegate.run(argv);
+        }
+
+        @Override
+        public void runInheritIo(List<String> argv) {
+            delegate.runInheritIo(argv);
+        }
+
+        @Override
+        public RunningCommand start(List<String> argv) {
+            return delegate.start(argv);
+        }
+    }
+
     @BeforeEach
     void setUp() throws IOException {
         Files.write(pkg.resolve("xac.yaml"), String.join("\n",
@@ -264,14 +312,16 @@ class TuiAppTest {
         return app(display, keys, new FakeLogStream());
     }
 
-    private TuiApp app(RecordingDisplay display, KeySource keys, FakeLogStream logs)
+    private TuiApp app(RecordingDisplay display, KeySource keys, final FakeLogStream logs)
             throws InvalidSpecException {
-        return new TuiApp(openPackage(), display, keys, FIXED_CLOCK, new Supplier<LogStream>() {
-            @Override
-            public LogStream get() {
-                return logs;
-            }
-        });
+        return new TuiApp(openPackage(), display, keys, FIXED_CLOCK,
+                new TuiApp.LogStreamFactory() {
+                    @Override
+                    public LogStream open(int lines, boolean follow) {
+                        logs.openedWithFollow = follow;
+                        return logs;
+                    }
+                });
     }
 
     private static String repeat(char c, int count) {
@@ -423,9 +473,9 @@ class TuiAppTest {
         FailingDisplay display = new FailingDisplay(failure);
         TuiApp app = new TuiApp(openPackage(), display,
                 new ScriptedKeySource(KeyEvent.of(NavKey.QUIT)), FIXED_CLOCK,
-                new Supplier<LogStream>() {
+                new TuiApp.LogStreamFactory() {
                     @Override
-                    public LogStream get() {
+                    public LogStream open(int lines, boolean follow) {
                         return new FakeLogStream();
                     }
                 });
@@ -507,9 +557,9 @@ class TuiAppTest {
         SwitchableRunner switchable = new SwitchableRunner(runner);
         RecordingDisplay display = new RecordingDisplay(80, 24);
         TuiApp app = new TuiApp(openPackage(switchable), display,
-                new ScriptedKeySource(), FIXED_CLOCK, new Supplier<LogStream>() {
+                new ScriptedKeySource(), FIXED_CLOCK, new TuiApp.LogStreamFactory() {
                     @Override
-                    public LogStream get() {
+                    public LogStream open(int lines, boolean follow) {
                         return new FakeLogStream();
                     }
                 });
@@ -533,6 +583,8 @@ class TuiAppTest {
         TuiApp app = app(display, new ScriptedKeySource(), logs);
         logs.awaitStarted();
         assertEquals(200, logs.requestedLines);
+        assertTrue(logs.openedWithFollow, "TUI must request follow=true from the log source");
+        assertTrue(logs.isFollow(), "the log stream itself must be in follow mode");
         logs.emit("line 1");
         logs.emit("line 2");
 
@@ -674,9 +726,9 @@ class TuiAppTest {
     void unavailableLogSourceIsContained() throws Exception {
         RecordingDisplay display = new RecordingDisplay(80, 24);
         TuiApp app = new TuiApp(openPackage(), display, new ScriptedKeySource(),
-                FIXED_CLOCK, new Supplier<LogStream>() {
+                FIXED_CLOCK, new TuiApp.LogStreamFactory() {
                     @Override
-                    public LogStream get() {
+                    public LogStream open(int lines, boolean follow) {
                         throw new LogSourceException("log file not found: /nope");
                     }
                 });
@@ -685,5 +737,65 @@ class TuiAppTest {
 
         assertTrue(display.line(22).contains("logs unavailable: log file not found"),
                 display.line(22));
+    }
+
+    @Test
+    void endedLogStreamShowsNoticeAndStopsPretendingToFollow() throws Exception {
+        RecordingDisplay display = new RecordingDisplay(80, 24);
+        FakeLogStream logs = new FakeLogStream();
+        TuiApp app = app(display, new ScriptedKeySource(), logs);
+        logs.awaitStarted();
+        assertTrue(app.awaitLogStart(1000), "log pump must finish before asserting the ended state");
+
+        assertTrue(app.tick(0));
+
+        assertTrue(app.statusNote().contains("log stream ended"),
+                "ended stream must be visible: " + app.statusNote());
+        assertTrue(display.line(5).contains("follow (ended)"), display.line(5));
+    }
+
+    @Test
+    void closeDoesNotBlockTheUiThread() throws Exception {
+        RecordingDisplay display = new RecordingDisplay(80, 24);
+        FakeLogStream logs = new FakeLogStream();
+        logs.blockUntilClosed = true;
+        logs.closeDelayMillis = 5000L;
+        TuiApp app = app(display, new ScriptedKeySource(KeyEvent.of(NavKey.QUIT)), logs);
+        logs.awaitStarted();
+
+        long started = System.nanoTime();
+        assertEquals(0, app.run());
+        long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+
+        assertTrue(elapsedMillis < 1000L, "run() blocked " + elapsedMillis + "ms in close()");
+        assertTrue(logs.closeStarted.await(1, TimeUnit.SECONDS), "close() was not called");
+    }
+
+    @Test
+    void statusQueryTimeoutKeepsTheUiResponsive() throws Exception {
+        BlockingRunner blocking = new BlockingRunner(runner);
+        RecordingDisplay display = new RecordingDisplay(80, 24);
+        TuiApp app = new TuiApp(openPackage(blocking), display, new ScriptedKeySource(),
+                FIXED_CLOCK, new TuiApp.LogStreamFactory() {
+                    @Override
+                    public LogStream open(int lines, boolean follow) {
+                        return new FakeLogStream();
+                    }
+                });
+        blocking.blocking = true;
+
+        long started = System.nanoTime();
+        assertTrue(app.tick(2000));
+        long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+
+        assertTrue(elapsedMillis < 3500L, "tick() blocked " + elapsedMillis + "ms on status");
+        assertTrue(display.line(1).contains("unknown"), display.line(1));
+        assertTrue(display.line(3).contains("status timed out"), display.line(3));
+
+        blocking.blocking = false;
+        app.tick(4001);
+        assertFalse(display.line(1).contains("unknown"), display.line(1));
+
+        app.close();
     }
 }

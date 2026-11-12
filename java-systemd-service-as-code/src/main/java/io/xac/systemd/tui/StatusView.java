@@ -26,7 +26,7 @@ public final class StatusView {
     public static List<String> lines(StatusReport report) {
         StatusResult status = report.status;
         List<String> rows = new ArrayList<String>(4);
-        rows.add(row("unit", unitState(status), text(status.unitPath), !status.unitInSync));
+        rows.add(row("unit", unitState(status), unitDetail(status), unitDrift(status)));
         rows.add(row("env", envState(status), envDetail(status), envDrift(status)));
         rows.add(row("process", processState(status), processDetail(status), processDrift(status)));
         rows.add(row("links", linkState(status), linkDetail(status),
@@ -72,19 +72,40 @@ public final class StatusView {
     }
 
     private static boolean envDrift(StatusResult status) {
-        return status.envConfigured && status.envReadable && !status.envInSync;
+        // 与 StatusResult.drift() 同一判据：能读且不同步就是漂移；
+        // envConfigured=false 但文件存在（extra）也算。
+        return status.envReadable && !status.envInSync;
+    }
+
+    /** unit 行的漂移必须覆盖 drift() 里所有 unit/服务加载/自启的条目。 */
+    private static boolean unitDrift(StatusResult status) {
+        return !status.unitInSync || status.serviceNotFound() || status.autoStartMismatch();
     }
 
     private static String unitState(StatusResult status) {
+        if (status.serviceNotFound()) {
+            return "not loaded";
+        }
         if (status.unitInSync) {
             return "in sync";
         }
         return status.unitInstalled ? "out of sync" : "missing";
     }
 
+    private static String unitDetail(StatusResult status) {
+        StringBuilder detail = new StringBuilder(text(status.unitPath));
+        if (status.serviceNotFound()) {
+            detail.append(" · not loaded by systemd");
+        }
+        if (status.autoStartMismatch()) {
+            detail.append(status.wantEnabled ? " · auto-start disabled" : " · auto-start enabled");
+        }
+        return detail.toString();
+    }
+
     private static String envState(StatusResult status) {
         if (!status.envConfigured) {
-            return "not configured";
+            return status.envInstalled ? "extra" : "not configured";
         }
         if (!status.envReadable) {
             return "cannot check";
@@ -96,7 +117,7 @@ public final class StatusView {
     }
 
     private static String envDetail(StatusResult status) {
-        return status.envConfigured ? text(status.envPath) : "";
+        return status.envConfigured || status.envInstalled ? text(status.envPath) : "";
     }
 
     private static String processState(StatusResult status) {

@@ -42,7 +42,11 @@ public final class TuiState {
     }
 
     public static TuiState load(ServicePackage servicePackage) {
-        StatusReport report = servicePackage.status();
+        return from(servicePackage, servicePackage.status());
+    }
+
+    /** 从已经取回的状态快照构造一帧；调用方负责超时与异常收口。 */
+    static TuiState from(ServicePackage servicePackage, StatusReport report) {
         ServiceSpec spec = servicePackage.spec();
         StatusResult status = report.status;
         return new TuiState(shortName(UnitNaming.unitName(spec)), StatusView.activity(status),

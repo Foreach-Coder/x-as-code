@@ -3,11 +3,20 @@ package io.xac.systemd.tui;
 import java.io.IOException;
 import java.time.Clock;
 import java.util.List;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Supplier;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import io.xac.systemd.core.ServicePackage;
+import io.xac.systemd.core.StatusReport;
 import io.xac.systemd.logs.LogSink;
 import io.xac.systemd.logs.LogStream;
 
@@ -24,6 +33,8 @@ public final class TuiApp {
 
     private static final long POLL_MILLIS = 50;
     private static final long STATUS_POLL_MILLIS = 2000;
+    private static final long STATUS_TIMEOUT_MILLIS = 3000;
+    private static final long CLOSE_WAIT_MILLIS = 250;
     private static final int LOG_LINES = 200;
     private static final int LOG_CAPACITY = 2000;
     private static final int WIDE_SCREEN = 80;
@@ -35,22 +46,39 @@ public final class TuiApp {
             "q quit  a apply  r restart  d destroy  e edit  ? help";
     private static final String NARROW_KEY_BAR = "? help";
 
+    /** 日志源工厂：显式带走 follow 参数，测试可断言 TUI 请求的是跟随模式。 */
+    interface LogStreamFactory {
+        LogStream open(int lines, boolean follow);
+    }
+
     private final ServicePackage servicePackage;
     private final Display display;
     private final KeySource keys;
     private final Clock clock;
-    private final Supplier<LogStream> logStreams;
+    private final LogStreamFactory logStreams;
     private final LogPane logPane = new LogPane(LOG_CAPACITY);
     /** 日志线程完成 start()（成功或失败收口）后放行；测试用它替代 sleep。 */
     private final CountDownLatch logStart = new CountDownLatch(1);
+    /** 单线程 daemon 执行器：状态查询永远不占用 UI 线程。 */
+    private final ExecutorService statusExecutor = Executors.newSingleThreadExecutor(
+            new ThreadFactory() {
+                @Override
+                public Thread newThread(Runnable task) {
+                    Thread thread = new Thread(task, "xac-tui-status");
+                    thread.setDaemon(true);
+                    return thread;
+                }
+            });
+    private final AtomicBoolean closed = new AtomicBoolean(false);
 
     private TuiState state;
-    private LogStream logStream;
+    private volatile LogStream logStream;
     private long lastStatusAt;
     private int logPage = 10;
     private boolean logsVisible = true;
     private boolean logsToggled;
     private boolean overlayOpen;
+    private volatile boolean logsEnded;
 
     private volatile boolean running = true;
     private volatile boolean failed;
@@ -65,9 +93,9 @@ public final class TuiApp {
         this(servicePackage, display, keys, clock, packageLogs(servicePackage));
     }
 
-    /** 测试接缝：时间与日志源都可注入，绝不启动真实终端。 */
+    /** 测试接缝：时间与日志源工厂都可注入，绝不启动真实终端。 */
     TuiApp(ServicePackage servicePackage, Display display, KeySource keys, Clock clock,
-           Supplier<LogStream> logStreams) {
+           LogStreamFactory logStreams) {
         this.servicePackage = servicePackage;
         this.display = display;
         this.keys = keys;
@@ -80,11 +108,11 @@ public final class TuiApp {
         startLogs();
     }
 
-    private static Supplier<LogStream> packageLogs(final ServicePackage servicePackage) {
-        return new Supplier<LogStream>() {
+    private static LogStreamFactory packageLogs(final ServicePackage servicePackage) {
+        return new LogStreamFactory() {
             @Override
-            public LogStream get() {
-                return servicePackage.logs(LOG_LINES);
+            public LogStream open(int lines, boolean follow) {
+                return servicePackage.logs(lines, follow);
             }
         };
     }
@@ -93,8 +121,8 @@ public final class TuiApp {
      * 主循环。终端读写失败都在这里收口：写一条 notice、停止循环、返回 1，
      * 绝不把异常抛给 picocli。返回 0 表示用户正常退出。
      *
-     * <p>退出时在 finally 里关闭日志源。设计文档提醒 close() 可能要等子进程，
-     * 按约定仍在这里关：最后一帧已经画完，阻塞只影响退出延迟，不影响画面一致性。
+     * <p>退出时在 finally 里关闭日志源与状态执行器。日志 close() 放在 daemon 线程，
+     * UI 最多等 {@value #CLOSE_WAIT_MILLIS}ms，不把子进程的退出延迟算到画面上。
      */
     public int run() {
         try {
@@ -117,7 +145,7 @@ public final class TuiApp {
                 }
             }
         } finally {
-            closeLogs();
+            close();
         }
         return failed ? 1 : 0;
     }
@@ -162,6 +190,19 @@ public final class TuiApp {
     }
 
     /**
+     * 关闭日志源并停掉状态执行器；可重复调用，供只用 {@link #tick(long)} 的调用方收尾。
+     * 日志 close() 在 daemon 线程执行，UI 最多等 {@value #CLOSE_WAIT_MILLIS}ms。
+     */
+    public void close() {
+        if (!closed.compareAndSet(false, true)) {
+            return;
+        }
+        running = false;
+        closeLogs();
+        statusExecutor.shutdownNow();
+    }
+
+    /**
      * 覆盖层（帮助/动作确认）打开时暂停状态轮询，关闭后下一次 tick 立即补一次。
      * Task 9 的 ACTION 覆盖层通过这个接缝接入。
      */
@@ -178,10 +219,32 @@ public final class TuiApp {
     }
 
     private TuiState loadStateSafely() {
+        Future<StatusReport> future;
         try {
-            return TuiState.load(servicePackage);
+            future = statusExecutor.submit(new Callable<StatusReport>() {
+                @Override
+                public StatusReport call() {
+                    return servicePackage.status();
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            return TuiState.unknown(servicePackage, "status executor closed");
+        }
+        try {
+            // 状态查询有 3s 预算：UI 线程最多等这么久，超时就取消并显示 unknown。
+            return TuiState.from(servicePackage, future.get(STATUS_TIMEOUT_MILLIS,
+                    TimeUnit.MILLISECONDS));
+        } catch (TimeoutException e) {
+            future.cancel(true);
+            return TuiState.unknown(servicePackage, "status timed out");
+        } catch (InterruptedException e) {
+            future.cancel(true);
+            Thread.currentThread().interrupt();
+            return TuiState.unknown(servicePackage, "status interrupted");
+        } catch (ExecutionException e) {
+            return TuiState.unknown(servicePackage, messageOf(e.getCause()));
         } catch (RuntimeException e) {
-            // 轮询失败只降级这一帧，UI 继续可退出（I-1 异常收口）。
+            future.cancel(true);
             return TuiState.unknown(servicePackage, messageOf(e));
         }
     }
@@ -203,7 +266,7 @@ public final class TuiApp {
     private void startLogs() {
         LogStream stream;
         try {
-            stream = logStreams.get();
+            stream = logStreams.open(LOG_LINES, true);
         } catch (RuntimeException e) {
             logStart.countDown();
             degradeLogs(e);
@@ -250,6 +313,13 @@ public final class TuiApp {
                 degradeLogs(e);
             }
         } finally {
+            // start() 正常返回 = 日志流结束（EOF 或读取线程收口）。
+            // 不能再假装还在 follow，否则表头会永远骗人。
+            if (logStream == stream) {
+                logsEnded = true;
+                notice = "log stream ended";
+                dirty = true;
+            }
             logStart.countDown();
         }
     }
@@ -271,15 +341,31 @@ public final class TuiApp {
     }
 
     private void closeLogs() {
-        LogStream stream = logStream;
+        final LogStream stream = logStream;
         logStream = null;
-        closeQuietly(stream);
+        if (stream == null) {
+            return;
+        }
+        Thread closer = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                closeQuietly(stream);
+            }
+        }, "xac-tui-close-logs");
+        closer.setDaemon(true);
+        closer.start();
+        try {
+            closer.join(CLOSE_WAIT_MILLIS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private void renderIfDirty() {
         if (dirty) {
-            render();
+            // 先清标记再画：render() 期间日志线程的新写入不会被这次清掉。
             dirty = false;
+            render();
         }
     }
 
@@ -469,6 +555,9 @@ public final class TuiApp {
             return;
         }
         String status = logPane.following() ? "follow" : "paused";
+        if (logsEnded) {
+            status = status + " (ended)";
+        }
         String left = "├ logs ─ " + state.logSource + " · " + status + " ";
         if (left.length() + 1 <= width) {
             canvas.text(0, y, left);

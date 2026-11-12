@@ -73,6 +73,25 @@ class LogPaneTest {
     }
 
     @Test
+    void pausedWindowStaysFixedWhenCapacityDropsOldLines() {
+        LogPane pane = new LogPane(10);
+        for (int i = 1; i <= 10; i++) {
+            pane.append("line " + i);
+        }
+        pane.scrollUp(5);
+        List<String> before = pane.visible(2);
+        assertEquals(Arrays.asList("line 4", "line 5"), before);
+
+        for (int i = 11; i <= 13; i++) {
+            pane.append("line " + i);
+        }
+
+        assertFalse(pane.following());
+        assertEquals(before, pane.visible(2));
+        assertEquals(8, pane.scrollBack());
+    }
+
+    @Test
     void scrollingDownToBottomResumesFollow() {
         LogPane pane = paneWith(5);
         pane.scrollUp(1);
