@@ -16,8 +16,7 @@ artifact:
 runtime:
   # Java executable used to start the service.
   java: {{java}}
-  # JVM arguments, one list item per argument, passed verbatim. A heap limit is
-  # optional:
+  # JVM arguments, one list item per argument, passed verbatim, for example:
   #   - -Xmx512m
   #   - -XX:+UseG1GC
   opts: []
