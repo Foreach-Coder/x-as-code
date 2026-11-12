@@ -1,4 +1,4 @@
-﻿# xac（x-as-code）
+# xac（x-as-code）
 
 用代码定义和管理一切。仓库里每个子项目都是「把某类基础设施写成代码」：
 
@@ -150,6 +150,33 @@ e2e 用 Testcontainers 起一个 `--privileged` 的 Ubuntu 24.04 容器，`syste
 - 不负责产物分发：业务 jar 与配置由 CI/rsync 事先放好。
 - 单服务：没有项目层编排、服务间依赖或分组。
 - 仅支持 systemd；不兼容 OpenRC / SysV，不支持 systemd 219 及更早。
+
+## 发布
+
+推一个 `v*` tag 即触发 [`.github/workflows/publish.yml`](.github/workflows/publish.yml)：
+
+1. 跑 `mvn test`、打包 fat jar；
+2. 创建 GitHub release（已存在则复用，不覆盖附件）；
+3. 把分支与 tag 镜像到 GitCode（`git push --prune`，不是 `--mirror`，避免把 `refs/remotes/*` 推过去）；
+4. 在 GitCode 创建同名 release，并用 Release API 上传同一个 jar，最后校验 `sha256`。
+
+`push master` 只做第 3 步（镜像），不发版。
+
+需要的唯一凭据是 GitHub 仓库 secret `GITCODE_TOKEN`（GitCode 个人访问令牌，勾选 repo 读写）：
+
+1. 打开 <https://gitcode.com/setting/token-classic>，生成令牌，复制（只显示一次）；
+2. 打开 <https://github.com/Foreach-Coder/x-as-code/settings/secrets/actions>，`New repository secret`，名字填 `GITCODE_TOKEN`，粘贴令牌。
+
+本地手动补发某个版本（等价于 workflow 第 3、4 步）：
+
+```powershell
+$env:GITCODE_TOKEN = '<token>'
+git push --prune "https://foreach1991:$env:GITCODE_TOKEN@gitcode.com/foreach1991/x-as-code.git" `
+  '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'
+pwsh -NoProfile -File .github/scripts/sync-gitcode-release.ps1 `
+  -Owner foreach1991 -Repo x-as-code -Tag v0.1.0 `
+  -Asset java-systemd-service-as-code/target/java-systemd-service-cli-0.1.0.jar
+```
 
 ## 文档
 

@@ -1,0 +1,127 @@
+name: publish
+
+# push master：把 git 分支与 tag 镜像到 GitCode。
+# push v* tag（或在 Actions 页面手动填 tag 运行）：跑测试、打包、发 GitHub release、镜像 git、同步 GitCode release 与 jar。
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布到 GitCode 的 tag，例如 v0.1.0'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GITCODE_HOST: gitcode.com
+  GITCODE_OWNER: foreach1991
+  GITCODE_REPO: x-as-code
+  PROJECT_DIR: java-systemd-service-as-code
+
+jobs:
+  mirror:
+    name: mirror git refs to GitCode
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: master
+      - name: push branches and tags
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GITCODE_TOKEN:-}" ]; then
+            echo "GITCODE_TOKEN secret is not configured" >&2
+            exit 1
+          fi
+          git fetch --prune origin \
+            '+refs/heads/*:refs/remotes/origin/*' \
+            '+refs/tags/*:refs/tags/*'
+          remote="https://${GITCODE_OWNER}:${GITCODE_TOKEN}@${GITCODE_HOST}/${GITCODE_OWNER}/${GITCODE_REPO}.git"
+          git push --prune "$remote" \
+            '+refs/remotes/origin/*:refs/heads/*' \
+            '+refs/tags/*:refs/tags/*'
+
+  release:
+    name: publish release
+    needs: mirror
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: java-systemd-service-as-code/pom.xml
+
+      - name: test
+        run: mvn -B -f "$PROJECT_DIR/pom.xml" test
+
+      - name: package
+        run: mvn -B -f "$PROJECT_DIR/pom.xml" -DskipTests package
+
+      - name: resolve tag
+        id: meta
+        env:
+          TAG_INPUT: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="${TAG_INPUT:-}"
+          if [ -z "$tag" ]; then
+            tag="${GITHUB_REF#refs/tags/}"
+          fi
+          if [ -z "$tag" ]; then
+            echo "cannot resolve tag" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: create GitHub release if missing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "GitHub release $TAG already exists, keeping its assets"
+          else
+            jar=$(ls "$PROJECT_DIR"/target/java-systemd-service-cli-*.jar | head -n 1)
+            gh release create "$TAG" "$jar" --title "xac $TAG" --generate-notes
+          fi
+
+      - name: download release asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "$TAG" --pattern '*.jar' --dir dist
+          ls -l dist
+
+      - name: sync GitCode release and asset
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+        run: |
+          set -euo pipefail
+          jar=$(ls dist/*.jar | head -n 1)
+          pwsh -NoProfile -File .github/scripts/sync-gitcode-release.ps1 \
+            -Owner "$GITCODE_OWNER" \
+            -Repo "$GITCODE_REPO" \
+            -Tag "${{ steps.meta.outputs.tag }}" \
+            -Asset "$jar"
