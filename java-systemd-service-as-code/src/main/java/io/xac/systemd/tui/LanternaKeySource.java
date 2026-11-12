@@ -67,6 +67,10 @@ public final class LanternaKeySource implements KeySource {
                 return KeyEvent.of(NavKey.UP);
             case ArrowDown:
                 return KeyEvent.of(NavKey.DOWN);
+            case ArrowLeft:
+                return KeyEvent.of(NavKey.LEFT);
+            case ArrowRight:
+                return KeyEvent.of(NavKey.RIGHT);
             case PageUp:
                 return KeyEvent.of(NavKey.PGUP);
             case PageDown:
@@ -79,6 +83,8 @@ public final class LanternaKeySource implements KeySource {
                 return KeyEvent.of(NavKey.ENTER);
             case Tab:
                 return KeyEvent.of(NavKey.TAB);
+            case ReverseTab:
+                return KeyEvent.of(NavKey.SHIFT_TAB);
             case Backspace:
                 return KeyEvent.of(NavKey.BACKSPACE);
             default:

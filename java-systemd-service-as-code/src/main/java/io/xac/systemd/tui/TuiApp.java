@@ -1,6 +1,9 @@
 package io.xac.systemd.tui;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -25,9 +28,14 @@ import io.xac.systemd.core.ServicePackage;
 import io.xac.systemd.core.StatusReport;
 import io.xac.systemd.logs.LogSink;
 import io.xac.systemd.logs.LogStream;
+import io.xac.systemd.spec.Comments;
+import io.xac.systemd.spec.YamlCommentScanner;
 import io.xac.systemd.systemd.UnitNaming;
 import io.xac.systemd.tui.actions.ActionKind;
 import io.xac.systemd.tui.actions.ActionOverlay;
+import io.xac.systemd.tui.edit.EditScreen;
+import io.xac.systemd.tui.edit.EditorModel;
+import io.xac.systemd.tui.edit.FileStamp;
 
 /**
  * TUI 外壳。只依赖 {@link Display} 与 {@link KeySource}，因此测试不用启动终端；
@@ -66,12 +74,25 @@ public final class TuiApp {
         LogStream open(int lines, boolean follow);
     }
 
-    private final ServicePackage servicePackage;
+    /** 重新打开包目录的接缝；测试注入假的 runner/probe，生产走 {@link ServicePackage#open(Path)}。 */
+    interface PackageOpener {
+        ServicePackage open(Path packageDir) throws InvalidSpecException;
+    }
+
+    private static final PackageOpener DEFAULT_OPENER = new PackageOpener() {
+        @Override
+        public ServicePackage open(Path packageDir) throws InvalidSpecException {
+            return ServicePackage.open(packageDir);
+        }
+    };
+
+    private ServicePackage servicePackage;
     private final Display display;
     private final KeySource keys;
     private final Clock clock;
     private final LogStreamFactory logStreams;
-    private final LogPane logPane = new LogPane(LOG_CAPACITY);
+    private final PackageOpener opener;
+    private LogPane logPane = new LogPane(LOG_CAPACITY);
     /** 日志线程完成 start()（成功或失败收口）后放行；测试用它替代 sleep。 */
     private final CountDownLatch logStart = new CountDownLatch(1);
     /** 单线程 daemon 执行器：状态查询永远不占用 UI 线程。 */
@@ -95,6 +116,8 @@ public final class TuiApp {
     private boolean overlayOpen;
     /** 当前动作确认面板；null 表示主屏。 */
     private ActionOverlay overlay;
+    /** 编辑屏覆盖层；非 null 时独占按键与画面。 */
+    private EditScreen editor;
     /** 关闭覆盖层后强制补一次状态查询，不必等 2s 节流。 */
     private volatile boolean statusPollDue;
     /** 动作执行线程；非 null 表示后台还有一个动作在跑。 */
@@ -116,17 +139,24 @@ public final class TuiApp {
     }
 
     public TuiApp(ServicePackage servicePackage, Display display, KeySource keys, Clock clock) {
-        this(servicePackage, display, keys, clock, packageLogs(servicePackage));
+        this(servicePackage, display, keys, clock, null);
     }
 
     /** 测试接缝：时间与日志源工厂都可注入，绝不启动真实终端。 */
     TuiApp(ServicePackage servicePackage, Display display, KeySource keys, Clock clock,
            LogStreamFactory logStreams) {
+        this(servicePackage, display, keys, clock, logStreams, null);
+    }
+
+    /** 测试接缝：再加一个重新打开包目录的注入点，用于保存后的 reopen 流程。 */
+    TuiApp(ServicePackage servicePackage, Display display, KeySource keys, Clock clock,
+           LogStreamFactory logStreams, PackageOpener opener) {
         this.servicePackage = servicePackage;
         this.display = display;
         this.keys = keys;
         this.clock = clock;
-        this.logStreams = logStreams;
+        this.logStreams = logStreams != null ? logStreams : dynamicLogs();
+        this.opener = opener != null ? opener : DEFAULT_OPENER;
         this.state = loadStateSafely();
         this.lastStatusAt = clock.millis();
         this.logsVisible = display.size().height >= SHORT_SCREEN;
@@ -134,11 +164,15 @@ public final class TuiApp {
         startLogs();
     }
 
-    private static LogStreamFactory packageLogs(final ServicePackage servicePackage) {
+    /**
+     * 生产用的日志源：延迟到 open() 时才读 {@code servicePackage}，
+     * 这样保存后换了包实例，日志仍然读新配置。
+     */
+    private LogStreamFactory dynamicLogs() {
         return new LogStreamFactory() {
             @Override
             public LogStream open(int lines, boolean follow) {
-                return servicePackage.logs(lines, follow);
+                return TuiApp.this.servicePackage.logs(lines, follow);
             }
         };
     }
@@ -448,6 +482,10 @@ public final class TuiApp {
         if (event == null) {
             return;
         }
+        if (editor != null) {
+            handleEditor(event);
+            return;
+        }
         if (actionRunning) {
             // 动作执行期间忽略其它按键，但 q/esc/ctrl-c 可以放弃等待退出：
             // UI 立即退出，进程随即结束，daemon 动作线程也会被杀（design §6.6）。
@@ -510,9 +548,7 @@ public final class TuiApp {
         } else if (event.ch == 'd') {
             openDestroy();
         } else if (event.ch == 'e') {
-            // edit 还没实现：明确告诉用户，而不是假装按键生效。
-            notice = "edit is not implemented yet";
-            dirty = true;
+            openEditor();
         } else if (event.ch == '?') {
             notice = "help is not implemented yet";
             dirty = true;
@@ -530,6 +566,80 @@ public final class TuiApp {
         } else if (event.ch == 'G') {
             logPane.toBottom();
         }
+    }
+
+    // --------------------------------------------------------------- editing
+
+    /**
+     * 打开编辑屏：读当前 xac.yaml 的文本与注释，服务模型来自已加载的 spec。
+     * 语法坏到连 spec 都建不起来的包在 {@link ServicePackage#open} 就失败了，
+     * 根本进不到这里——这正是 design §7.5 的边界。
+     */
+    private void openEditor() {
+        if (editor != null) {
+            return;
+        }
+        Path file = servicePackage.packageDir().resolve("xac.yaml");
+        try {
+            // 先取指纹再读文本：读完到保存之间任何外部改动都能被发现。
+            FileStamp stamp = FileStamp.of(file);
+            String text = readText(file);
+            Comments comments = YamlCommentScanner.scan(text);
+            EditorModel model = EditorModel.from(servicePackage.spec(), comments);
+            editor = new EditScreen(model, file, stamp);
+            setOverlayOpen(true);
+            notice = "";
+            dirty = true;
+        } catch (IOException | RuntimeException e) {
+            notice = "edit unavailable: " + messageOf(e);
+            dirty = true;
+        }
+    }
+
+    private void handleEditor(KeyEvent event) {
+        EditScreen current = editor;
+        if (current == null) {
+            return;
+        }
+        current.handle(event.key, event.ch);
+        if (!current.closed()) {
+            return;
+        }
+        boolean wasSaved = current.saved();
+        editor = null;
+        setOverlayOpen(false);
+        dirty = true;
+        if (wasSaved) {
+            reopenAfterSave();
+        }
+    }
+
+    /** 保存成功后重新打开包，让 spec/状态/日志都基于新文件；失败也要把原因说清楚。 */
+    private void reopenAfterSave() {
+        Path packageDir = servicePackage.packageDir();
+        try {
+            servicePackage = opener.open(packageDir);
+            state = loadStateSafely();
+            lastStatusAt = clock.millis();
+            statusPollDue = false;
+            closeLogs();
+            logPane = new LogPane(LOG_CAPACITY);
+            logsEnded = false;
+            startLogs();
+            notice = "saved";
+        } catch (InvalidSpecException e) {
+            notice = "saved; reopen failed: " + firstViolation(e);
+        } catch (RuntimeException e) {
+            notice = "saved; reopen failed: " + messageOf(e);
+        }
+        dirty = true;
+    }
+
+    private static String readText(Path file) throws IOException {
+        if (!Files.exists(file)) {
+            return "";
+        }
+        return new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
     }
 
     /** 覆盖层内只认 y（确认）与 enter/n/esc（取消）；其它键一律不生效。 */
@@ -772,6 +882,10 @@ public final class TuiApp {
     }
 
     private void paint(Canvas canvas) {
+        if (editor != null) {
+            paintEditor(canvas);
+            return;
+        }
         int height = canvas.height();
         if (!logsToggled) {
             logsVisible = height >= SHORT_SCREEN;
@@ -809,6 +923,30 @@ public final class TuiApp {
             paintOverlay(canvas);
         }
         paintKeyBar(canvas);
+    }
+
+    /**
+     * 编辑屏占满整个画面：顶行标题，下面两列缩进画字段/行编辑/错误行。
+     * 每行由 {@link EditScreen#lines} 自己按宽度截断，这里只负责摆放。
+     */
+    private void paintEditor(Canvas canvas) {
+        EditScreen current = editor;
+        if (current == null) {
+            return;
+        }
+        int width = canvas.width();
+        int height = canvas.height();
+        canvas.clear();
+        canvas.text(0, 0, "edit " + state.service);
+        List<String> lines = current.lines(Math.max(1, width - 2), Math.max(1, height - 1));
+        int row = 1;
+        for (String line : lines) {
+            if (row >= height) {
+                break;
+            }
+            canvas.text(1, row, line);
+            row++;
+        }
     }
 
     /**

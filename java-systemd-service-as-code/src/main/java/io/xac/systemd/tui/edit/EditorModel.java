@@ -238,6 +238,11 @@ public final class EditorModel {
         return found;
     }
 
+    /** 服务名（只读字段 {@code name} 的文本值）。 */
+    public String name() {
+        return value("name");
+    }
+
     /**
      * 返回副本：只替换目标字段的文本值，其余字段原样带过去。
      * map 冲突按行原文保留——新值里仍包含冲突行时冲突不解除，只有该行被改写才移除。

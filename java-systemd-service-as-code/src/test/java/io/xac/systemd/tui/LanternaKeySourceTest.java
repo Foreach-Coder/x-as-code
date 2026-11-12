@@ -50,12 +50,15 @@ class LanternaKeySourceTest {
         assertKey(KeyType.Escape, NavKey.ESC);
         assertKey(KeyType.ArrowUp, NavKey.UP);
         assertKey(KeyType.ArrowDown, NavKey.DOWN);
+        assertKey(KeyType.ArrowLeft, NavKey.LEFT);
+        assertKey(KeyType.ArrowRight, NavKey.RIGHT);
         assertKey(KeyType.PageUp, NavKey.PGUP);
         assertKey(KeyType.PageDown, NavKey.PGDN);
         assertKey(KeyType.Home, NavKey.TOP);
         assertKey(KeyType.End, NavKey.BOTTOM);
         assertKey(KeyType.Enter, NavKey.ENTER);
         assertKey(KeyType.Tab, NavKey.TAB);
+        assertKey(KeyType.ReverseTab, NavKey.SHIFT_TAB);
         assertKey(KeyType.Backspace, NavKey.BACKSPACE);
     }
 

@@ -25,11 +25,13 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Deque;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -1012,7 +1014,7 @@ class TuiAppTest {
     }
 
     @Test
-    void editKeyReportsNotImplemented() throws Exception {
+    void editKeyOpensEditor() throws Exception {
         RecordingDisplay display = new RecordingDisplay(80, 24);
         FakeLogStream logs = new FakeLogStream();
         logs.blockUntilClosed = true;
@@ -1021,7 +1023,59 @@ class TuiAppTest {
 
         assertTrue(app.tick(0));
 
-        assertEquals("edit is not implemented yet", app.statusNote());
+        String screen = screen(display);
+        assertTrue(screen.contains("edit xac.demo"), screen);
+        assertTrue(screen.contains("description"), screen);
+        assertTrue(screen.contains("enter edit  space toggle  s save"), screen);
+        assertFalse(app.statusNote().contains("not implemented"));
+    }
+
+    @Test
+    void editSaveReopensPackageWithNewValue() throws Exception {
+        RecordingDisplay display = new RecordingDisplay(80, 24);
+        final List<FakeLogStream> streams = new ArrayList<FakeLogStream>();
+        final AtomicReference<ServicePackage> reopened = new AtomicReference<ServicePackage>();
+        TuiApp app = new TuiApp(openPackage(), display,
+                new ScriptedKeySource(
+                        KeyEvent.character('e'),
+                        KeyEvent.character('c'),
+                        KeyEvent.of(NavKey.ENTER),
+                        KeyEvent.character('c'),
+                        KeyEvent.character('h'),
+                        KeyEvent.character('a'),
+                        KeyEvent.character('n'),
+                        KeyEvent.character('g'),
+                        KeyEvent.character('e'),
+                        KeyEvent.character('d'),
+                        KeyEvent.of(NavKey.ENTER),
+                        KeyEvent.character('s')),
+                FIXED_CLOCK,
+                new TuiApp.LogStreamFactory() {
+                    @Override
+                    public LogStream open(int lines, boolean follow) {
+                        FakeLogStream stream = new FakeLogStream();
+                        stream.blockUntilClosed = true;
+                        streams.add(stream);
+                        return stream;
+                    }
+                },
+                new TuiApp.PackageOpener() {
+                    @Override
+                    public ServicePackage open(Path packageDir) throws InvalidSpecException {
+                        ServicePackage opened = ServicePackage.open(packageDir, runner, probe,
+                                new SystemdTarget(packageDir.resolve("units"),
+                                        packageDir.resolve("env")));
+                        reopened.set(opened);
+                        return opened;
+                    }
+                });
+
+        assertTrue(app.tick(0));
+
+        assertNotNull(reopened.get(), "save must reopen the package");
+        assertEquals("changed", reopened.get().spec().description);
+        assertEquals("saved", app.statusNote());
+        assertEquals(2, streams.size(), "log stream must be rebuilt after reopen");
     }
 
     @Test
