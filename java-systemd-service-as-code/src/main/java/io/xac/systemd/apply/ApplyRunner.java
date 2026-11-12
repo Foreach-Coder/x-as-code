@@ -1,6 +1,6 @@
 package io.xac.systemd.apply;
 
-import java.io.PrintStream;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -26,21 +26,42 @@ public final class ApplyRunner {
                 new RestartAction());
     }
 
-    public int run(ApplyContext ctx, PrintStream out) {
+    public ApplyOutcome run(ApplyContext ctx) {
+        List<StepResult> steps = new ArrayList<StepResult>();
         for (Action action : actions()) {
-            String description = action.describe(ctx);
+            StepPlan plan = new StepPlan(action.describe(ctx), false);
             if (ctx.dryRun) {
-                out.println("would " + description);
+                steps.add(new StepResult(plan, true, null));
                 continue;
             }
-            out.println(description);
             try {
                 action.run(ctx);
             } catch (ActionFailure e) {
-                out.println("failed: " + e.getMessage());
-                return 1;
+                StepResult failed = new StepResult(plan, false, e.getMessage());
+                steps.add(failed);
+                return new ApplyOutcome(steps, true, failed);
             }
+            steps.add(new StepResult(plan, true, takeWarnings(ctx)));
         }
-        return 0;
+        return new ApplyOutcome(steps, !ctx.dryRun, null);
+    }
+
+    /**
+     * 动作的警告由该步的 {@link StepResult#message} 承载，CLI 决定怎么显示；
+     * 取走后清空，避免串到下一步。
+     */
+    private static String takeWarnings(ApplyContext ctx) {
+        if (ctx.warnings.isEmpty()) {
+            return null;
+        }
+        StringBuilder message = new StringBuilder();
+        for (String warning : ctx.warnings) {
+            if (message.length() > 0) {
+                message.append("; ");
+            }
+            message.append(warning);
+        }
+        ctx.warnings.clear();
+        return message.toString();
     }
 }

@@ -6,9 +6,11 @@ import java.nio.file.Paths;
 import java.util.concurrent.Callable;
 
 import io.xac.systemd.apply.ApplyContext;
+import io.xac.systemd.apply.ApplyOutcome;
 import io.xac.systemd.apply.ApplyRunner;
 import io.xac.systemd.apply.EnvironmentProbe;
 import io.xac.systemd.apply.RealEnvironmentProbe;
+import io.xac.systemd.apply.StepResult;
 import io.xac.systemd.exec.CommandRunner;
 import io.xac.systemd.exec.ProcessRunner;
 import io.xac.systemd.systemd.SystemdTarget;
@@ -43,6 +45,19 @@ public final class ApplyCommand implements Callable<Integer> {
             return 2;
         }
         ApplyContext ctx = new ApplyContext(loaded.spec, target, runner, dryRun);
-        return new ApplyRunner().run(ctx, out);
+        ApplyOutcome outcome = new ApplyRunner().run(ctx);
+        for (StepResult step : outcome.steps) {
+            out.println(outcome.performed
+                    ? step.plan.description
+                    : "would " + step.plan.description);
+            if (step.ok && step.message != null) {
+                out.println("warning: " + step.message);
+            }
+        }
+        if (outcome.failed != null) {
+            out.println("failed: " + outcome.failed.message);
+            return 1;
+        }
+        return 0;
     }
 }

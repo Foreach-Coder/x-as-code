@@ -17,6 +17,7 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -85,13 +86,29 @@ class ApplyCommandTest {
         Files.createDirectories(target().envDir);
     }
 
-    private int apply(boolean dryRun) {
+    private static final class Captured {
+        final int code;
+        final String output;
+
+        Captured(int code, String output) {
+            this.code = code;
+            this.output = output;
+        }
+    }
+
+    private Captured capture(boolean dryRun, CommandRunner runner) throws IOException {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        int code = ApplyCommand.run(pkg, dryRun, new FakeProbe(), runner, target(),
+                new PrintStream(buffer, true, "UTF-8"));
+        return new Captured(code, buffer.toString("UTF-8"));
+    }
+
+    private int apply(boolean dryRun) throws IOException {
         return apply(dryRun, new RecordingRunner());
     }
 
-    private int apply(boolean dryRun, CommandRunner runner) {
-        return ApplyCommand.run(pkg, dryRun, new FakeProbe(), runner, target(),
-                new PrintStream(new ByteArrayOutputStream()));
+    private int apply(boolean dryRun, CommandRunner runner) throws IOException {
+        return capture(dryRun, runner).code;
     }
 
     private static RecordingRunner runnerShowing(String stdout) {
@@ -212,5 +229,44 @@ class ApplyCommandTest {
 
         assertEquals(1, runner.calls().size(), runner.calls().toString());
         assertFalse(Files.exists(unitPath()));
+    }
+
+    /** 红线：dry-run 每个动作一行，前缀 would，共 7 步。 */
+    @Test
+    void dryRunPrintsWouldPrefixForEveryStep() throws IOException {
+        Files.createFile(pkg.resolve("app.jar"));
+        writePlainSpec();
+        createTargetDirs();
+        Captured captured = capture(true, runnerShowing("LoadState=not-found\nFragmentPath=\n"));
+
+        assertEquals(0, captured.code);
+        List<String> lines = Arrays.asList(captured.output.split("\n"));
+        assertEquals(7, lines.size(), captured.output);
+        for (String line : lines) {
+            assertTrue(line.startsWith("would "), captured.output);
+        }
+        assertTrue(lines.get(0).contains("path-links"), captured.output);
+        assertTrue(lines.get(6).contains("restart"), captured.output);
+    }
+
+    /** 红线：失败时先打印已完成步骤，再打印 failed: 与原因，退出 1。 */
+    @Test
+    void failurePrintsStepsThenFailedLineAndExitsOne() throws IOException {
+        Files.createFile(pkg.resolve("app.jar"));
+        writePlainSpec();
+        createTargetDirs();
+        RecordingRunner runner = runnerShowing("LoadState=not-found\nFragmentPath=\n");
+        runner.addResult(Arrays.asList("systemctl", "daemon-reload"),
+                new ExecResult(1, "", "boom"));
+
+        Captured captured = capture(false, runner);
+
+        assertEquals(1, captured.code);
+        List<String> lines = Arrays.asList(captured.output.split("\n"));
+        assertEquals(6, lines.size(), captured.output);
+        assertFalse(lines.get(0).startsWith("would "), captured.output);
+        assertTrue(lines.get(4).contains("daemon-reload"), captured.output);
+        assertTrue(lines.get(5).startsWith("failed: "), captured.output);
+        assertTrue(lines.get(5).contains("boom"), captured.output);
     }
 }

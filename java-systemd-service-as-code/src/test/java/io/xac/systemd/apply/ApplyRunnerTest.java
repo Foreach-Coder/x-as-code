@@ -11,10 +11,8 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
-import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
@@ -23,11 +21,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ApplyRunnerTest {
@@ -60,13 +59,10 @@ class ApplyRunnerTest {
         return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
     }
 
-    private String run(ApplyContext ctx) throws IOException {
+    private ApplyOutcome run(ApplyContext ctx) throws IOException {
         Files.createDirectories(target().unitDir);
         Files.createDirectories(target().envDir);
-        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-        int code = new ApplyRunner().run(ctx, new PrintStream(buffer, true, "UTF-8"));
-        assertEquals(0, code, buffer.toString("UTF-8"));
-        return buffer.toString("UTF-8");
+        return new ApplyRunner().run(ctx);
     }
 
     @Test
@@ -74,8 +70,16 @@ class ApplyRunnerTest {
         RecordingRunner runner = new RecordingRunner();
         ApplyContext ctx = new ApplyContext(spec(true, env("BAR", "b")), target(), runner, false);
 
-        run(ctx);
+        ApplyOutcome outcome = run(ctx);
 
+        assertTrue(outcome.performed);
+        assertNull(outcome.failed);
+        assertEquals(7, outcome.steps.size());
+        for (StepResult step : outcome.steps) {
+            assertTrue(step.ok, step.plan.description);
+            assertNull(step.message, step.plan.description);
+            assertFalse(step.plan.destructive, step.plan.description);
+        }
         assertEquals(ctx.unitContent, read(UnitNaming.unitPath(ctx.spec, ctx.target)));
         assertEquals(ctx.envContent, read(UnitNaming.envPath(ctx.spec, ctx.target)));
         assertEquals(Arrays.asList(
@@ -89,8 +93,9 @@ class ApplyRunnerTest {
         RecordingRunner runner = new RecordingRunner();
         ApplyContext ctx = new ApplyContext(spec(false, env("BAR", "b")), target(), runner, false);
 
-        run(ctx);
+        ApplyOutcome outcome = run(ctx);
 
+        assertNull(outcome.failed);
         assertEquals(Arrays.asList("systemctl", "disable", "xac.demo.service"), runner.calls().get(1));
         assertFalse(ctx.unitContent.contains("[Install]"));
     }
@@ -103,8 +108,9 @@ class ApplyRunnerTest {
 
         ApplyContext ctx = new ApplyContext(spec(true, Collections.<String, String>emptyMap()),
                 target(), new RecordingRunner(), false);
-        run(ctx);
+        ApplyOutcome outcome = run(ctx);
 
+        assertNull(outcome.failed);
         assertFalse(Files.exists(envFile));
         assertFalse(ctx.unitContent.contains("EnvironmentFile="));
     }
@@ -115,13 +121,15 @@ class ApplyRunnerTest {
         runner.addResultForCommand("systemctl", new ExecResult(1, "", "boom"));
         ApplyContext ctx = new ApplyContext(spec(true, env("BAR", "b")), target(), runner, false);
 
-        Files.createDirectories(target().unitDir);
-        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-        int code = new ApplyRunner().run(ctx, new PrintStream(buffer, true, "UTF-8"));
+        ApplyOutcome outcome = run(ctx);
 
-        assertEquals(1, code);
-        assertEquals(1, runner.calls().size());
-        assertTrue(buffer.toString("UTF-8").contains("boom"), buffer.toString("UTF-8"));
+        assertTrue(outcome.performed);
+        assertNotNull(outcome.failed);
+        assertFalse(outcome.failed.ok);
+        assertTrue(outcome.failed.message.contains("boom"), outcome.failed.message);
+        assertEquals(5, outcome.steps.size(), outcome.steps.toString());
+        assertEquals(outcome.failed, outcome.steps.get(4));
+        assertEquals(1, runner.calls().size(), runner.calls().toString());
     }
 
     @Test
@@ -129,17 +137,20 @@ class ApplyRunnerTest {
         RecordingRunner runner = new RecordingRunner();
         ApplyContext ctx = new ApplyContext(spec(true, env("BAR", "b")), target(), runner, true);
 
-        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-        int code = new ApplyRunner().run(ctx, new PrintStream(buffer, true, "UTF-8"));
+        ApplyOutcome outcome = new ApplyRunner().run(ctx);
 
-        assertEquals(0, code);
+        assertFalse(outcome.performed);
+        assertNull(outcome.failed);
         assertTrue(runner.calls().isEmpty());
         assertFalse(Files.exists(target().unitDir.resolve("xac.demo.service")));
-        List<String> lines = Arrays.asList(buffer.toString("UTF-8").split("\n"));
-        assertEquals(7, lines.size(), lines.toString());
-        assertTrue(lines.get(0).startsWith("would "), lines.toString());
-        assertTrue(lines.get(0).contains("path-links"), lines.toString());
-        assertTrue(lines.get(6).contains("restart"), lines.toString());
+        assertEquals(7, outcome.steps.size(), outcome.steps.toString());
+        for (StepResult step : outcome.steps) {
+            assertTrue(step.ok);
+            assertNull(step.message);
+            assertFalse(step.plan.description.startsWith("would "), step.plan.description);
+        }
+        assertTrue(outcome.steps.get(0).plan.description.contains("path-links"));
+        assertTrue(outcome.steps.get(6).plan.description.contains("restart"));
     }
 
     @Test
@@ -151,12 +162,12 @@ class ApplyRunnerTest {
         ApplyContext ctx = new ApplyContext(spec(true, Collections.<String, String>emptyMap()),
                 target(), new RecordingRunner(), false);
 
-        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-        int code = new ApplyRunner().run(ctx, new PrintStream(buffer, true, "UTF-8"));
+        ApplyOutcome outcome = run(ctx);
 
-        assertEquals(1, code, buffer.toString("UTF-8"));
-        assertTrue(buffer.toString("UTF-8").contains("existing env file is not managed by xac"),
-                buffer.toString("UTF-8"));
+        assertNotNull(outcome.failed);
+        assertEquals(3, outcome.steps.size(), outcome.steps.toString());
+        assertTrue(outcome.failed.message.contains("existing env file is not managed by xac"),
+                outcome.failed.message);
         assertTrue(Files.isRegularFile(envFile));
         assertEquals("OLD=1\n", read(envFile));
         assertFalse(Files.exists(target().unitDir.resolve("xac.demo.service")));
@@ -181,14 +192,14 @@ class ApplyRunnerTest {
         Files.createDirectories(target().unitDir);
         Files.createDirectories(target().envDir);
 
-        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-        int code = new ApplyRunner().run(ctx, new PrintStream(buffer, true, "UTF-8"));
+        ApplyOutcome outcome = new ApplyRunner().run(ctx);
 
-        assertEquals(1, code);
-        assertTrue(buffer.toString("UTF-8")
+        assertNotNull(outcome.failed);
+        assertEquals(1, outcome.steps.size(), outcome.steps.toString());
+        assertTrue(outcome.failed.message
                         .contains("target exists and is not a symlink to source, handle it manually: "
                                 + link),
-                buffer.toString("UTF-8"));
+                outcome.failed.message);
         assertTrue(runner.calls().isEmpty(), runner.calls().toString());
         assertTrue(Files.isDirectory(link));
         assertEquals("keep", read(link.resolve("keep.txt")));
