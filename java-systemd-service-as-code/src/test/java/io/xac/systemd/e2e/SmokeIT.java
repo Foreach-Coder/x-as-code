@@ -434,6 +434,17 @@ class SmokeIT {
         assertContains(cat(FILELOG_LOG), "FILELOG-READY");
     }
 
+    @Order(11)
+    void tuiRefusesToStartWithoutATty() throws Exception {
+        // 容器里 exec 没有 TTY：tui 必须一行提示后退出 2，绝不尝试打开终端。
+        ExecResult result = xac("tui", PACKAGE_DIR);
+
+        assertExit(2, result, "tui without a TTY");
+        assertContains(result.getStderr(), "tui requires an interactive terminal");
+        assertEquals("", result.getStdout(), "tui without a TTY must not write to stdout");
+        assertAscii("tui without a TTY", combined(result));
+    }
+
     private static ExecResult xac(String... args) throws IOException, InterruptedException {
         List<String> argv = new ArrayList<String>();
         argv.add("java");

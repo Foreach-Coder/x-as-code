@@ -140,6 +140,7 @@ sudo java-systemd-service-cli destroy . -y     # 非交互环境用 -y
 | `logs` | `[包目录] [-n N] [-f]` | 读 `journalctl -u xac.<name>.service --no-pager`，或 `logs.file` 指定的文件；`-f` 跟随 |
 | `destroy` | `[包目录] [--dry-run] [-y]` | 停止、禁用、删 unit/env/软链接；非交互环境必须加 `-y` |
 | `init` | `[父目录]` | 交互式创建 `<父目录>/<服务名>/xac.yaml` 模板，不覆盖已有文件 |
+| `tui` | `[包目录]` | 交互式终端界面（Linux/SSH 终端）；没有 TTY 时一行提示并退 2 |
 | `install` | `--dry-run` | 把当前发行包的启动脚本软链到 `/usr/local/bin`（root） |
 | `uninstall` | `--dry-run` | 删掉 `install` 建的那条软链（root） |
 

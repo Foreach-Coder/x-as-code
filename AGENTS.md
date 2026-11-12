@@ -25,7 +25,10 @@
 - **Java 8**：`maven.compiler.release=8`。禁止 record、`var`、switch 表达式、文本块、
   `List.of`/`Map.of`、`Optional.isEmpty()`、`ProcessorHandle`/`ProcessHandle`、`Stream.toList()`。
   测试代码同样按 `--release 8` 编译。
-- 运行期依赖只有 picocli 4.7.6 与 snakeyaml 2.2；测试用 JUnit 5.10.2 与 Testcontainers
+- 运行期依赖只有 picocli 4.7.6、snakeyaml 2.2 与 Lanterna 3.1.5
+  （`com.googlecode.lanterna:lanterna`，仅 `tui` 命令使用；shade 不得加
+  filters/includes 过滤 Lanterna 的终端相关资源（`terminfo/` 等），否则真实终端可能无法初始化）；
+  测试用 JUnit 5.10.2 与 Testcontainers
   1.19.8（`org.testcontainers:testcontainers`、`org.testcontainers:junit-jupiter`）；
   打包用 maven-shade-plugin 与 maven-assembly-plugin，e2e 用 maven-failsafe-plugin。
   不新增其他依赖，不追大版本。

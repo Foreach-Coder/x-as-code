@@ -2,6 +2,7 @@ package io.xac.systemd.cli;
 
 import java.util.concurrent.Callable;
 
+import io.xac.systemd.tui.TuiCommand;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Spec;
@@ -12,7 +13,7 @@ import picocli.CommandLine.Model.CommandSpec;
         version = "0.1.3",
         description = "install a Java service as a systemd unit",
         subcommands = {ApplyCommand.class, StatusCommand.class, LogsCommand.class,
-                DestroyCommand.class, InitCommand.class})
+                DestroyCommand.class, InitCommand.class, TuiCommand.class})
 public final class RootCommand implements Callable<Integer> {
 
     @Spec
