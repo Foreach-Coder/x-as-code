@@ -312,7 +312,7 @@ xac uninstall [--dry-run]      # 由发行包的启动脚本处理，见 §8
 
 **静态校验**（只看 yaml 文本，与规范 §6 一一对应）
 
-5. 顶层是映射；`name`、`artifact.jar`、`runtime.java`、`runtime.opts` 齐备
+5. 顶层是映射；`name`、`artifact.jar`、`runtime.java` 齐备（`runtime.opts` 可省略，缺省空列表）
 6. 无未知字段、无类型不符（报精确路径，如 `runtime.opts[3] must be a string`）
 7. `name` 只含字母数字 `-` `_` `.` `:`，不以 `.` 开头，不含 `/`，且不以 `xac.` 开头（不区分大小写；工具会自动加该前缀）
 8. `env` 键名合法、值不含换行、键不重复
