@@ -209,6 +209,27 @@ java-systemd-service-cli tui [<package-dir>]
 - `d`：面板列出 willRemove/willKeep；只有 `y` 执行，`enter`/`n`/`esc` 取消（不执行，也不需要输入服务名）；notice `destroy ok` / `destroy failed: <msg>`。
 - 动作在独立 daemon 线程执行，UI 不阻塞、每 tick 检查完成标志；执行期间忽略其它按键，但 `q`/`esc`/`ctrl-c` 可放弃等待并退出。放弃等待后进程即将退出：当前命令可能完成，**剩余步骤不会执行**，请重跑 `apply`/`destroy`；不提供 detached 执行。结果不再回写 UI，notice 记 `left running; current step may finish, remaining steps will not; re-run apply/destroy`；退出前不再发起状态查询，避免为一条即将消失的结果再阻塞最多 3 秒。
 
+### 6.7 SpecWriter 契约
+
+`SpecWriter` 是 `ServiceSpec` → `xac.yaml` 文本的唯一出口，供 TUI 保存（§7.3）与 CLI 共用。公开接口只有两个：
+
+```java
+String render(ServiceSpec spec)
+void save(Path file, String yaml) throws IOException
+```
+
+`render` 是纯函数：同样的 spec 必产出逐字节相同的文本。`save` 只负责落盘，不解析、不合并注释；注释由 `YamlCommentScanner` 在 `render` 的输出上合并（§7.4）。
+
+- **段序**：`name` → `description` → `artifact.jar` → `runtime.java` → `runtime.opts` → `env` → `properties` → `workdir` → `path-links` → `logs` → `lifecycle`；段间空一行。
+- **排序**：`env` / `properties` 的键按字符串自然序（`TreeMap`）输出，与输入 map 的插入顺序无关，保证同一份配置在任何机器上产生相同 diff；`opts` / `path-links` 是位置敏感的列表，保持原顺序。
+- **引号**：能安全用 plain 标量就不加引号；空串、首尾空白、含 `:` / `#` / `${`、形似 YAML 布尔/空值/数字/日期、以 YAML 指示符开头、以 `<<`（merge key 形态）开头、含控制字符时加双引号。引号内转义 `\\`、`"`、`\n`、`\r`、`\t`；不使用 block 标量，保证读回是同一个字符串。
+- **转义**：C0（`< 0x20`）、DEL（`0x7f`）、C1（`0x80–0x9f`，含 NEL `U+0085`）写成 `\xNN`；LINE/PARAGRAPH SEPARATOR（`U+2028`/`U+2029`）写成 `\uNNNN`。这些字符若原样输出，loader 会报 `unacceptable code point`，或把 NEL/LS/PS 当换行折叠。
+- **换行**：只用 LF，结尾恰好一个 `\n`，无 BOM。
+- **空段**：`description`、`env`、`properties`、`workdir`、`path-links`、`logs` 为空时整段省略（与 `xac.yaml.template` 的默认形态一致）；`opts` 为空时显式写 `opts: []`，让「没有 JVM 参数」在文本里可见；`lifecycle` 恒写四键，缺省值取 `Lifecycle` 的文档默认值。
+- **路径**：`artifact.jar` 与 `workdir` 相对包目录渲染，分隔符统一为 `/`；`workdir: .` 表示包目录本身，保持为 `.`，不展开成机器相关的绝对路径；与包目录不在同一个根（例如 Windows 换盘符）时退回绝对路径。`logs.file` 是运行时路径，原样输出，不做相对化。
+- **软链**：`save` 的目标是软链时，写到 `toRealPath()` 指向的真实文件，链接本身保留；解析失败（悬空链接、无权限）退回普通替换语义。
+- **落盘**：父目录必须已存在；同目录建 `.xac-*.tmp`，内容按 UTF-8 写，POSIX 下设 `0644`；用 `ATOMIC_MOVE + REPLACE_EXISTING` 覆盖目标。文件系统不支持原子移动时**不回退**到普通 move，而是抛 `IOException`（消息以 `atomic move not supported: <path>` 开头），避免「看似成功、实际非原子」。任何失败都删除临时文件、保留原目标；不备份，也不做 diff/确认。
+
 ## 7. 编辑
 
 ### 7.1 表单生成
@@ -265,7 +286,7 @@ s → 草稿 spec → Schema + ValidationRunner
 | 前置注释 | 同上，输出为该字段上方若干行 |
 | 段头注释 | 段路径（如 `env`） |
 
-`SpecWriter` 按固定顺序输出（与模板一致），先用模板默认英文注释打底，再用扫描结果覆盖；`env`/`properties` 保留插入顺序，`opts`/`path-links` 保序；结尾单个 `\n`，LF。
+`SpecWriter` 按固定顺序输出（与模板一致），先用模板默认英文注释打底，再用扫描结果覆盖；`env`/`properties` 的键按字符串自然序输出（与插入顺序无关），`opts`/`path-links` 保持原顺序；结尾单个 `\n`，LF。完整契约（含引号、转义、路径与落盘语义）见 §6.7。
 
 无法定位的注释（文件末尾游离、块标量内部、多余注释块）在 diff 前提示条数，不静默丢弃。
 

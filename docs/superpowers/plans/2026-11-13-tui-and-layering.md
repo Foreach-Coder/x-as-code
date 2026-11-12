@@ -46,9 +46,8 @@ java-systemd-service-as-code/src/main/java/io/xac/systemd/
   logs/FileLogStream.java             新增：FileTail 的流实现
   logs/JournaldLogStream.java         新增：journalctl --follow 的流实现
   logs/LogsRunner.java                删除（能力搬进 core + LogStream）
-  spec/SpecWriter.java                新增：模型 → 规范 YAML 文本
-  spec/SpecSaver.java                 新增：原子写文件
-  spec/YamlCommentScanner.java        新增：注释扫描与挂回路径
+  spec/SpecWriter.java                新增：模型 → 规范 YAML 文本 + 原子落盘
+  spec/YamlCommentScanner.java        新增：注释扫描，并在 render 输出上合并注释
   spec/Comments.java                  新增：line → inline、path → leading 的表
   spec/LineDiff.java                  新增：逐行 diff 文本
   tui/TuiCommand.java                 新增：picocli 子命令
@@ -770,8 +769,8 @@ git add -A && git commit -m "feat: TUI 动作面板（apply 预览/restart/destr
 **Interfaces:**
 ```java
 public final class SpecWriter {
-    public static String write(ServiceSpec spec);                     // 无注释，纯结构
-    public static String write(ServiceSpec spec, Comments comments);  // 带保留注释
+    public static String render(ServiceSpec spec);                     // 纯结构，不含注释
+    public static void save(Path file, String yaml) throws IOException; // 原子落盘：软链跟随、0644
 }
 ```
 
@@ -779,7 +778,7 @@ public final class SpecWriter {
 
 ```java
 @Test void writesKeysInFixedOrderAndEndsWithSingleNewline() {
-    String yaml = SpecWriter.write(spec);
+    String yaml = SpecWriter.render(spec);
     assertTrue(yaml.startsWith("name: demo\n"));
     assertTrue(yaml.endsWith("\n") && !yaml.endsWith("\n\n"));
     assertTrue(yaml.indexOf("\nartifact:") < yaml.indexOf("\nruntime:"));
@@ -797,11 +796,11 @@ Expected: COMPILATION ERROR。
 
 - [ ] **Step 3: 最小实现**
 
-按模板顺序输出：`name`、`description`（非 null）、`artifact.jar`、`runtime.java` + `opts`（非空）、`env`（非空，按插入序）、`properties`（非空）、`workdir`（非 null）、`path-links`（非空）、`logs.file`（非 null）、`lifecycle` 四键（恒写，使用 `OrDefault()`）。标量引用规则：含 `: `、` #`、以空格开头/结尾、为空 → `"` 包裹并把 `"`→`\"`、`\`→`\\`；否则原样。列表项 `- <scalar>`；map 键值同规则。
+按模板顺序输出：`name`、`description`（非 null）、`artifact.jar`、`runtime.java` + `opts`（非空）、`env`（非空，键按自然序）、`properties`（非空，键按自然序）、`workdir`（非 null，与包目录同一目录时写 `.`）、`path-links`（非空，保序）、`logs.file`（非 null，原样）、`lifecycle` 四键（恒写，使用 `OrDefault()`）。标量引用规则：含 `: `、` #`、以空格开头/结尾、为空、形似布尔/数字/日期、以 YAML 指示符或 `<<` 开头、含控制字符 → `"` 包裹；C0/DEL/C1 写成 `\xNN`，U+2028/U+2029 写成 `\uNNNN`；列表项 `- <scalar>`，map 键值同规则。`save`：同目录临时文件 → 0644 → `ATOMIC_MOVE`；目标是软链时写到 `toRealPath()` 目标；文件系统不支持原子移动时抛 `IOException`，不回退到普通 move。
 
 - [ ] **Step 4: 跑测试确认通过**
 
-Run: `MVN test -Dtest=SpecWriterTest` → Expected: 4 tests, 0 failures。
+Run: `MVN test -Dtest=SpecWriterTest` → Expected: 29 tests, 0 failures。
 
 - [ ] **Step 5: 提交**
 
@@ -814,8 +813,7 @@ git add -A && git commit -m "feat: SpecWriter 规范化输出 xac.yaml"
 ### Task 11: 注释扫描与挂回
 
 **Files:**
-- Create: `spec/Comments.java`、`spec/YamlCommentScanner.java`
-- Modify: `spec/SpecWriter.java`（消费 `Comments`）
+- Create: `spec/Comments.java`、`spec/YamlCommentScanner.java`（`scan` 与 `apply`）
 - Create: `src/test/java/io/xac/systemd/spec/YamlCommentScannerTest.java`
 
 **Interfaces:**
@@ -839,7 +837,7 @@ public final class YamlCommentScanner {
 @Test void keepsListValueComment() { /* "- ./conf:/opt/conf  # 配置" → inline["path-links[./conf:/opt/conf]"] */ }
 @Test void ignoresHashInsideQuotes() { /* description: "a # b" 不产生注释 */ }
 @Test void reportsOrphans() { /* 文件末尾游离注释进 orphans */ }
-@Test void writerReplaysComments() { /* write(spec, comments) 输出含注释且再 scan 一致 */ }
+@Test void writerReplaysComments() { /* YamlCommentScanner.apply(SpecWriter.render(spec), comments) 输出含注释且再 scan 一致 */ }
 ```
 
 - [ ] **Step 2: 跑失败**
@@ -849,7 +847,7 @@ Expected: COMPILATION ERROR。
 
 - [ ] **Step 3: 最小实现**
 
-逐行扫描：维护 `Deque<IndentNode>`（缩进 → 路径段）；空行清空“待挂”注释块；行内 `#` 只有在引号外且前面是空白时才算注释；`- ` 开头按值生成 `key[value]` 段。`SpecWriter` 在每行前输出 `leading`，行尾输出 ` # inline`。
+逐行扫描：维护 `Deque<IndentNode>`（缩进 → 路径段）；空行清空“待挂”注释块；行内 `#` 只有在引号外且前面是空白时才算注释；`- ` 开头按值生成 `key[value]` 段。`YamlCommentScanner.apply(String yaml, Comments comments)` 在 `SpecWriter.render(spec)` 的输出上合并注释，产出最终文本：每行前插入 `leading`，行尾追加 ` # inline`；`SpecWriter` 本身不消费 `Comments`。
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -923,7 +921,7 @@ git add -A && git commit -m "feat: 编辑器字段树与草稿模型"
 ### Task 13: 编辑表单 UI 与保存流程
 
 **Files:**
-- Create: `tui/edit/EditScreen.java`、`tui/edit/EditorView.java`、`tui/edit/SaveFlow.java`、`spec/SpecSaver.java`、`spec/LineDiff.java`
+- Create: `tui/edit/EditScreen.java`、`tui/edit/EditorView.java`、`tui/edit/SaveFlow.java`、`spec/LineDiff.java`
 - Modify: `tui/TuiApp.java`（`e` 打开，`ESC` 返回）
 - Create: `src/test/java/io/xac/systemd/tui/edit/EditScreenTest.java`、`SaveFlowTest.java`、`spec/LineDiffTest.java`
 
@@ -931,9 +929,6 @@ git add -A && git commit -m "feat: 编辑器字段树与草稿模型"
 ```java
 public final class LineDiff {
     public static List<String> diff(String oldText, String newText);   // "  x" / "- x" / "+ x"
-}
-public final class SpecSaver {
-    public static void save(Path file, String text) throws IOException; // 同目录临时文件 + 0644 + ATOMIC_MOVE
 }
 public final class SaveFlow {
     public static Result prepare(EditorModel model, Path yamlFile);
@@ -970,7 +965,7 @@ Expected: COMPILATION ERROR。
 
 - `EditorView`：渲染字段行（path 左、值右，截断），底部两行提示 `enter edit  s save  u undo  q cancel`，错误行标红（Canvas 不带颜色时用 `!` 前缀）。
 - `EditScreen`：`focus` 整数、`mode {BROWSE, EDIT_SCALAR, EDIT_LINES}`；标量编辑复用一个 `StringBuilder` 缓冲（`CHAR` 追加、`BACKSPACE` 删、`ENTER` 提交、`ESC` 取消）；列表/map 进入 `EDIT_LINES`：`↑↓` 选行、`a` 追加空行、`x` 删行、`ENTER` 编辑该行为标量、`ESC` 返回。
-- `SaveFlow.prepare`：`model.validate()` → 错误直接返回；否则 `SpecWriter.write(model.toSpec(), comments)` → `LineDiff.diff(old, new)` → 比较 `mtime+size` 生成提示；`commit` 调 `SpecSaver.save`。
+- `SaveFlow.prepare`：`model.validate()` → 错误直接返回；否则 `YamlCommentScanner.apply(SpecWriter.render(model.toSpec()), comments)` 产出最终文本 → `LineDiff.diff(old, new)` → 比较 `mtime+size` 生成提示；`commit` 调 `SpecWriter.save(yamlFile, text)`。
 - `TuiApp`：`e` 进入编辑（先 `ServicePackage.open` 已持有 spec；同时读原文件文本与注释），编辑中暂停状态轮询；保存成功 → 重新 `ServicePackage.open` 重建状态与日志（`LogStream` 重建）；`q` 脏数据二次确认（`y` 放弃）。
 
 - [ ] **Step 4: 跑测试确认通过**
