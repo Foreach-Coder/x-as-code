@@ -3,6 +3,7 @@ package io.xac.systemd.logs;
 import io.xac.systemd.exec.CommandRunner;
 import io.xac.systemd.exec.ExecResult;
 import io.xac.systemd.exec.RecordingRunner;
+import io.xac.systemd.exec.RunningCommand;
 import io.xac.systemd.spec.Lifecycle;
 import io.xac.systemd.spec.ServiceSpec;
 import org.junit.jupiter.api.Test;
@@ -127,6 +128,11 @@ class LogsRunnerTest {
             @Override
             public void runInheritIo(List<String> argv) {
                 throw new IllegalStateException("无法执行 journalctl: boom");
+            }
+
+            @Override
+            public RunningCommand start(List<String> argv) {
+                throw new UnsupportedOperationException("not used by this test");
             }
         };
 
