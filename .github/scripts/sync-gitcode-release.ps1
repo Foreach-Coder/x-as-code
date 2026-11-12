@@ -72,19 +72,20 @@ $uploadUri = "$releaseUri/upload_url?file_name=$([uri]::EscapeDataString($assetN
 Write-Host "target: $Owner/$Repo tag=$Tag"
 Write-Host "asset: $assetName ($assetSize bytes) sha256=$assetSha"
 
+$releaseName = "xac $Tag"
+if ([string]::IsNullOrWhiteSpace($NotesFile) -or -not (Test-Path -LiteralPath $NotesFile)) {
+    $body = "xac $Tag`n`nSee https://github.com/Foreach-Coder/x-as-code/releases/tag/$Tag"
+}
+else {
+    $body = Get-Content -LiteralPath $NotesFile -Raw
+}
+
 $release = Get-ReleaseOrNull -uri $releaseUri -headers $headers
 
 if ($null -eq $release) {
-    if ([string]::IsNullOrWhiteSpace($NotesFile) -or -not (Test-Path -LiteralPath $NotesFile)) {
-        $body = "xac $Tag`n`nSee https://github.com/Foreach-Coder/x-as-code/releases/tag/$Tag"
-    }
-    else {
-        $body = Get-Content -LiteralPath $NotesFile -Raw
-    }
-
     $payload = @{
         tag_name       = $Tag
-        name           = "xac $Tag"
+        name           = $releaseName
         body           = $body
         release_status = 'latest'
     } | ConvertTo-Json -Depth 4
@@ -95,7 +96,23 @@ if ($null -eq $release) {
     Write-Host "release created: $($release.html_url)"
 }
 else {
-    Write-Host "release exists: $($release.html_url)"
+    $currentBody = [string]$release.body
+    $sameName = ([string]$release.name) -eq $releaseName
+    $sameBody = $currentBody.TrimEnd() -eq $body.TrimEnd()
+    if ($sameName -and $sameBody) {
+        Write-Host "release exists and matches: $($release.html_url)"
+    }
+    else {
+        Write-Host 'release exists but title/notes differ, updating ...'
+        $payload = @{
+            name           = $releaseName
+            body           = $body
+            release_status = 'latest'
+        } | ConvertTo-Json -Depth 4
+        $release = Invoke-RestMethod -Uri $releaseUri -Headers $headers `
+            -Method Patch -ContentType 'application/json; charset=utf-8' -Body $payload
+        Write-Host "release updated: $($release.html_url)"
+    }
 }
 
 $existing = @($release.assets | Where-Object { $_.name -eq $assetName })

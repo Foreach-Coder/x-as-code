@@ -120,6 +120,15 @@ jobs:
           gh release download "$TAG" --pattern '*.jar' --dir dist
           ls -l dist
 
+      - name: export GitHub release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --json body --jq .body > release-notes.md
+          wc -c release-notes.md
+
       - name: sync GitCode release and asset
         env:
           GITCODE_TOKEN: ${{ secrets.GITCODE_FOREACH1991 }}
@@ -130,4 +139,5 @@ jobs:
             -Owner "$GITCODE_OWNER" \
             -Repo "$GITCODE_REPO" \
             -Tag "${{ steps.meta.outputs.tag }}" \
-            -Asset "$jar"
+            -Asset "$jar" \
+            -NotesFile release-notes.md
