@@ -52,7 +52,7 @@ io.xac.systemd
 ├── exec/      CommandRunner、ProcessRunner、ExecResult、RunningCommand
 ├── apply/     Action 与七个动作、ApplyContext、Preflight、FileWriter
 ├── status/    StatusRunner、StatusResult（只留数据与判断）
-├── logs/      LogsRunner、FileTail、LogStream 实现
+├── logs/      LogStream、FileLogStream、JournaldLogStream、FileTail
 ├── core/      ServicePackage ← 唯一门面
 ├── cli/       picocli 命令 + Formatter（全部文案与退出码）
 └── tui/       Lanterna 画面、键位、视图模型
@@ -71,7 +71,6 @@ io.xac.systemd
 |---|---|
 | `apply/ApplyRunner.java:29` | `run(ApplyContext, PrintStream)`，边执行边打 `would …`/`失败: …`，并返回退出码 |
 | `apply/DestroyRunner.java:34` | 同上，且确认清单文案在 core 层生成 |
-| `logs/LogsRunner.java:61` | `new FileTail(file, System.out, 200L)` 硬编码 stdout |
 | `cli/SpecCommands.java` | 编排（load + validate + preflight）在 CLI 层，TUI 无法复用 |
 
 ### 4.4 `StatusResult` 的调整
@@ -112,7 +111,7 @@ public final class ServicePackage {
 - `destroyPlan`：只读计划，预检后只读文件系统、零动作，供确认面板使用；TUI 取 destroy 计划必须用它，**不要**用 `destroy(true)` 代替。
 - `destroy(true/false)`：返回删除清单、保留项、步骤结果、警告；`Stop/Disable/Reload` 的失败记入 `warnings` 而不是中止。
 - `destroyPlan(DestroyRunner)` / `destroy(boolean, DestroyRunner)`：供 CLI/测试注入动作序列；生产默认用无参重载。
-- 日志门面在 Task 6 以 `LogStream logs(int lines)` 落地，本阶段不预埋。
+- 日志门面：`LogStream logs(int lines)`（非 follow，CLI 默认）与 `LogStream logs(int lines, boolean follow)`（`-f`）。`start(...)` 阻塞到来源结束或 `close()`，调用方必须放在工作线程；`close()` 幂等，可能等待子进程退出。
 
 返回类型（全部为不可变数据）：
 
@@ -132,16 +131,22 @@ public final class StatusReport { StatusResult status; List<String> drift; boole
 public interface LogSink  { void accept(String line); }
 public interface LogStream extends AutoCloseable {
     void start(int lines, LogSink sink);  // 阻塞到 close() 或来源结束
-    void close();                          // 幂等
+    default void start(int lines, LogSink stdoutSink, LogSink stderrSink) {
+        start(lines, stdoutSink);         // 合并两路；journald 覆写以保留 stderr 通道
+    }
+    boolean isFollow();
+    void close();                          // 幂等，可能等待子进程
 }
 ```
 
 两个实现：
 
-- `JournaldLogStream`：`ProcessBuilder` 启动 `journalctl -u <unit> --no-pager -n N --follow`，两个流按行泵入 sink；`close()` 结束子进程。
-- `FileLogStream`：`FileTail` + 停止标志；`close()` 置位并唤醒。
+- `JournaldLogStream`：`ProcessBuilder` 启动 `journalctl -u <unit> --no-pager -n N`（follow 时追加 `--follow`），stdout 与 stderr 各一个泵线程按行送入对应 sink；非 follow 时 stderr 只用于非零退出的错误消息；`close()` 先 `destroy()`，必要时 `destroyForcibly()` 兜底。follow 模式注册 shutdown hook。
+- `FileLogStream`：`FileTail` + 停止标志；`close()` 置位并唤醒。follow 时最后一行没有换行符的残余只在 `follow()` 正常返回后由 `flushPending()` 补出。
 
-`exec` 层新增 `RunningCommand`（由 `ProcessRunner.start(argv)` 返回）：暴露 `stdout()`/`stderr()` 读流、`waitFor()`、`destroy()`。这是本次唯一新增的基础设施。
+`start` 是阻塞调用，TUI 要放在日志线程里；`close()` 可能等待子进程退出，不要在 UI 线程直接调用。文件 follow 没有 shutdown hook，Ctrl-C 可能丢掉最后一行未换行的残余。
+
+`exec` 层新增 `RunningCommand`（由 `ProcessRunner.start(argv)` 返回）：暴露 `stdout()`/`stderr()` 读流、`waitFor()`、`destroy()`、`destroyForcibly()`。这是本次唯一新增的基础设施。
 
 ## 6. TUI
 

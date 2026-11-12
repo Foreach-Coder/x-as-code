@@ -126,7 +126,8 @@ sudo java-systemd-service-cli destroy . -y     # 非交互环境用 -y
 
 `logs` 默认读 `journalctl -u xac.<name>`。如果服务自己不往控制台打日志，在 `xac.yaml` 里写
 `logs.file: <绝对路径>`，`logs` 就改读那个文件（`-n` / `-f` 一样可用）；文件不存在时退 2。
-`xac` 不创建也不轮转这个文件。
+`xac` 不创建也不轮转这个文件。文件 follow 没有 shutdown hook，Ctrl-C 时可能丢掉最后一行
+没有换行符的残余。
 
 升级 CLI 本身：解压新版本到新目录，在新目录里再跑一次 `sudo .../bin/java-systemd-service-cli install`，链接自动改指；旧目录随后可以删除。不需要先 `uninstall`。
 
