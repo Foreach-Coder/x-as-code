@@ -113,6 +113,12 @@ jobs:
           echo "wrapper reports version: $version"
           test "$version" = "${TAG#v}"
 
+          # init: template generation must work from the packaged jar (resource inside)
+          initdir=$(mktemp -d)
+          printf '\n\n\n' | "$root/bin/java-systemd-service-cli" init "$initdir"
+          test -f "$initdir/demo/xac.yaml"
+          grep -qx 'name: demo' "$initdir/demo/xac.yaml"
+
           # launcher help lists the shell-side commands too
           "$root/bin/java-systemd-service-cli" --help | grep -q 'install'
           "$root/bin/java-systemd-service-cli" --help | grep -q 'uninstall'
