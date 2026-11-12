@@ -62,6 +62,10 @@ class SmokeIT {
     private static final String ENV_PATH = "/etc/xac/xac.demo.env";
     private static final String WANTS_LINK = "/etc/systemd/system/multi-user.target.wants/" + UNIT;
     private static final String PACKAGE_DIR = "/opt/demo";
+    private static final String FILELOG_PACKAGE_DIR = "/opt/filelog";
+    private static final String BADLOG_PACKAGE_DIR = "/opt/badlog";
+    private static final String FILELOG_UNIT = "xac.filelog.service";
+    private static final String FILELOG_LOG = "/var/log/filelog/app.log";
     private static final String CLI_JAR = "/opt/xac.jar";
     private static final String WORKDIR = "/opt/demo";
     private static final String[] LINK_NAMES = {"a", "b", "c", "d", "e", "f", "g"};
@@ -74,6 +78,8 @@ class SmokeIT {
     private static Path cliJar;
     private static Path demoJar;
     private static Path demoYaml;
+    private static Path filelogYaml;
+    private static Path badlogYaml;
     private static Path shadowUnit;
     private static Path shadowYaml;
 
@@ -85,6 +91,8 @@ class SmokeIT {
         cliJar = locateCliJar(buildDir);
         demoJar = buildDemoJar(tempDir);
         demoYaml = writeHostFile("xac.yaml", demoYamlText());
+        filelogYaml = writeHostFile("filelog-xac.yaml", filelogYamlText());
+        badlogYaml = writeHostFile("badlog-xac.yaml", badlogYamlText());
         shadowUnit = writeHostFile("xac.shadow.service", shadowUnitText());
         shadowYaml = writeHostFile("shadow-xac.yaml", shadowYamlText());
 
@@ -114,9 +122,14 @@ class SmokeIT {
         exec("mkdir", "-p", PACKAGE_DIR, "/opt/links", "/opt/elsewhere",
                 "/opt/links/a", "/opt/links/b", "/opt/links/c", "/opt/links/d",
                 "/opt/links/e", "/opt/links/f", "/opt/links/g");
+        exec("mkdir", "-p", FILELOG_PACKAGE_DIR, BADLOG_PACKAGE_DIR, "/var/log/filelog");
         copyToContainer(cliJar, CLI_JAR);
         copyToContainer(demoJar, PACKAGE_DIR + "/app.jar");
         copyToContainer(demoYaml, PACKAGE_DIR + "/xac.yaml");
+        copyToContainer(demoJar, FILELOG_PACKAGE_DIR + "/app.jar");
+        copyToContainer(filelogYaml, FILELOG_PACKAGE_DIR + "/xac.yaml");
+        copyToContainer(demoJar, BADLOG_PACKAGE_DIR + "/app.jar");
+        copyToContainer(badlogYaml, BADLOG_PACKAGE_DIR + "/xac.yaml");
 
         // 四种「目标已存在且不是指向源的软链接」的形态，供 apply 的护栏测试使用。
         exec("mkdir", "-p", "/opt/links/b/app.jar");
@@ -386,6 +399,41 @@ class SmokeIT {
         assertNotEquals("active", showValue("xac.shadow.service", "ActiveState"));
     }
 
+    @Test
+    @Order(10)
+    void logsReadConfiguredFileInsteadOfJournald() throws Exception {
+        ExecResult applied = xac("apply", FILELOG_PACKAGE_DIR);
+        assertExit(0, applied, "apply filelog");
+        waitForActive(FILELOG_UNIT, "active");
+
+        // 服务自己写的日志文件：READY 行只会出现在文件里，不会出现在 stdout/journal 里。
+        String fileContent = waitForFileText(FILELOG_LOG, "FILELOG-READY");
+        assertContains(fileContent, "FILELOG-READY");
+
+        ExecResult logs = xac("logs", FILELOG_PACKAGE_DIR, "-n", "2");
+        assertExit(0, logs, "logs from configured file");
+        String out = logs.getStdout();
+        assertAscii("file logs", out);
+        assertContains(out, "FILELOG-");
+        assertFalse(out.contains("READY pid="),
+                "file mode must not read journald output:\n" + out);
+        assertTrue(out.trim().split("\n").length <= 2,
+                "logs -n 2 must bound the line count, got:\n" + out);
+
+        ExecResult missing = xac("logs", BADLOG_PACKAGE_DIR);
+        assertExit(2, missing, "logs with missing log file");
+        assertContains(missing.getStderr(),
+                "log file not found: /var/log/filelog/missing.log");
+
+        ExecResult destroyed = xac("destroy", FILELOG_PACKAGE_DIR, "--yes");
+        assertExit(0, destroyed, "destroy filelog");
+        assertFalse(exists("/etc/systemd/system/" + FILELOG_UNIT),
+                "filelog unit must be removed");
+        assertFalse(exists("/etc/xac/xac.filelog.env"), "filelog env must be removed");
+        assertTrue(exists(FILELOG_LOG), "destroy must not remove the log file it does not own");
+        assertContains(cat(FILELOG_LOG), "FILELOG-READY");
+    }
+
     private static ExecResult xac(String... args) throws IOException, InterruptedException {
         List<String> argv = new ArrayList<String>();
         argv.add("java");
@@ -482,16 +530,37 @@ class SmokeIT {
     }
 
     private static void waitForActive(String expected) throws IOException, InterruptedException {
+        waitForActive(UNIT, expected);
+    }
+
+    private static void waitForActive(String unit, String expected)
+            throws IOException, InterruptedException {
         long deadline = System.currentTimeMillis() + 30000L;
         String last = "";
         while (System.currentTimeMillis() < deadline) {
-            last = showValue(UNIT, "ActiveState");
+            last = showValue(unit, "ActiveState");
             if (expected.equals(last)) {
                 return;
             }
             Thread.sleep(200L);
         }
-        fail("unit did not reach " + expected + ", last ActiveState=" + last);
+        fail(unit + " did not reach " + expected + ", last ActiveState=" + last);
+    }
+
+    private static String waitForFileText(String path, String needle)
+            throws IOException, InterruptedException {
+        long deadline = System.currentTimeMillis() + 15000L;
+        String last = "";
+        while (System.currentTimeMillis() < deadline) {
+            ExecResult result = exec("cat", path);
+            last = result.getExitCode() == 0 ? result.getStdout() : "";
+            if (last.contains(needle)) {
+                return last;
+            }
+            Thread.sleep(200L);
+        }
+        fail("file " + path + " did not contain [" + needle + "], last content:\n" + last);
+        return last;
     }
 
     private static String waitForPidChange(String before) throws IOException, InterruptedException {
@@ -684,6 +753,37 @@ class SmokeIT {
         yaml.append("  restart: on-failure\n");
         yaml.append("  restart-sec: 2\n");
         yaml.append("  timeout-stop-sec: 10\n");
+        return yaml.toString();
+    }
+
+    private static String filelogYamlText() {
+        StringBuilder yaml = new StringBuilder();
+        yaml.append("name: filelog\n");
+        yaml.append("description: e2e file log\n");
+        yaml.append("artifact:\n");
+        yaml.append("  jar: app.jar\n");
+        yaml.append("runtime:\n");
+        yaml.append("  java: /usr/bin/java\n");
+        yaml.append("  opts:\n");
+        yaml.append("    - -Dlog.file=").append(FILELOG_LOG).append("\n");
+        yaml.append("logs:\n");
+        yaml.append("  file: ").append(FILELOG_LOG).append("\n");
+        yaml.append("workdir: ").append(FILELOG_PACKAGE_DIR).append("\n");
+        yaml.append("lifecycle:\n");
+        yaml.append("  restart-sec: 2\n");
+        yaml.append("  timeout-stop-sec: 10\n");
+        return yaml.toString();
+    }
+
+    private static String badlogYamlText() {
+        StringBuilder yaml = new StringBuilder();
+        yaml.append("name: badlog\n");
+        yaml.append("artifact:\n");
+        yaml.append("  jar: app.jar\n");
+        yaml.append("runtime:\n");
+        yaml.append("  java: /usr/bin/java\n");
+        yaml.append("logs:\n");
+        yaml.append("  file: /var/log/filelog/missing.log\n");
         return yaml.toString();
     }
 

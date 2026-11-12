@@ -30,15 +30,16 @@ launcher 段。脚本按自身真实路径定位 jar，所以可以软链到 `/u
 ## 测试
 
 ```bash
-# 单元 + 集成测试：165 个，不需要 root / systemd / Docker
+# 单元 + 集成测试：180 个，不需要 root / systemd / Docker
 mvn -f java-systemd-service-as-code/pom.xml test
 
-# 真 systemd 端到端：9 个用例，需要 Docker
+# 真 systemd 端到端：10 个用例，需要 Docker
 mvn -f java-systemd-service-as-code/pom.xml -Pe2e verify
 ```
 
 e2e 用 Testcontainers 起一个 `--privileged` 的 Ubuntu 24.04 容器，`systemd` 作为 PID 1，覆盖
-apply/status/logs/destroy、幂等重跑、path-links 拒绝、影子 unit 拒绝、`SuccessExitStatus=143` 等场景。
+apply/status/logs/destroy、幂等重跑、path-links 拒绝、影子 unit 拒绝、`SuccessExitStatus=143`、
+以及 `logs.file` 从文件读日志等场景。
 镜像缺失时先构建：
 
 ```bash

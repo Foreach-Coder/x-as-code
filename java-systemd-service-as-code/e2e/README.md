@@ -62,7 +62,7 @@ systemd 起来后轮询 `systemctl is-system-running`，最多 60 秒，接受 `
 
 ## 覆盖的场景
 
-`SmokeIT` 按 `@Order` 顺序共享一个容器和一个 demo 服务：
+`SmokeIT` 按 `@Order` 顺序共享一个容器；`demo` 服务日志走 journald，`filelog` 服务日志由应用自己写文件：
 
 1. **apply 前 status**：退出码 1，`unit (missing)`、`env (out of sync)`、逐条 `drift:`。
 2. **path-links 护栏**：目标处是真实目录 / 外来软链接 / 普通文件 / 悬空链接时
@@ -82,6 +82,11 @@ systemd 起来后轮询 `systemctl is-system-running`，最多 60 秒，接受 `
 9. **shadow guard**：`/usr/lib/systemd/system/xac.shadow.service` 存在时，对 `name: shadow`
    的 apply 退出码 2，消息里出现 FragmentPath，且不写 `/etc/systemd/system/xac.shadow.service`
    与 env。
+10. **logs.file**：`filelog` 服务用 `-Dlog.file=/var/log/filelog/app.log` 自己写日志。
+    apply 后文件里出现 `FILELOG-READY`；`logs` 读到的是这个文件而不是 journald
+    （输出里有 `FILELOG-`、没有 journal 才有的 `READY pid=`），`-n 2` 不超过 2 行；
+    指向不存在文件的包退 2 并报 `log file not found: ...`；`destroy` 删 unit/env，
+    但**不删**那个日志文件，内容仍在。
 
 ## 注意
 
@@ -91,5 +96,5 @@ systemd 起来后轮询 `systemctl is-system-running`，最多 60 秒，接受 `
 - Testcontainers 1.19.8 内置的 docker-java 在未指定 API 版本时会退回 1.32，Docker 29
   已把最低 API 提到 1.44，连接会被拒。`SmokeIT` 先问本机 `docker version` 的服务端
   API 版本并设置系统属性 `api.version`，兼容新旧 Docker；没有 docker CLI 时保持默认。
-- 所有 `/opt/demo`、`/opt/links/*`、`/opt/elsewhere` 都只在一次性容器里创建，
-  成功后随容器一起消失。
+- 所有 `/opt/demo`、`/opt/filelog`、`/opt/badlog`、`/opt/links/*`、`/opt/elsewhere`、
+  `/var/log/filelog` 都只在一次性容器里创建，成功后随容器一起消失。

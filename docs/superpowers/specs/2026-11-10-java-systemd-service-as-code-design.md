@@ -603,7 +603,9 @@ PID 1。24.04 上 `systemctl is-system-running` 返回 `running`；249 上返回
 这两轮的事实现在由可重复的 JUnit IT 固定：`SmokeIT`（JUnit 5 + Testcontainers，源码在
 `java-systemd-service-as-code/src/test/java/io/xac/systemd/e2e/`）在一个一次性容器里跑完
 `apply / status / logs / stop / destroy`、path-links 四种护栏、重复 apply、`--dry-run`
-与 shadow guard。命令是 `mvn -f java-systemd-service-as-code/pom.xml -Pe2e verify`；
+与 shadow guard。第 10 个用例用 `-Dlog.file=...` 让示例进程自己写日志文件，验证 `logs.file`
+读到的是文件而不是 journald、`-n` 生效、缺失文件退 2、`destroy` 不删该文件。
+命令是 `mvn -f java-systemd-service-as-code/pom.xml -Pe2e verify`；
 它由 `e2e` profile 里的 failsafe 绑定到 `integration-test` / `verify`，先打 fat jar 再起容器。
 `mvn test` 不启动 Docker，也不匹配 `SmokeIT`。镜像缺失时按 `e2e/README.md` 构建。
 
