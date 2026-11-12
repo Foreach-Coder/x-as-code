@@ -825,7 +825,13 @@ public final class Comments {
 }
 
 public final class YamlCommentScanner {
-    public static Comments scan(String text);
+    public static Comments scan(String yaml);
+    public static Comments scanTemplate();                // /xac.yaml.template 作默认注释
+    public static Comments merge(Comments base, Comments override);
+    public static ApplyResult apply(String rendered, Comments comments);
+    public static ApplyResult apply(String rendered, Comments source, Comments template);
+    public static final class ApplyResult { public final String text; public final int kept;
+                                            public final int dropped; }
 }
 ```
 
@@ -847,7 +853,7 @@ Expected: COMPILATION ERROR。
 
 - [ ] **Step 3: 最小实现**
 
-逐行扫描：维护 `Deque<IndentNode>`（缩进 → 路径段）；空行清空“待挂”注释块；行内 `#` 只有在引号外且前面是空白时才算注释；`- ` 开头按值生成 `key[value]` 段。`YamlCommentScanner.apply(String yaml, Comments comments)` 在 `SpecWriter.render(spec)` 的输出上合并注释，产出最终文本：每行前插入 `leading`，行尾追加 ` # inline`；`SpecWriter` 本身不消费 `Comments`。
+逐行扫描：维护 `Deque<IndentNode>`（缩进 → 路径段）；空行把“待挂”注释块冲进 `orphans`；行内 `#` 只有在引号外且前面是空白时才算注释；`- ` 开头按值生成 `key[value]` 段。`apply(String rendered, Comments comments)` 在 `SpecWriter.render(spec)` 的输出上插入前置注释行、追加行尾注释，返回 `ApplyResult{text, kept, dropped}`；三参重载用 `scanTemplate()` 打底、用户注释覆盖。`SpecWriter` 本身不消费 `Comments`；注释文本做换行转义。
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -965,7 +971,7 @@ Expected: COMPILATION ERROR。
 
 - `EditorView`：渲染字段行（path 左、值右，截断），底部两行提示 `enter edit  s save  u undo  q cancel`，错误行标红（Canvas 不带颜色时用 `!` 前缀）。
 - `EditScreen`：`focus` 整数、`mode {BROWSE, EDIT_SCALAR, EDIT_LINES}`；标量编辑复用一个 `StringBuilder` 缓冲（`CHAR` 追加、`BACKSPACE` 删、`ENTER` 提交、`ESC` 取消）；列表/map 进入 `EDIT_LINES`：`↑↓` 选行、`a` 追加空行、`x` 删行、`ENTER` 编辑该行为标量、`ESC` 返回。
-- `SaveFlow.prepare`：`model.validate()` → 错误直接返回；否则 `YamlCommentScanner.apply(SpecWriter.render(model.toSpec()), comments)` 产出最终文本 → `LineDiff.diff(old, new)` → 比较 `mtime+size` 生成提示；`commit` 调 `SpecWriter.save(yamlFile, text)`。
+- `SaveFlow.prepare`：`model.validate()` → 错误直接返回；否则 `YamlCommentScanner.apply(SpecWriter.render(model.toSpec()), comments, YamlCommentScanner.scanTemplate())` 产出最终文本（`ApplyResult.dropped` 进保存前提示）→ `LineDiff.diff(old, new)` → 比较 `mtime+size` 生成提示；`commit` 调 `SpecWriter.save(yamlFile, text)`。
 - `TuiApp`：`e` 进入编辑（先 `ServicePackage.open` 已持有 spec；同时读原文件文本与注释），编辑中暂停状态轮询；保存成功 → 重新 `ServicePackage.open` 重建状态与日志（`LogStream` 重建）；`q` 脏数据二次确认（`y` 放弃）。
 
 - [ ] **Step 4: 跑测试确认通过**

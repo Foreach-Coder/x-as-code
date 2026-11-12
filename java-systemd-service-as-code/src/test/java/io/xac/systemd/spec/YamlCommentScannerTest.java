@@ -373,18 +373,28 @@ class YamlCommentScannerTest {
 
     @Test
     void mergedTextStillLoadsIntoTheSameSpec() {
-        String old = "# title\nname: demo\n"
+        String old = "# title\nname: demo\ndescription: demo service\n"
                 + "artifact:\n  jar: app.jar  # jar\n"
                 + "runtime:\n  java: /usr/bin/java\n  opts:\n    - -Xmx512m  # heap\n"
                 + "env:\n  A: \"1\"  # a\n"
-                + "path-links:\n  - ./conf:/opt/conf  # conf\n";
+                + "properties:\n  k: v  # prop\n"
+                + "workdir: run\n"
+                + "path-links:\n  - ./conf:/opt/conf  # conf\n"
+                + "logs:\n  file: /var/log/demo/app.log  # log\n"
+                + "lifecycle:\n  auto-start: false  # no boot\n"
+                + "  restart: always\n  restart-sec: 30\n  timeout-stop-sec: 90\n";
         String rendered = SpecWriter.render(builder()
                 .name("demo")
+                .description("demo service")
                 .jar("app.jar")
                 .java("/usr/bin/java")
                 .opts(Arrays.asList("-Xmx512m"))
                 .env(map("A", "1"))
+                .properties(map("k", "v"))
+                .workdir("run")
                 .pathLinks(Arrays.asList("./conf:/opt/conf"))
+                .logFile("/var/log/demo/app.log")
+                .lifecycle(new Lifecycle(Boolean.FALSE, "always", 30, 90))
                 .build());
 
         YamlCommentScanner.ApplyResult result = YamlCommentScanner.apply(rendered,
@@ -398,10 +408,20 @@ class YamlCommentScannerTest {
         SpecLoader.Result fromRendered = load(rendered);
         assertTrue(fromRendered.violations.isEmpty(), fromRendered.violations.toString());
         assertEquals(fromRendered.spec.name, fromMerged.spec.name);
+        assertEquals(fromRendered.spec.description, fromMerged.spec.description);
         assertEquals(fromRendered.spec.jar, fromMerged.spec.jar);
+        assertEquals(fromRendered.spec.java, fromMerged.spec.java);
         assertEquals(fromRendered.spec.opts, fromMerged.spec.opts);
         assertEquals(fromRendered.spec.env, fromMerged.spec.env);
+        assertEquals(fromRendered.spec.properties, fromMerged.spec.properties);
+        assertEquals(fromRendered.spec.workdir, fromMerged.spec.workdir);
         assertEquals(fromRendered.spec.pathLinks, fromMerged.spec.pathLinks);
+        assertEquals(fromRendered.spec.logFile, fromMerged.spec.logFile);
+        assertEquals(fromRendered.spec.lifecycle.autoStart, fromMerged.spec.lifecycle.autoStart);
+        assertEquals(fromRendered.spec.lifecycle.restart, fromMerged.spec.lifecycle.restart);
+        assertEquals(fromRendered.spec.lifecycle.restartSec, fromMerged.spec.lifecycle.restartSec);
+        assertEquals(fromRendered.spec.lifecycle.timeoutStopSec,
+                fromMerged.spec.lifecycle.timeoutStopSec);
     }
 
     @Test
@@ -418,7 +438,7 @@ class YamlCommentScannerTest {
         YamlCommentScanner.ApplyResult first =
                 YamlCommentScanner.apply(rendered, YamlCommentScanner.scan(old));
         YamlCommentScanner.ApplyResult second =
-                YamlCommentScanner.apply(rendered, YamlCommentScanner.scan(first.text));
+                YamlCommentScanner.apply(first.text, YamlCommentScanner.scan(first.text));
 
         assertEquals(first.text, second.text);
         assertEquals(first.kept, second.kept);
@@ -475,5 +495,272 @@ class YamlCommentScannerTest {
 
         List<String> keys = new java.util.ArrayList<String>(comments.inline.keySet());
         assertEquals(Collections.singletonList("path-links[./conf:/opt/conf]"), keys);
+    }
+
+    // --------------------------------------------------------------- template
+
+    @Test
+    void scanTemplateAttributesEveryProseBlockToItsSection() {
+        Comments template = YamlCommentScanner.scanTemplate();
+
+        assertTrue(template.inline.isEmpty(), template.inline.toString());
+        assertTrue(template.orphans.isEmpty(), template.orphans.toString());
+        assertTrue(joinLines(template.leading.get("name")).contains("single source of truth"),
+                template.leading.toString());
+        assertEquals("xac.yaml -- service definition for java-systemd-service-as-code.",
+                template.leading.get("name").get(0));
+        assertTrue(joinLines(template.leading.get("artifact.jar")).contains("Application jar"),
+                template.leading.toString());
+        assertTrue(joinLines(template.leading.get("runtime.java")).contains("Java executable"),
+                template.leading.toString());
+        assertTrue(joinLines(template.leading.get("runtime.opts")).contains("JVM arguments"),
+                template.leading.toString());
+        assertTrue(joinLines(template.leading.get("env")).contains("Environment variables"),
+                template.leading.toString());
+        assertTrue(joinLines(template.leading.get("properties")).contains("System properties"),
+                template.leading.toString());
+        assertTrue(joinLines(template.leading.get("workdir")).contains("Working directory"),
+                template.leading.toString());
+        assertTrue(joinLines(template.leading.get("path-links")).contains("Symlinks created"),
+                template.leading.toString());
+        assertTrue(joinLines(template.leading.get("logs")).contains("journald"),
+                template.leading.toString());
+        assertTrue(joinLines(template.leading.get("lifecycle.auto-start"))
+                .contains("starting at boot"), template.leading.toString());
+    }
+
+    @Test
+    void templateCommentsSurviveFirstSaveOfFullSpec() {
+        String rendered = SpecWriter.render(fullSpec());
+        Comments template = YamlCommentScanner.scanTemplate();
+
+        YamlCommentScanner.ApplyResult result =
+                YamlCommentScanner.apply(rendered, Comments.empty(), template);
+
+        assertTrue(result.text.contains("single source of truth"), result.text);
+        assertTrue(result.text.contains("Environment variables"), result.text);
+        assertTrue(result.text.contains("System properties"), result.text);
+        assertTrue(result.text.contains("Working directory"), result.text);
+        assertTrue(result.text.contains("Symlinks created"), result.text);
+        assertTrue(result.text.contains("journald"), result.text);
+        assertTrue(result.text.contains("starting at boot"), result.text);
+        assertEquals(0, result.dropped);
+        assertEquals(template.total(), result.kept);
+        assertSameSpec(rendered, result.text);
+    }
+
+    @Test
+    void sourceCommentsOverrideTemplateOnSamePath() {
+        String rendered = SpecWriter.render(fullSpec());
+        Comments source = YamlCommentScanner.scan("# my header\nname: demo  # mine\n");
+
+        YamlCommentScanner.ApplyResult result =
+                YamlCommentScanner.apply(rendered, source, YamlCommentScanner.scanTemplate());
+
+        assertTrue(result.text.contains("# my header"), result.text);
+        assertFalse(result.text.contains("single source of truth"), result.text);
+        assertEquals(1, count(result.text, "# my header"), result.text);
+        assertEquals(1, count(result.text, "# mine"), result.text);
+        assertTrue(result.text.contains("Application jar"), result.text);
+        assertEquals(0, result.dropped);
+        assertSameSpec(rendered, result.text);
+    }
+
+    @Test
+    void templateDefaultsAreNotCountedAsDropped() {
+        String rendered = minimalRender();
+        Comments template = YamlCommentScanner.scanTemplate();
+
+        YamlCommentScanner.ApplyResult noUserComments =
+                YamlCommentScanner.apply(rendered, Comments.empty(), template);
+        assertEquals(0, noUserComments.dropped);
+        assertTrue(noUserComments.kept > 0);
+        assertTrue(noUserComments.kept < template.total(),
+                "sections missing from the spec are simply not rendered");
+
+        Comments userCommentOnMissingField =
+                YamlCommentScanner.scan("name: demo\n# lost\ndescription: d\n");
+        YamlCommentScanner.ApplyResult withUserComments =
+                YamlCommentScanner.apply(rendered, userCommentOnMissingField, template);
+        assertEquals(1, withUserComments.dropped);
+    }
+
+    // ------------------------------------------------------- duplicate values
+
+    @Test
+    void duplicateListValueInlineCommentsBecomeOrphans() {
+        String old = "path-links:\n"
+                + "  - ./c:/opt/c  # one\n"
+                + "  - ./c:/opt/c  # two\n";
+        Comments comments = YamlCommentScanner.scan(old);
+
+        assertEquals("one", comments.inline.get("path-links[./c:/opt/c]"));
+        assertEquals(1, comments.orphans.size(), comments.orphans.toString());
+        assertTrue(comments.orphans.get(0).contains(
+                "duplicate comment for path-links[./c:/opt/c]"), comments.orphans.get(0));
+        assertTrue(comments.orphans.get(0).contains("two"), comments.orphans.get(0));
+
+        String rendered = SpecWriter.render(builder()
+                .name("demo")
+                .jar("app.jar")
+                .java("/usr/bin/java")
+                .pathLinks(Arrays.asList("./c:/opt/c", "./c:/opt/c"))
+                .build());
+        YamlCommentScanner.ApplyResult result = YamlCommentScanner.apply(rendered, comments);
+        assertEquals(1, result.kept);
+        assertEquals(1, result.dropped);
+        assertEquals(1, count(result.text, "# one"), result.text);
+        assertEquals(0, count(result.text, "# two"), result.text);
+        assertSameSpec(rendered, result.text);
+    }
+
+    @Test
+    void duplicateListValueLeadingBlocksBecomeOrphans() {
+        String old = "path-links:\n"
+                + "  # first\n"
+                + "  - ./c:/opt/c\n"
+                + "  # second\n"
+                + "  - ./c:/opt/c\n";
+        Comments comments = YamlCommentScanner.scan(old);
+
+        assertEquals(Collections.singletonList("first"),
+                comments.leading.get("path-links[./c:/opt/c]"));
+        assertEquals(1, comments.orphans.size(), comments.orphans.toString());
+        assertTrue(comments.orphans.get(0).contains(
+                "duplicate comment for path-links[./c:/opt/c]"), comments.orphans.get(0));
+        assertTrue(comments.orphans.get(0).contains("second"), comments.orphans.get(0));
+
+        String rendered = SpecWriter.render(builder()
+                .name("demo")
+                .jar("app.jar")
+                .java("/usr/bin/java")
+                .pathLinks(Arrays.asList("./c:/opt/c", "./c:/opt/c"))
+                .build());
+        YamlCommentScanner.ApplyResult result = YamlCommentScanner.apply(rendered, comments);
+        assertEquals(1, result.kept);
+        assertEquals(1, result.dropped);
+    }
+
+    // ------------------------------------------------------------- injection
+
+    @Test
+    void programmaticCommentTextCannotSpanLines() {
+        String rendered = SpecWriter.render(builder()
+                .name("demo")
+                .description("safe")
+                .jar("app.jar")
+                .java("/usr/bin/java")
+                .build());
+
+        Comments inlineInjection = new Comments(
+                map("name", "note\ndescription: evil"),
+                Collections.<String, List<String>>emptyMap(),
+                Collections.<String>emptyList());
+        YamlCommentScanner.ApplyResult inlineResult =
+                YamlCommentScanner.apply(rendered, inlineInjection);
+        assertFalse(inlineResult.text.contains("\ndescription: evil"),
+                inlineResult.text);
+        assertTrue(inlineResult.text.contains("\\ndescription: evil"), inlineResult.text);
+        assertSameSpec(rendered, inlineResult.text);
+
+        Map<String, List<String>> leading = new LinkedHashMap<String, List<String>>();
+        leading.put("name", Collections.singletonList("note\u2028description: evil"));
+        Comments leadingInjection = new Comments(
+                Collections.<String, String>emptyMap(), leading,
+                Collections.<String>emptyList());
+        YamlCommentScanner.ApplyResult leadingResult =
+                YamlCommentScanner.apply(rendered, leadingInjection);
+        assertFalse(leadingResult.text.contains("\u2028"), leadingResult.text);
+        assertTrue(leadingResult.text.contains("\\u2028"), leadingResult.text);
+        assertSameSpec(rendered, leadingResult.text);
+    }
+
+    @Test
+    void lineSeparatorsInSourceFileRoundTrip() {
+        String[] separators = {"\r", "\u0085", "\u2028", "\u2029"};
+        for (String separator : separators) {
+            String old = "name: demo" + separator + "description: d  # note\n"
+                    + "artifact:\n  jar: app.jar\nruntime:\n  java: /usr/bin/java\n";
+            String label = "separator U+" + Integer.toHexString(separator.charAt(0));
+
+            SpecLoader.Result source = load(old);
+            assertTrue(source.violations.isEmpty(), label + ": " + source.violations);
+            assertEquals("d", source.spec.description, label);
+            assertEquals("note",
+                    YamlCommentScanner.scan(old).inline.get("description"), label);
+
+            String rendered = SpecWriter.render(source.spec);
+            YamlCommentScanner.ApplyResult result =
+                    YamlCommentScanner.apply(rendered, YamlCommentScanner.scan(old));
+            assertSameSpec(rendered, result.text);
+        }
+    }
+
+    @Test
+    void scanStripsByteOrderMark() {
+        Comments comments = YamlCommentScanner.scan("\uFEFF# header\nname: demo\n");
+
+        assertEquals(Collections.singletonList("header"), comments.leading.get("name"));
+        assertTrue(comments.orphans.isEmpty(), comments.orphans.toString());
+    }
+
+    @Test
+    void applyingSameCommentsToMergedTextDoesNotDuplicate() {
+        String old = "# title\nname: demo  # named\n\nartifact:\n  # jar doc\n  jar: app.jar\n";
+        String rendered = SpecWriter.render(builder()
+                .name("demo")
+                .jar("app.jar")
+                .java("/usr/bin/java")
+                .build());
+        Comments comments = YamlCommentScanner.scan(old);
+
+        YamlCommentScanner.ApplyResult first = YamlCommentScanner.apply(rendered, comments);
+        YamlCommentScanner.ApplyResult second = YamlCommentScanner.apply(first.text, comments);
+
+        assertEquals(first.text, second.text);
+        assertEquals(first.kept, second.kept);
+        assertEquals(0, second.dropped);
+        assertEquals(1, count(second.text, "# title"), second.text);
+        assertEquals(1, count(second.text, "# jar doc"), second.text);
+        assertEquals(1, count(second.text, "# named"), second.text);
+    }
+
+    // ---------------------------------------------------------------- helpers
+
+    private ServiceSpec fullSpec() {
+        return builder()
+                .name("demo")
+                .description("demo service")
+                .jar("app.jar")
+                .java("/usr/bin/java")
+                .opts(Arrays.asList("-Xmx512m"))
+                .env(map("A", "1"))
+                .properties(map("k", "v"))
+                .workdir("run")
+                .pathLinks(Arrays.asList("./conf:/opt/conf"))
+                .logFile("/var/log/demo/app.log")
+                .lifecycle(new Lifecycle(Boolean.TRUE, "on-failure", 5, 60))
+                .build();
+    }
+
+    private void assertSameSpec(String rendered, String text) {
+        SpecLoader.Result loaded = load(text);
+        assertTrue(loaded.violations.isEmpty(), loaded.violations.toString());
+        assertEquals(rendered, SpecWriter.render(loaded.spec),
+                "comments must not change the loaded spec");
+    }
+
+    private static String joinLines(List<String> lines) {
+        if (lines == null) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder();
+        for (String line : lines) {
+            if (out.length() > 0) {
+                out.append('\n');
+            }
+            out.append(line);
+        }
+        return out.toString();
     }
 }

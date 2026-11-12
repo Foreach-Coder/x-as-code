@@ -13,8 +13,12 @@ import java.util.Map;
  * {@code runtime.opts[-Xmx512m]}、{@code path-links[./logs:/applog/demo]}、{@code env.KEY}。
  * 列表项按<strong>值</strong>索引，因此列表重排后注释仍跟着对应元素走。</p>
  *
- * <p>{@link #orphans} 保存无法归属的注释，每条形如 {@code line 7: text}，供编辑器在 diff 前
- * 提示「N 条注释无法定位」。</p>
+ * <p>{@link #orphans} 保存无法归属的注释，每条形如 {@code line 7: text}；重复列表值的第二份
+ * 注释也记在这里（{@code duplicate comment for <path>: text}），供编辑器在 diff 前提示
+ * 「N 条注释无法定位」。</p>
+ *
+ * <p>注释文本在扫描时已 trim；写入前 {@link YamlCommentScanner#apply} 会把 CR/LF/NEL/LS/PS
+ * 转义成可见文本，因此这里的值可以来自程序化构造，不会注入额外配置行。</p>
  */
 public final class Comments {
 
