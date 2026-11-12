@@ -21,6 +21,7 @@
 10. 目标平台定案 **Ubuntu 24.04 / systemd 255**，移出 CentOS 7 兼容
 11. `--dry-run` 先过预检再打印（§6.2）：预检不通过按输入错误退 2
 12. `destroy` 的 `stop`/`disable`/`reload` 失败只记警告（§6.5）：destroy 的目标是文件消失
+13. 交付形态改为 **`tar.gz` 发行包**（`bin/` 启动脚本 + `libs/` fat jar），release 只发这个包（§8）
 
 ## 1. 背景与目标
 
@@ -599,8 +600,15 @@ CMD：本机缓存的镜像元数据可能是 `ENTRYPOINT ["/bin/sh"]`，不覆�
 ## 8. 构建与交付
 
 - Maven，`maven-compiler-plugin` 配 `<release>8</release>`
-- maven-shade-plugin 打 fat jar
-- 产物：`java-systemd-service-as-code/target/java-systemd-service-cli-<ver>.jar`
+- maven-shade-plugin 打 fat jar；maven-assembly-plugin 打发行包（必须排在 shade 之后，包里才是 fat jar）
+- 产物：
+  - `java-systemd-service-as-code/target/java-systemd-service-cli-<ver>.jar`（可直接 `java -jar`）
+  - `java-systemd-service-as-code/target/java-systemd-service-cli-<ver>.tar.gz`，顶层目录
+    `java-systemd-service-cli-<ver>/` 下 `bin/java-systemd-service-cli`（POSIX sh，`0755`）与
+    `libs/java-systemd-service-cli-<ver>.jar`（`0644`）
+- 入口脚本按 `XAC_JAVA` → `$JAVA_HOME/bin/java` → `PATH` 选 JVM，按自身真实路径定位 `../libs/*.jar`，
+  再 `exec java -jar ... "$@"`；启动器自身的失败（找不到 jar 或 JVM）退出 1，其余退出码透传 CLI
+- release 只发布 `tar.gz`；`--version` 必须等于 tag 去掉 `v` 前缀（CI 里解压后实际跑一次校验）
 - 仓库：`D:\Develop\xac` 为 monorepo 根，`.git` 初始化在根
 
 ## 9. 错误与诊断

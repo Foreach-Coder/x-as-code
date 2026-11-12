@@ -1,4 +1,4 @@
-﻿# AGENTS.md
+# AGENTS.md
 
 本文件是本仓库的长期约定，对任何在本仓库工作的 agent 生效（人同样适用）。
 
@@ -27,7 +27,8 @@
   测试代码同样按 `--release 8` 编译。
 - 运行期依赖只有 picocli 4.7.6 与 snakeyaml 2.2；测试用 JUnit 5.10.2 与 Testcontainers
   1.19.8（`org.testcontainers:testcontainers`、`org.testcontainers:junit-jupiter`）；
-  打包用 maven-shade-plugin，e2e 用 maven-failsafe-plugin。不新增其他依赖，不追大版本。
+  打包用 maven-shade-plugin 与 maven-assembly-plugin，e2e 用 maven-failsafe-plugin。
+  不新增其他依赖，不追大版本。
 - 外部命令一律 `ProcessBuilder` + `List<String>` 传 argv，**不经过 shell**，不做字符串拼接。
 - 渲染必须确定性：同样的 `xac.yaml` 产出逐字节相同的 unit 与 env 文件。
 - 运行时输出（stdout/stderr、`--help`、校验与警告）统一英文 ASCII；注释与文档正文不限。
@@ -38,9 +39,11 @@
 # 全部单元/集成测试（约 10 秒，不需要 root、不需要 systemd）
 mvn -f java-systemd-service-as-code/pom.xml test
 
-# 打包成 fat jar
+# 打包：fat jar + 发行包
 mvn -f java-systemd-service-as-code/pom.xml -DskipTests package
 #   → java-systemd-service-as-code/target/java-systemd-service-cli-0.1.0.jar
+#   → java-systemd-service-as-code/target/java-systemd-service-cli-0.1.0.tar.gz
+#      解压后 java-systemd-service-cli-0.1.0/{bin/java-systemd-service-cli, libs/*.jar}
 
 # 真 systemd e2e（Testcontainers；需要 Docker + 镜像 xac-e2e:24.04，见 e2e/README.md）
 mvn -f java-systemd-service-as-code/pom.xml -Pe2e verify

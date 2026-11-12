@@ -25,7 +25,7 @@ sudo java -jar xac.jar apply .
 | 版本 | `v0.1.0` |
 | 目标平台 | Ubuntu 24.04 + systemd 255（不支持 CentOS 7 / systemd 219） |
 | 运行要求 | root、systemd；目标机只需 JRE 8+ |
-| 产物 | 单文件 fat jar，约 `0.8 MB` |
+| 产物 | 发行包 `java-systemd-service-cli-0.1.0.tar.gz`（`bin/` 启动脚本 + `libs/` fat jar，约 `0.75 MB`） |
 | 测试 | 156 个单元/集成测试；9 个 Testcontainers 端到端用例（真 systemd 255） |
 
 ## 快速开始
@@ -34,8 +34,12 @@ sudo java -jar xac.jar apply .
 
 ```bash
 mvn -f java-systemd-service-as-code/pom.xml -DskipTests package
-# → java-systemd-service-as-code/target/java-systemd-service-cli-0.1.0.jar
+# → java-systemd-service-as-code/target/java-systemd-service-cli-0.1.0.tar.gz
+#    解压后：java-systemd-service-cli-0.1.0/{bin/java-systemd-service-cli, libs/java-systemd-service-cli-0.1.0.jar}
+#    同目录仍有可直接 java -jar 的 fat jar
 ```
+
+发行包里的 `bin/java-systemd-service-cli` 是 POSIX `sh` 启动脚本：先按 `XAC_JAVA` → `$JAVA_HOME/bin/java` → `PATH` 的顺序找 JVM，再 `exec java -jar ../libs/*.jar "$@"`。脚本按自身真实路径定位 jar，所以可以软链到 `/usr/local/bin`。
 
 ### 2. 在目标机上准备包目录
 
@@ -46,8 +50,17 @@ mvn -f java-systemd-service-as-code/pom.xml -DskipTests package
 ├── app.jar
 ├── conf/            # 可选，供 path-links 使用
 └── xac.yaml
-/opt/xac.jar         # 把 fat jar 拷到服务器
 ```
+
+把发行包解压到目标机（例如 `/opt/xac`），得到一个入口脚本和一个 jar：
+
+```
+/opt/xac/
+├── bin/java-systemd-service-cli      # 0755
+└── libs/java-systemd-service-cli-0.1.0.jar
+```
+
+可选：`ln -s /opt/xac/bin/java-systemd-service-cli /usr/local/bin/java-systemd-service-cli`，之后直接敲 `java-systemd-service-cli`。
 
 `xac.yaml` 示例：
 
@@ -87,10 +100,10 @@ lifecycle:
 
 ```bash
 cd /opt/demo
-sudo java -jar /opt/xac.jar apply   .          # 安装/更新并重启
-     java -jar /opt/xac.jar status  .          # 只读，0=一致 1=漂移
-     java -jar /opt/xac.jar logs    . -n 100 -f
-sudo java -jar /opt/xac.jar destroy . -y       # 停止并清理
+sudo /opt/xac/bin/java-systemd-service-cli apply   .          # 安装/更新并重启
+     /opt/xac/bin/java-systemd-service-cli status  .          # 只读，0=一致 1=漂移
+     /opt/xac/bin/java-systemd-service-cli logs    . -n 100 -f
+sudo /opt/xac/bin/java-systemd-service-cli destroy . -y       # 停止并清理
 ```
 
 `apply` 和 `destroy` 支持 `--dry-run`，只打印将执行的动作。
@@ -155,10 +168,10 @@ e2e 用 Testcontainers 起一个 `--privileged` 的 Ubuntu 24.04 容器，`syste
 
 推一个 `v*` tag 即触发 [`.github/workflows/publish.yml`](.github/workflows/publish.yml)：
 
-1. 跑 `mvn test`、打包 fat jar；
-2. 创建 GitHub release（已存在则复用，不覆盖附件）；
+1. 跑 `mvn test`、打包 fat jar 与 `tar.gz`，并解压发行包跑一次 `--version` 自检；
+2. 创建 GitHub release（已存在则复用，缺 `tar.gz` 附件时补传，不覆盖同名附件），附件是 `tar.gz`；
 3. 把分支与 tag 镜像到 GitCode（`git push --prune`，不是 `--mirror`，避免把 `refs/remotes/*` 推过去）；
-4. 在 GitCode 创建同名 release，并用 Release API 上传同一个 jar，最后校验 `sha256`。
+4. 在 GitCode 创建同名 release，并用 Release API 上传同一个 `tar.gz`，最后校验 `sha256`。
 
 `push master` 只做第 3 步（镜像），不发版。
 
@@ -175,7 +188,7 @@ git push --prune "https://foreach1991:$env:GITCODE_TOKEN@gitcode.com/foreach1991
   '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'
 pwsh -NoProfile -File .github/scripts/sync-gitcode-release.ps1 `
   -Owner foreach1991 -Repo x-as-code -Tag v0.1.0 `
-  -Asset java-systemd-service-as-code/target/java-systemd-service-cli-0.1.0.jar
+  -Asset java-systemd-service-as-code/target/java-systemd-service-cli-0.1.0.tar.gz
 ```
 
 ## 文档
