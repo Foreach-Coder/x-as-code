@@ -1,0 +1,63 @@
+#!/bin/sh
+# java-systemd-service-cli - launcher for the xac CLI.
+#
+# Expected layout (the release tarball uses exactly this):
+#   bin/java-systemd-service-cli     this script
+#   libs/java-systemd-service-cli-<version>.jar
+#
+# The jar is looked up next to this script's real location, so installing a
+# symlink such as /usr/local/bin/java-systemd-service-cli keeps working.
+#
+# JVM selection, first match wins:
+#   XAC_JAVA    explicit java executable
+#   JAVA_HOME   $JAVA_HOME/bin/java
+#   PATH        java
+#
+# Exit codes mirror the CLI: this wrapper only exits non-zero on its own
+# failures (missing jar or JVM), otherwise the CLI's code is passed through.
+set -eu
+
+log() {
+    printf 'java-systemd-service-cli: %s\n' "$*" >&2
+}
+
+# Resolve the script's real directory so ../libs is correct even when this
+# file is reached through a symlink.
+self=$0
+while [ -h "$self" ]; do
+    dir=$(cd -P "$(dirname "$self")" && pwd)
+    target=$(readlink "$self")
+    case $target in
+        /*) self=$target ;;
+        *) self=$dir/$target ;;
+    esac
+done
+bin_dir=$(cd -P "$(dirname "$self")" && pwd)
+libs_dir=$bin_dir/../libs
+
+jar=
+for candidate in "$libs_dir"/*.jar; do
+    if [ -f "$candidate" ]; then
+        jar=$candidate
+        break
+    fi
+done
+if [ -z "$jar" ]; then
+    log "no jar found in $libs_dir"
+    exit 1
+fi
+
+if [ -n "${XAC_JAVA:-}" ]; then
+    java=$XAC_JAVA
+elif [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+    java=$JAVA_HOME/bin/java
+else
+    java=java
+fi
+
+if ! command -v "$java" >/dev/null 2>&1; then
+    log "java executable not found: $java (set XAC_JAVA or JAVA_HOME)"
+    exit 1
+fi
+
+exec "$java" -jar "$jar" "$@"

@@ -76,6 +76,27 @@
           </execution>
         </executions>
       </plugin>
+      <!-- 发行包：java-systemd-service-cli-<version>.tar.gz
+           顶层目录下 bin/java-systemd-service-cli 与 libs/java-systemd-service-cli-<version>.jar。
+           必须声明在 shade 之后，确保打进包里的是 shade 产出的 fat jar。 -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-assembly-plugin</artifactId>
+        <version>3.7.1</version>
+        <executions>
+          <execution>
+            <id>dist</id>
+            <phase>package</phase>
+            <goals><goal>single</goal></goals>
+            <configuration>
+              <appendAssemblyId>false</appendAssemblyId>
+              <descriptors>
+                <descriptor>src/assembly/dist.xml</descriptor>
+              </descriptors>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
     </plugins>
   </build>
 
