@@ -89,49 +89,4 @@ public final class StatusResult {
     public boolean healthy() {
         return drift().isEmpty();
     }
-
-    public String format() {
-        StringBuilder out = new StringBuilder();
-        out.append("service: ").append(service).append('\n');
-        out.append("package: ").append(packageDir).append('\n');
-        out.append("unit: ").append(unitPath).append(unitState()).append('\n');
-        if (!envConfigured) {
-            out.append("env: (not configured)\n");
-        } else if (!envReadable) {
-            out.append("env: (cannot verify: root required)\n");
-        } else {
-            out.append("env: ").append(envPath)
-                    .append(envInSync ? " (in sync)" : " (out of sync)").append('\n');
-        }
-        out.append("active: ").append(value("ActiveState", "unknown"));
-        String sub = show.get("SubState");
-        if (sub != null && !sub.isEmpty()) {
-            out.append(" (").append(sub).append(')');
-        }
-        String since = show.get("ActiveEnterTimestamp");
-        if (since != null && !since.isEmpty()) {
-            out.append(" since ").append(since);
-        }
-        out.append('\n');
-        out.append("pid: ").append(value("MainPID", "unknown")).append('\n');
-        out.append("auto-start: ")
-                .append(queryOk ? (enabled ? "enabled" : "disabled") : "unknown")
-                .append('\n');
-        for (String line : drift()) {
-            out.append("drift: ").append(line).append('\n');
-        }
-        return out.toString();
-    }
-
-    private String unitState() {
-        if (unitInSync) {
-            return " (in sync)";
-        }
-        return unitInstalled ? " (out of sync)" : " (missing)";
-    }
-
-    private String value(String key, String fallback) {
-        String value = show.get(key);
-        return value == null || value.isEmpty() ? fallback : value;
-    }
 }

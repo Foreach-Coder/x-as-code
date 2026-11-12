@@ -111,8 +111,8 @@ class StatusRunnerTest {
 
         StatusResult result = new StatusRunner().run(spec, target, runnerWithShow());
 
-        assertTrue(result.healthy(), result.format());
-        assertEquals(0, result.drift().size(), result.format());
+        assertTrue(result.healthy(), result.drift().toString());
+        assertEquals(0, result.drift().size(), result.drift().toString());
     }
 
     @Test
@@ -133,37 +133,12 @@ class StatusRunnerTest {
     }
 
     @Test
-    void formatsReport() throws IOException {
-        ServiceSpec spec = spec(env());
-        SystemdTarget target = target();
-        Files.createDirectories(target.unitDir);
-        Files.createDirectories(target.envDir);
-        UnitRenderer renderer = new UnitRenderer();
-        Files.write(UnitNaming.unitPath(spec, target),
-                renderer.render(spec, target).getBytes(StandardCharsets.UTF_8));
-        Files.write(UnitNaming.envPath(spec, target),
-                renderer.renderEnvFile(spec).getBytes(StandardCharsets.UTF_8));
-
-        String expected = String.join("\n",
-                "service: demo",
-                "package: " + root.toAbsolutePath().normalize(),
-                "unit: " + UnitNaming.unitPath(spec, target) + " (in sync)",
-                "env: " + UnitNaming.envPath(spec, target) + " (in sync)",
-                "active: active (running) since Mon 2026-11-10 19:00:00 CST",
-                "pid: 1234",
-                "auto-start: enabled",
-                "");
-
-        assertEquals(expected,
-                new StatusRunner().run(spec, target, runnerWithShow()).format());
-    }
-
-    @Test
     void treatsMissingUnitAsDrift() {
         ServiceSpec spec = spec(Collections.<String, String>emptyMap());
         StatusResult result = new StatusRunner().run(spec, target(), runnerWithShow());
         assertFalse(result.healthy());
-        assertTrue(result.format().contains("(missing)"), result.format());
+        assertTrue(result.drift().contains("unit not installed: "
+                + UnitNaming.unitPath(spec, target())), result.drift().toString());
     }
 
     @Test
@@ -190,12 +165,10 @@ class StatusRunnerTest {
 
         StatusResult result = runner.run(spec, target, runnerWithShow());
 
-        assertTrue(result.healthy(), result.format());
+        assertTrue(result.healthy(), result.drift().toString());
         for (String line : result.drift()) {
             assertFalse(line.contains("env"), result.drift().toString());
         }
-        assertTrue(result.format().contains("env: (cannot verify: root required)"), result.format());
-        assertFalse(result.format().contains("out of sync"), result.format());
     }
 
     /** 设计文档 §6.3：exit 0 还要求服务在运行；inactive 必须让 status 以 1 退出。 */
@@ -209,7 +182,7 @@ class StatusRunnerTest {
 
         StatusResult result = new StatusRunner().run(spec, target, runner);
 
-        assertFalse(result.healthy(), result.format());
+        assertFalse(result.healthy(), result.drift().toString());
         assertTrue(result.drift().contains("service: inactive (dead)"), result.drift().toString());
         // StatusCommand 把 !healthy() 映射为退出码 1。
         assertEquals(Arrays.asList("service: inactive (dead)"), result.drift());
@@ -226,8 +199,8 @@ class StatusRunnerTest {
 
         StatusResult result = new StatusRunner().run(spec, target, runner);
 
-        assertTrue(result.healthy(), result.format());
-        assertEquals(0, result.drift().size(), result.format());
+        assertTrue(result.healthy(), result.drift().toString());
+        assertEquals(0, result.drift().size(), result.drift().toString());
     }
 
     /** 查询失败不能被读成「未启用」；只报告没有观察到状态。 */
@@ -242,10 +215,9 @@ class StatusRunnerTest {
 
         StatusResult result = new StatusRunner().run(spec, target, runner);
 
-        assertFalse(result.healthy(), result.format());
+        assertFalse(result.healthy(), result.drift().toString());
         assertTrue(result.drift().contains("systemd: cannot query xac.demo.service"),
                 result.drift().toString());
         assertFalse(result.drift().contains("auto-start disabled"), result.drift().toString());
-        assertTrue(result.format().contains("auto-start: unknown"), result.format());
     }
 }

@@ -28,7 +28,7 @@ public final class StatusCommand implements Callable<Integer> {
         }
         StatusResult result = new StatusRunner().run(loaded.spec, SystemdTarget.defaults(),
                 new ProcessRunner());
-        System.out.print(result.format());
+        System.out.print(StatusTextFormatter.format(result));
         return result.healthy() ? 0 : 1;
     }
 }
