@@ -1,13 +1,13 @@
 <#
 .SYNOPSIS
-    Create or reuse a GitCode release for a tag, then upload the release asset (jar).
+    Create or reuse a GitCode release for a tag, then upload the release asset (tar.gz).
 
 .DESCRIPTION
     Called by the GitHub Actions workflow "publish"; can also be run locally:
       $env:GITCODE_TOKEN = '<token>'
       pwsh -NoProfile -File .github/scripts/sync-gitcode-release.ps1 `
         -Owner foreach1991 -Repo x-as-code -Tag v0.1.0 `
-        -Asset dist/java-systemd-service-cli-0.1.0.jar
+        -Asset dist/java-systemd-service-cli-0.1.0.tar.gz
 
     Idempotent: an existing release is reused; the asset is skipped when its
     sha256 already matches the local file.

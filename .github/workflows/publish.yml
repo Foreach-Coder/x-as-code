@@ -1,7 +1,7 @@
 name: publish
 
 # push master：把 git 分支与 tag 镜像到 GitCode。
-# push v* tag（或在 Actions 页面手动填 tag 运行）：跑测试、打包、发 GitHub release、镜像 git、同步 GitCode release 与 jar。
+# push v* tag（或在 Actions 页面手动填 tag 运行）：跑测试、打包发行包、发 GitHub release、镜像 git、同步 GitCode release 与 tar.gz。
 on:
   push:
     branches: [master]
@@ -97,17 +97,40 @@ jobs:
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
-      - name: create GitHub release if missing
+      - name: verify distribution package
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          tarball=$(ls "$PROJECT_DIR"/target/java-systemd-service-cli-*.tar.gz | head -n 1)
+          echo "tarball: $tarball"
+          tar -tzvf "$tarball"
+          workdir=$(mktemp -d)
+          tar -xzf "$tarball" -C "$workdir"
+          root=$(ls -d "$workdir"/java-systemd-service-cli-*)
+          test -x "$root/bin/java-systemd-service-cli"
+          version=$("$root/bin/java-systemd-service-cli" --version)
+          echo "wrapper reports version: $version"
+          test "$version" = "${TAG#v}"
+
+      - name: create or update GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.meta.outputs.tag }}
         run: |
           set -euo pipefail
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "GitHub release $TAG already exists, keeping its assets"
+          asset=$(ls "$PROJECT_DIR"/target/java-systemd-service-cli-*.tar.gz | head -n 1)
+          name=$(basename "$asset")
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" "$asset" --title "xac $TAG" --generate-notes
+            exit 0
+          fi
+          echo "GitHub release $TAG already exists"
+          if gh release view "$TAG" --json assets --jq '.assets[].name' | grep -qx "$name"; then
+            echo "asset $name is already attached"
           else
-            jar=$(ls "$PROJECT_DIR"/target/java-systemd-service-cli-*.jar | head -n 1)
-            gh release create "$TAG" "$jar" --title "xac $TAG" --generate-notes
+            echo "attaching $name"
+            gh release upload "$TAG" "$asset"
           fi
 
       - name: download release asset
@@ -117,7 +140,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          gh release download "$TAG" --pattern '*.jar' --dir dist
+          gh release download "$TAG" --pattern '*.tar.gz' --dir dist
           ls -l dist
 
       - name: export GitHub release notes
@@ -134,10 +157,10 @@ jobs:
           GITCODE_TOKEN: ${{ secrets.GITCODE_FOREACH1991 }}
         run: |
           set -euo pipefail
-          jar=$(ls dist/*.jar | head -n 1)
+          asset=$(ls dist/*.tar.gz | head -n 1)
           pwsh -NoProfile -File ci/.github/scripts/sync-gitcode-release.ps1 \
             -Owner "$GITCODE_OWNER" \
             -Repo "$GITCODE_REPO" \
             -Tag "${{ steps.meta.outputs.tag }}" \
-            -Asset "$jar" \
+            -Asset "$asset" \
             -NotesFile release-notes.md
