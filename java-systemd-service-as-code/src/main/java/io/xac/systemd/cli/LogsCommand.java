@@ -2,11 +2,15 @@ package io.xac.systemd.cli;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
 import java.util.concurrent.Callable;
 
+import io.xac.systemd.core.InvalidSpecException;
+import io.xac.systemd.core.ServicePackage;
 import io.xac.systemd.exec.ExecResult;
 import io.xac.systemd.exec.ProcessRunner;
 import io.xac.systemd.logs.LogsRunner;
+import io.xac.systemd.spec.Violation;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
@@ -28,13 +32,17 @@ public final class LogsCommand implements Callable<Integer> {
     @Override
     public Integer call() {
         Path packageDir = Paths.get(packageDirArg).toAbsolutePath().normalize();
-        SpecCommands.Loaded loaded = SpecCommands.parse(packageDir);
-        if (loaded.spec == null) {
-            SpecCommands.report(loaded.violations);
+        ServicePackage pkg;
+        try {
+            pkg = ServicePackage.open(packageDir);
+        } catch (InvalidSpecException e) {
+            for (Violation violation : e.violations) {
+                System.err.println(violation);
+            }
             return 2;
         }
         ExecResult result = new LogsRunner()
-                .run(loaded.spec, new ProcessRunner(), lines, follow);
+                .run(pkg.spec(), new ProcessRunner(), lines, follow);
         if (!result.ok()) {
             System.err.println(result.stderr.trim());
         } else if (!follow) {

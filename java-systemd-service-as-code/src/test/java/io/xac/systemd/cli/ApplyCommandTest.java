@@ -295,4 +295,22 @@ class ApplyCommandTest {
         assertEquals(1, captured.code);
         assertEquals(expected, captured.output);
     }
+
+    /** 红线：缺 xac.yaml 时 stdout 为空、stderr 逐字节固定、退出 2、不碰 systemd。 */
+    @Test
+    void missingXacYamlPrintsExactStderrAndExitsTwo() throws IOException {
+        ByteArrayOutputStream outBuffer = new ByteArrayOutputStream();
+        ByteArrayOutputStream errBuffer = new ByteArrayOutputStream();
+        RecordingRunner runner = new RecordingRunner();
+
+        int code = ApplyCommand.run(pkg, false, new FakeProbe(), runner, target(),
+                new PrintStream(outBuffer, true, "UTF-8"),
+                new PrintStream(errBuffer, true, "UTF-8"));
+
+        assertEquals(2, code);
+        assertEquals("", outBuffer.toString("UTF-8"));
+        assertEquals("xac.yaml: xac.yaml not found in package directory"
+                + System.lineSeparator(), errBuffer.toString("UTF-8"));
+        assertTrue(runner.calls().isEmpty(), runner.calls().toString());
+    }
 }

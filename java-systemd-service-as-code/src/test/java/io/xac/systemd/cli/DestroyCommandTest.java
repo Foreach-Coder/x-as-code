@@ -103,17 +103,21 @@ class DestroyCommandTest {
     }
 
     private Captured capture(boolean dryRun, boolean yes, RecordingRunner runner) throws IOException {
-        return capture(dryRun, yes, runner, new DestroyRunner());
+        return capture(dryRun, yes, runner, null);
     }
 
+    /** destroyRunner 为 null 时走生产路径（ServicePackage 门面），否则走注入的动作失败路径。 */
     private Captured capture(boolean dryRun, boolean yes, RecordingRunner runner,
                              DestroyRunner destroyRunner) throws IOException {
         writeSpec();
         ByteArrayOutputStream outBuffer = new ByteArrayOutputStream();
         ByteArrayOutputStream errBuffer = new ByteArrayOutputStream();
-        int code = DestroyCommand.run(root, dryRun, yes, new FakeProbe(), runner, target(),
-                new PrintStream(outBuffer, true, "UTF-8"),
-                new PrintStream(errBuffer, true, "UTF-8"), destroyRunner);
+        PrintStream out = new PrintStream(outBuffer, true, "UTF-8");
+        PrintStream err = new PrintStream(errBuffer, true, "UTF-8");
+        int code = destroyRunner == null
+                ? DestroyCommand.run(root, dryRun, yes, new FakeProbe(), runner, target(), out, err)
+                : DestroyCommand.run(root, dryRun, yes, new FakeProbe(), runner, target(), out, err,
+                        destroyRunner);
         return new Captured(code, outBuffer.toString("UTF-8"), errBuffer.toString("UTF-8"));
     }
 

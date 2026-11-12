@@ -5,16 +5,21 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
 import java.util.concurrent.Callable;
 
 import io.xac.systemd.apply.ApplyContext;
 import io.xac.systemd.apply.DestroyOutcome;
 import io.xac.systemd.apply.DestroyRunner;
 import io.xac.systemd.apply.EnvironmentProbe;
+import io.xac.systemd.apply.Preflight;
 import io.xac.systemd.apply.RealEnvironmentProbe;
 import io.xac.systemd.apply.StepResult;
+import io.xac.systemd.core.InvalidSpecException;
+import io.xac.systemd.core.ServicePackage;
 import io.xac.systemd.exec.CommandRunner;
 import io.xac.systemd.exec.ProcessRunner;
+import io.xac.systemd.spec.Violation;
 import io.xac.systemd.systemd.SystemdTarget;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
@@ -44,24 +49,57 @@ public final class DestroyCommand implements Callable<Integer> {
     static int run(Path packageDir, boolean dryRun, boolean yes, EnvironmentProbe probe,
                    CommandRunner runner, SystemdTarget target, PrintStream out, PrintStream err)
             throws IOException {
-        return run(packageDir, dryRun, yes, probe, runner, target, out, err, new DestroyRunner());
+        ServicePackage pkg;
+        try {
+            pkg = ServicePackage.open(packageDir, runner, probe, target);
+        } catch (InvalidSpecException e) {
+            report(e.violations, err);
+            return 2;
+        }
+        DestroyOutcome plan;
+        try {
+            plan = pkg.destroyPlan();
+        } catch (InvalidSpecException e) {
+            report(e.violations, err);
+            return 2;
+        }
+        printPlan(plan, out);
+        if (!yes && !dryRun && !confirm(pkg.spec().name, err)) {
+            return 2;
+        }
+        DestroyOutcome outcome;
+        try {
+            outcome = pkg.destroy(dryRun);
+        } catch (InvalidSpecException e) {
+            report(e.violations, err);
+            return 2;
+        }
+        return printOutcome(outcome, dryRun, out);
     }
 
+    /** 测试专用：注入 DestroyRunner 以覆盖动作失败分支。 */
     static int run(Path packageDir, boolean dryRun, boolean yes, EnvironmentProbe probe,
                    CommandRunner runner, SystemdTarget target, PrintStream out, PrintStream err,
                    DestroyRunner destroyRunner) throws IOException {
-        SpecCommands.Loaded loaded = SpecCommands.loadForDestroy(packageDir, probe);
-        if (loaded.spec == null) {
-            SpecCommands.report(loaded.violations);
+        ServicePackage pkg;
+        try {
+            pkg = ServicePackage.open(packageDir, runner, probe, target);
+        } catch (InvalidSpecException e) {
+            report(e.violations, err);
             return 2;
         }
-        DestroyOutcome plan = destroyRunner.plan(loaded.spec, target);
+        List<Violation> violations = Preflight.checkDestroy(probe);
+        if (!violations.isEmpty()) {
+            report(violations, err);
+            return 2;
+        }
+        DestroyOutcome plan = destroyRunner.plan(pkg.spec(), target);
         printPlan(plan, out);
-        if (!yes && !dryRun && !confirm(loaded.spec.name, err)) {
+        if (!yes && !dryRun && !confirm(pkg.spec().name, err)) {
             return 2;
         }
         DestroyOutcome outcome = destroyRunner.run(
-                new ApplyContext(loaded.spec, target, runner, dryRun));
+                new ApplyContext(pkg.spec(), target, runner, dryRun));
         return printOutcome(outcome, dryRun, out);
     }
 
@@ -88,6 +126,12 @@ public final class DestroyCommand implements Callable<Integer> {
             }
         }
         return outcome.failed == null ? 0 : 1;
+    }
+
+    private static void report(List<Violation> violations, PrintStream err) {
+        for (Violation violation : violations) {
+            err.println(violation);
+        }
     }
 
     private static boolean confirm(String name, PrintStream err) {

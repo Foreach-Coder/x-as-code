@@ -3,16 +3,18 @@ package io.xac.systemd.cli;
 import java.io.PrintStream;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
 import java.util.concurrent.Callable;
 
-import io.xac.systemd.apply.ApplyContext;
 import io.xac.systemd.apply.ApplyOutcome;
-import io.xac.systemd.apply.ApplyRunner;
 import io.xac.systemd.apply.EnvironmentProbe;
 import io.xac.systemd.apply.RealEnvironmentProbe;
 import io.xac.systemd.apply.StepResult;
+import io.xac.systemd.core.InvalidSpecException;
+import io.xac.systemd.core.ServicePackage;
 import io.xac.systemd.exec.CommandRunner;
 import io.xac.systemd.exec.ProcessRunner;
+import io.xac.systemd.spec.Violation;
 import io.xac.systemd.systemd.SystemdTarget;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
@@ -39,13 +41,25 @@ public final class ApplyCommand implements Callable<Integer> {
     /** 预检失败退出 2，且在任何动作之前返回；--dry-run 也走同一条预检路径。 */
     static int run(Path packageDir, boolean dryRun, EnvironmentProbe probe,
             CommandRunner runner, SystemdTarget target, PrintStream out) {
-        SpecCommands.Loaded loaded = SpecCommands.load(packageDir, probe, runner, target);
-        if (loaded.spec == null) {
-            SpecCommands.report(loaded.violations);
+        return run(packageDir, dryRun, probe, runner, target, out, System.err);
+    }
+
+    static int run(Path packageDir, boolean dryRun, EnvironmentProbe probe,
+            CommandRunner runner, SystemdTarget target, PrintStream out, PrintStream err) {
+        ServicePackage pkg;
+        try {
+            pkg = ServicePackage.open(packageDir, runner, probe, target);
+        } catch (InvalidSpecException e) {
+            report(e.violations, err);
             return 2;
         }
-        ApplyContext ctx = new ApplyContext(loaded.spec, target, runner, dryRun);
-        ApplyOutcome outcome = new ApplyRunner().run(ctx);
+        ApplyOutcome outcome;
+        try {
+            outcome = pkg.apply(dryRun);
+        } catch (InvalidSpecException e) {
+            report(e.violations, err);
+            return 2;
+        }
         for (StepResult step : outcome.steps) {
             out.println(outcome.performed
                     ? step.plan.description
@@ -59,5 +73,11 @@ public final class ApplyCommand implements Callable<Integer> {
             return 1;
         }
         return 0;
+    }
+
+    private static void report(List<Violation> violations, PrintStream err) {
+        for (Violation violation : violations) {
+            err.println(violation);
+        }
     }
 }
