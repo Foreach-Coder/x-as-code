@@ -21,6 +21,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
@@ -81,6 +82,16 @@ class EditorModelTest {
         SpecLoader.Result result = SpecLoader.load(pkg);
         assertTrue(result.ok(), String.valueOf(result.violations));
         return result.spec;
+    }
+
+    private static int countPath(List<Violation> violations, String path) {
+        int count = 0;
+        for (Violation violation : violations) {
+            if (path.equals(violation.path)) {
+                count++;
+            }
+        }
+        return count;
     }
 
     // ---------------------------------------------------------------- tests
@@ -452,14 +463,100 @@ class EditorModelTest {
     }
 
     @Test
+    void keepsMapConflictUntilTheConflictingRowIsRewritten() throws IOException {
+        writeYaml(ServiceSpec.builder(pkg)
+                .name("demo")
+                .jar("app.jar")
+                .java("/usr/bin/java")
+                .properties(map("a=b", "v"))
+                .build());
+        EditorModel model = EditorModel.from(reload(), Comments.empty());
+
+        // UI 提交整份 map，冲突行仍在：不得静默拆成 {a: b=v}。
+        EditorModel same = model.with("properties", list("a=b=v", "C=1"));
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, same::toSpec);
+        assertTrue(message(e).contains("properties"), message(e));
+        assertEquals(1, countPath(same.validate(), "properties"), String.valueOf(same.validate()));
+
+        // 改别的字段不能顺手清掉 properties 的冲突。
+        EditorModel otherField = model.with("env", list("X=1"));
+        assertEquals(1, countPath(otherField.validate(), "properties"),
+                String.valueOf(otherField.validate()));
+
+        // 重写冲突行本身才解除。
+        EditorModel fixed = model.with("properties", list("a=v2"));
+        assertTrue(fixed.validate().isEmpty(), String.valueOf(fixed.validate()));
+        assertEquals("v2", fixed.toSpec().properties.get("a"));
+    }
+
+    @Test
+    void reportsEveryConflictingMapKey() throws IOException {
+        writeYaml(ServiceSpec.builder(pkg)
+                .name("demo")
+                .jar("app.jar")
+                .java("/usr/bin/java")
+                .properties(map("a=b", "1", "c=d", "2"))
+                .build());
+        EditorModel model = EditorModel.from(reload(), Comments.empty());
+
+        assertEquals(2, countPath(model.validate(), "properties"),
+                String.valueOf(model.validate()));
+    }
+
+    @Test
+    void validateNeverThrowsOnUnparseablePathLinks() {
+        EditorModel base = EditorModel.from(fullSpec(), Comments.empty());
+
+        // Windows 上尾随空格非法（报 violation），Linux 上合法（无 violation）；都不许抛。
+        EditorModel trailing = base.with("path-links", list(" ./conf:/opt/x "));
+        List<Violation> trailingViolations = trailing.validate();
+        assertTrue(trailingViolations.isEmpty()
+                        || countPath(trailingViolations, "path-links[0]") == 1,
+                String.valueOf(trailingViolations));
+
+        // NUL 在两个平台上都不是合法路径字符。
+        EditorModel nul = base.with("path-links", list("conf:/opt/x\u0000"));
+        List<Violation> nulViolations = nul.validate();
+        assertEquals(1, countPath(nulViolations, "path-links[0]"),
+                String.valueOf(nulViolations));
+        assertTrue(nulViolations.get(0).message.contains("invalid target path"),
+                nulViolations.get(0).message);
+    }
+
+    @Test
+    void collectsErrorsFromSeveralFieldsAtOnce() {
+        EditorModel model = EditorModel.from(fullSpec(), Comments.empty())
+                .with("lifecycle.restart-sec", list("12x"))
+                .with("env", list("NOEQUALS"));
+
+        List<Violation> violations = model.validate();
+        assertEquals(2, violations.size(), String.valueOf(violations));
+        assertEquals("env", violations.get(0).path, String.valueOf(violations));
+        assertEquals("lifecycle.restart-sec", violations.get(1).path,
+                String.valueOf(violations));
+    }
+
+    @Test
     void leavesTheFileUntouchedWhenNothingChanged() throws IOException {
-        String text = writeYaml(fullSpec());
-        byte[] before = Files.readAllBytes(pkg.resolve("xac.yaml"));
+        ServiceSpec spec = ServiceSpec.builder(pkg)
+                .name("demo")
+                .jar("app.jar")
+                .java("/usr/bin/java")
+                .pathLinks(list("./conf:/opt/demo/conf"))
+                // Windows 上 /var/log/... 不算绝对路径；用包目录下的绝对路径，两个平台都合法。
+                .logFile(pkg.resolve("app.log").toString())
+                .build();
+        writeYaml(spec);
+        Path file = pkg.resolve("xac.yaml");
+        byte[] before = Files.readAllBytes(file);
 
-        ServiceSpec back = EditorModel.from(reload(), Comments.empty()).toSpec();
+        EditorModel model = EditorModel.from(reload(), Comments.empty());
+        assertTrue(model.validate().isEmpty(), String.valueOf(model.validate()));
 
-        assertEquals(text, SpecWriter.render(back));
-        assertEquals(new String(before, StandardCharsets.UTF_8),
-                new String(Files.readAllBytes(pkg.resolve("xac.yaml")), StandardCharsets.UTF_8));
+        ServiceSpec back = model.toSpec();
+        SpecWriter.save(file, SpecWriter.render(back));
+        assertArrayEquals(before, Files.readAllBytes(file));
+        SpecWriter.save(file, SpecWriter.render(back));
+        assertArrayEquals(before, Files.readAllBytes(file));
     }
 }

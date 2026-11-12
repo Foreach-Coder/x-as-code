@@ -24,7 +24,8 @@ import io.xac.systemd.spec.Violation;
  * {@link EditorField} 都不受影响。文本值是<strong>用户原文</strong>：不 trim、
  * 不改写外层空白，只有判空时才用 {@code trim().isEmpty()}。{@link #toSpec()} 只做
  * 结构转换，非法文本抛 {@link IllegalArgumentException}（消息以字段路径开头）；
- * {@link #validate()} 不抛异常，把必填缺失与转换失败都收敛成 {@link Violation}。</p>
+ * {@link #validate()} 不抛异常，把必填缺失、转换失败与校验结果都收敛成
+ * {@link Violation}。</p>
  */
 public final class EditorModel {
 
@@ -57,13 +58,13 @@ public final class EditorModel {
     private final Map<String, EditorField> byPath;
 
     /**
-     * 载入时无法用 {@code KEY=VALUE} 行表示的 map 键（含 {@code =}）。
-     * 路径 → 说明；用户重写该字段后清除。
+     * 载入时无法用 {@code KEY=VALUE} 行表示的 map 行原文（键含 {@code =}，如
+     * {@code a=b=v}）。路径 → 行集合；只有该行从草稿里消失后冲突才解除。
      */
-    private final Map<String, String> mapConflicts;
+    private final Map<String, Set<String>> conflictsByPath;
 
     private EditorModel(Path packageDir, List<EditorField> fields,
-                        Map<String, String> mapConflicts) {
+                        Map<String, Set<String>> conflictsByPath) {
         this.packageDir = packageDir;
         this.fields = Collections.unmodifiableList(new ArrayList<EditorField>(fields));
         LinkedHashMap<String, EditorField> index = new LinkedHashMap<String, EditorField>();
@@ -71,8 +72,13 @@ public final class EditorModel {
             index.put(field.path, field);
         }
         this.byPath = Collections.unmodifiableMap(index);
-        this.mapConflicts = Collections.unmodifiableMap(
-                new LinkedHashMap<String, String>(mapConflicts));
+        LinkedHashMap<String, Set<String>> conflicts =
+                new LinkedHashMap<String, Set<String>>();
+        for (Map.Entry<String, Set<String>> entry : conflictsByPath.entrySet()) {
+            conflicts.put(entry.getKey(), Collections.unmodifiableSet(
+                    new LinkedHashSet<String>(entry.getValue())));
+        }
+        this.conflictsByPath = Collections.unmodifiableMap(conflicts);
     }
 
     // ------------------------------------------------------------ construction
@@ -129,7 +135,8 @@ public final class EditorModel {
                 single(lifecycle.timeoutStopSec == null ? "" : lifecycle.timeoutStopSec.toString()),
                 Collections.<String>emptyList(), source));
 
-        LinkedHashMap<String, String> conflicts = new LinkedHashMap<String, String>();
+        LinkedHashMap<String, Set<String>> conflicts =
+                new LinkedHashMap<String, Set<String>>();
         detectMapConflicts(conflicts, "env", spec.env);
         detectMapConflicts(conflicts, "properties", spec.properties);
         return new EditorModel(spec.packageDir, out, conflicts);
@@ -183,17 +190,21 @@ public final class EditorModel {
         return out;
     }
 
-    /** {@code KEY=VALUE} 行无法表示含 {@code =} 的键：载入时记下，写回时拒绝而不是静默拆键。 */
-    private static void detectMapConflicts(Map<String, String> conflicts, String path,
+    /** 收集全部 {@code KEY=VALUE} 行无法表示的键（含 {@code =}），不静默拆键。 */
+    private static void detectMapConflicts(Map<String, Set<String>> conflicts, String path,
                                            Map<String, String> map) {
         if (map == null) {
             return;
         }
-        for (String key : map.keySet()) {
+        Set<String> rows = null;
+        for (Map.Entry<String, String> entry : map.entrySet()) {
+            String key = entry.getKey();
             if (key != null && key.indexOf('=') >= 0) {
-                conflicts.put(path, "key '" + key
-                        + "' contains '=', so it cannot be written as KEY=VALUE");
-                return;
+                if (rows == null) {
+                    rows = new LinkedHashSet<String>();
+                    conflicts.put(path, rows);
+                }
+                rows.add(key + "=" + entry.getValue());
             }
         }
     }
@@ -227,7 +238,10 @@ public final class EditorModel {
         return found;
     }
 
-    /** 返回副本：只替换目标字段的文本值，其余字段原样带过去。 */
+    /**
+     * 返回副本：只替换目标字段的文本值，其余字段原样带过去。
+     * map 冲突按行原文保留——新值里仍包含冲突行时冲突不解除，只有该行被改写才移除。
+     */
     public EditorModel with(String path, List<String> values) {
         EditorField target = field(path);
         if (target.readOnly) {
@@ -242,8 +256,18 @@ public final class EditorModel {
                 copy.add(field);
             }
         }
-        LinkedHashMap<String, String> conflicts = new LinkedHashMap<String, String>(mapConflicts);
-        conflicts.remove(path);
+        LinkedHashMap<String, Set<String>> conflicts =
+                new LinkedHashMap<String, Set<String>>();
+        for (Map.Entry<String, Set<String>> entry : conflictsByPath.entrySet()) {
+            conflicts.put(entry.getKey(), new LinkedHashSet<String>(entry.getValue()));
+        }
+        Set<String> rows = conflicts.get(path);
+        if (rows != null) {
+            rows.retainAll(values);
+            if (rows.isEmpty()) {
+                conflicts.remove(path);
+            }
+        }
         return new EditorModel(packageDir, copy, conflicts);
     }
 
@@ -294,7 +318,7 @@ public final class EditorModel {
     }
 
     /**
-     * 保存前全量校验：必填非空 + {@link ValidationRunner}。
+     * 保存前全量校验：必填非空 + 逐字段转换 + {@link ValidationRunner}。
      * 与 {@link #toSpec()} 不同，任何非法文本都转成 {@link Violation}，不抛异常。
      */
     public List<Violation> validate() {
@@ -303,15 +327,27 @@ public final class EditorModel {
         required(out, requiredEmpties, "name");
         required(out, requiredEmpties, "artifact.jar");
         required(out, requiredEmpties, "runtime.java");
+        try {
+            collectValidation(out, requiredEmpties);
+        } catch (RuntimeException e) {
+            // 兜底：validate 是 UI 的保存前入口，任何运行时异常都必须变成可展示的错误。
+            out.add(fromRuntime(e));
+        }
+        return out;
+    }
 
+    private void collectValidation(List<Violation> out, Set<String> requiredEmpties) {
+        List<Violation> conversion = conversionErrors();
+        if (!conversion.isEmpty()) {
+            out.addAll(conversion);
+            return;
+        }
         ServiceSpec spec;
         try {
             spec = toSpec();
         } catch (IllegalArgumentException e) {
-            String message = e.getMessage() == null ? "" : e.getMessage();
-            String path = pathOf(message);
-            out.add(new Violation(path, path.isEmpty() ? message : detailOf(message)));
-            return out;
+            out.add(fromIllegalArgument(e));
+            return;
         }
         for (Violation violation : ValidationRunner.run(spec)) {
             // 空 name 由上面的必填检查负责，避免同一条错误出现两次。
@@ -319,7 +355,74 @@ public final class EditorModel {
                 out.add(violation);
             }
         }
+    }
+
+    /** 逐字段尝试转换，收集所有转换错误（而不是遇到第一个就放弃）。 */
+    private List<Violation> conversionErrors() {
+        List<Violation> out = new ArrayList<Violation>();
+        for (EditorField field : fields) {
+            if (field.readOnly) {
+                continue;
+            }
+            if (field.type == Schema.Type.BOOLEAN) {
+                try {
+                    booleanValue(field.path);
+                } catch (IllegalArgumentException e) {
+                    out.add(fieldViolation(field.path, e));
+                }
+            } else if (field.type == Schema.Type.INTEGER) {
+                try {
+                    integerValue(field.path);
+                } catch (IllegalArgumentException e) {
+                    out.add(fieldViolation(field.path, e));
+                }
+            } else if (field.type == Schema.Type.STRING_LIST) {
+                checkListRows(field, out);
+            } else if (field.type == Schema.Type.STRING_MAP) {
+                checkMapRows(field, out);
+            }
+        }
         return out;
+    }
+
+    private void checkListRows(EditorField field, List<Violation> out) {
+        List<String> rows = field.values;
+        for (int i = 0; i < rows.size(); i++) {
+            String raw = rows.get(i);
+            int line = i + 1;
+            if (isBlank(raw)) {
+                out.add(new Violation(field.path, "line " + line + ": must not be empty"));
+            } else if ("path-links".equals(field.path) && !isLinkShape(raw)) {
+                out.add(new Violation(field.path, "line " + line
+                        + ": must be source:target, with an absolute target starting with /"));
+            }
+        }
+    }
+
+    private void checkMapRows(EditorField field, List<Violation> out) {
+        Set<String> conflicts = conflictsByPath.get(field.path);
+        Set<String> keys = new LinkedHashSet<String>();
+        List<String> rows = field.values;
+        for (int i = 0; i < rows.size(); i++) {
+            String row = rows.get(i);
+            int line = i + 1;
+            if (row != null && conflicts != null && conflicts.contains(row)) {
+                out.add(new Violation(field.path, "line " + line + ": row '" + row
+                        + "' cannot be written as KEY=VALUE: its key contains '='"));
+                continue;
+            }
+            int equals = row == null ? -1 : row.indexOf('=');
+            if (equals < 0) {
+                out.add(new Violation(field.path, "line " + line
+                        + ": expected KEY=VALUE, got '" + (row == null ? "" : row) + "'"));
+                continue;
+            }
+            String key = row.substring(0, equals);
+            if (!keys.add(key)) {
+                out.add(new Violation(field.path, "line " + line
+                        + ": duplicate key '" + key + "'"));
+            }
+        }
     }
 
     private void required(List<Violation> out, Set<String> paths, String path) {
@@ -327,6 +430,25 @@ public final class EditorModel {
             out.add(new Violation(path, "must not be empty"));
             paths.add(path);
         }
+    }
+
+    private Violation fieldViolation(String path, IllegalArgumentException e) {
+        String message = e.getMessage() == null ? "" : e.getMessage();
+        String prefix = path + ": ";
+        String detail = message.startsWith(prefix) ? message.substring(prefix.length()) : message;
+        return new Violation(path, detail);
+    }
+
+    private Violation fromIllegalArgument(IllegalArgumentException e) {
+        String message = e.getMessage() == null ? "" : e.getMessage();
+        String path = pathOf(message);
+        return new Violation(path, path.isEmpty() ? message : detailOf(message));
+    }
+
+    private Violation fromRuntime(RuntimeException e) {
+        String message = e.getMessage() == null ? "" : e.getMessage();
+        String path = pathOf(message);
+        return new Violation(path, path.isEmpty() ? message : detailOf(message));
     }
 
     /** 消息以字段路径开头时返回该路径（供 UI 定位），否则返回 {@code ""}。 */
@@ -346,6 +468,13 @@ public final class EditorModel {
 
     private static boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    /** 词法形状：最后一个冒号前有 source、后面是绝对 target。 */
+    private static boolean isLinkShape(String raw) {
+        int colon = raw.lastIndexOf(':');
+        return colon > 0 && colon < raw.length() - 1
+                && raw.substring(colon + 1).startsWith("/");
     }
 
     private String value(String path) {
@@ -378,10 +507,9 @@ public final class EditorModel {
         if (isBlank(raw)) {
             return null;
         }
-        String text = raw.trim();
         int parsed;
         try {
-            parsed = Integer.parseInt(text);
+            parsed = Integer.parseInt(raw.trim());
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException(path + ": expected an integer, got '" + raw + "'");
         }
@@ -406,17 +534,13 @@ public final class EditorModel {
     }
 
     /**
-     * 只做词法形状检查（最后一个冒号 + 绝对目标），不构造 {@link Path}：
-     * 用户原文可能带 Windows 上非法的尾随空格，保存前由 {@code PathLinksValidator} 复核。
+     * 只做词法形状检查，不构造 {@link Path}：用户原文可能带 Windows 上非法的尾随空格；
+     * 完整护栏（及其解析失败的捕获）由 {@code PathLinksValidator} 负责。
      */
     private List<String> linkValue(String path) {
         List<String> links = listValue(path);
         for (int i = 0; i < links.size(); i++) {
-            String raw = links.get(i);
-            int colon = raw.lastIndexOf(':');
-            boolean shaped = colon > 0 && colon < raw.length() - 1
-                    && raw.substring(colon + 1).startsWith("/");
-            if (!shaped) {
+            if (!isLinkShape(links.get(i))) {
                 throw new IllegalArgumentException(path + ": line " + (i + 1)
                         + ": must be source:target, with an absolute target starting with /");
             }
@@ -425,15 +549,16 @@ public final class EditorModel {
     }
 
     private LinkedHashMap<String, String> mapValue(String path) {
-        String conflict = mapConflicts.get(path);
-        if (conflict != null) {
-            throw new IllegalArgumentException(path + ": " + conflict);
-        }
+        Set<String> conflicts = conflictsByPath.get(path);
         List<String> rows = field(path).values;
         LinkedHashMap<String, String> out = new LinkedHashMap<String, String>();
         for (int i = 0; i < rows.size(); i++) {
             int line = i + 1;
             String row = rows.get(i);
+            if (row != null && conflicts != null && conflicts.contains(row)) {
+                throw new IllegalArgumentException(path + ": line " + line + ": row '" + row
+                        + "' cannot be written as KEY=VALUE: its key contains '='");
+            }
             int equals = row == null ? -1 : row.indexOf('=');
             if (equals < 0) {
                 throw new IllegalArgumentException(path + ": line " + line
