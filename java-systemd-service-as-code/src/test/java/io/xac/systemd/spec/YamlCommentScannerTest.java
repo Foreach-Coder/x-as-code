@@ -585,7 +585,92 @@ class YamlCommentScannerTest {
         assertEquals(1, withUserComments.dropped);
     }
 
+    @Test
+    void firstSaveOfRealInitFileKeepsTemplateCommentsWithoutFalseDropped() {
+        String initYaml = templateWith("demo", "app.jar", "/usr/bin/java");
+        Comments source = YamlCommentScanner.scan(initYaml);
+        String rendered = SpecWriter.render(fullSpec());
+
+        YamlCommentScanner.ApplyResult result = YamlCommentScanner.apply(
+                rendered, source, YamlCommentScanner.scanTemplate("demo"));
+
+        assertEquals(0, result.dropped, result.text);
+        assertEquals(1, count(result.text, "xac.yaml -- service definition"), result.text);
+        String[] needles = {
+                "Application jar", "Java executable", "JVM arguments",
+                "Environment variables", "System properties", "Working directory",
+                "Symlinks created", "read journald", "starting at boot"};
+        for (String needle : needles) {
+            assertTrue(result.text.contains(needle), needle + " missing:\n" + result.text);
+        }
+        assertFalse(result.text.contains("{{"), result.text);
+        assertSameSpec(rendered, result.text);
+
+        YamlCommentScanner.ApplyResult second = YamlCommentScanner.apply(
+                rendered, YamlCommentScanner.scan(result.text),
+                YamlCommentScanner.scanTemplate("demo"));
+        assertEquals(result.text, second.text, "second save must be stable");
+    }
+
+    @Test
+    void templateCommentsUseTheRealServiceNameAndNeverLeakPlaceholders() {
+        String rendered = SpecWriter.render(fullSpec());
+
+        YamlCommentScanner.ApplyResult first = YamlCommentScanner.apply(
+                rendered, Comments.empty(), YamlCommentScanner.scanTemplate("demo"));
+
+        assertFalse(first.text.contains("{{"), first.text);
+        assertTrue(first.text.contains("/etc/xac/xac.demo.env"), first.text);
+        assertFalse(first.text.contains("xac.{{name}}.env"), first.text);
+
+        YamlCommentScanner.ApplyResult second = YamlCommentScanner.apply(
+                rendered, YamlCommentScanner.scan(first.text),
+                YamlCommentScanner.scanTemplate("demo"));
+        assertFalse(second.text.contains("{{"), second.text);
+        assertSameSpec(rendered, second.text);
+    }
+
     // ------------------------------------------------------- duplicate values
+
+    @Test
+    void crossFormDuplicateInlineThenLeadingBecomesOrphan() {
+        String old = "path-links:\n"
+                + "  - ./c:/opt/c  # one\n"
+                + "  # two\n"
+                + "  - ./c:/opt/c\n";
+        assertCrossFormDuplicate(old);
+    }
+
+    @Test
+    void crossFormDuplicateLeadingThenInlineBecomesOrphan() {
+        String old = "path-links:\n"
+                + "  # one\n"
+                + "  - ./c:/opt/c\n"
+                + "  - ./c:/opt/c  # two\n";
+        assertCrossFormDuplicate(old);
+    }
+
+    private void assertCrossFormDuplicate(String old) {
+        Comments comments = YamlCommentScanner.scan(old);
+
+        assertEquals(1, comments.orphans.size(), comments.orphans.toString());
+        assertTrue(comments.orphans.get(0).contains(
+                "duplicate comment for path-links[./c:/opt/c]"), comments.orphans.get(0));
+        assertTrue(comments.orphans.get(0).contains("two"), comments.orphans.get(0));
+
+        String rendered = SpecWriter.render(builder()
+                .name("demo")
+                .jar("app.jar")
+                .java("/usr/bin/java")
+                .pathLinks(Arrays.asList("./c:/opt/c", "./c:/opt/c"))
+                .build());
+        YamlCommentScanner.ApplyResult result = YamlCommentScanner.apply(rendered, comments);
+        assertEquals(1, result.kept, result.text);
+        assertEquals(1, result.dropped, result.text);
+        assertEquals(1, count(result.text, "# one"), result.text);
+        assertEquals(0, count(result.text, "# two"), result.text);
+        assertSameSpec(rendered, result.text);
+    }
 
     @Test
     void duplicateListValueInlineCommentsBecomeOrphans() {
@@ -748,6 +833,38 @@ class YamlCommentScannerTest {
         assertTrue(loaded.violations.isEmpty(), loaded.violations.toString());
         assertEquals(rendered, SpecWriter.render(loaded.spec),
                 "comments must not change the loaded spec");
+    }
+
+    private static String templateWith(String name, String jar, String java) {
+        return readTemplateResource()
+                .replace("{{name}}", name)
+                .replace("{{jar}}", jar)
+                .replace("{{java}}", java);
+    }
+
+    private static String readTemplateResource() {
+        java.io.InputStream in =
+                YamlCommentScannerTest.class.getResourceAsStream("/xac.yaml.template");
+        if (in == null) {
+            throw new AssertionError("xac.yaml.template not on the test classpath");
+        }
+        try {
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            byte[] buffer = new byte[4096];
+            int read;
+            while ((read = in.read(buffer)) >= 0) {
+                out.write(buffer, 0, read);
+            }
+            return new String(out.toByteArray(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new AssertionError(e);
+        } finally {
+            try {
+                in.close();
+            } catch (IOException ignored) {
+                // nothing useful to do while closing a classpath resource
+            }
+        }
     }
 
     private static String joinLines(List<String> lines) {

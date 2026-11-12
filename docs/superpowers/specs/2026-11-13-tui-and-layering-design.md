@@ -225,6 +225,7 @@ void save(Path file, String yaml) throws IOException
 ```java
 Comments scan(String yaml)                                  // 扫描既有文件
 Comments scanTemplate()                                     // 读 /xac.yaml.template 作默认注释
+Comments scanTemplate(String name)                          // 同上，注释里的 {{name}} 替换为服务名
 Comments merge(Comments base, Comments override)            // 同路径 override 覆盖 base
 ApplyResult apply(String rendered, Comments comments)
 ApplyResult apply(String rendered, Comments source, Comments template)  // 模板打底、用户覆盖
@@ -232,9 +233,9 @@ ApplyResult apply(String rendered, Comments source, Comments template)  // 模�
 final class ApplyResult { String text; int kept; int dropped; }
 ```
 
-`apply` 不重排、不重写任何配置行，只在目标行前插入注释行、在行尾追加同行注释，因此结果仍能被 `SpecLoader` 读回与 `render` 等价的 spec。`kept` 是实际写入的注释条数，`dropped` 是未能挂回的用户注释条数，供 §6.5 的 “N 条注释无法定位” 使用；三参重载只统计用户注释，模板里没有对应字段的默认注释不算丢失。
+`apply` 不重排、不重写任何配置行，只在目标行前插入注释行、在行尾追加同行注释，因此结果仍能被 `SpecLoader` 读回与 `render` 等价的 spec。`kept` 是实际写入的注释条数，`dropped` 是未能挂回的用户注释条数，供 §6.5 的 “N 条注释无法定位” 使用；三参重载只统计用户注释，模板里没有对应字段的默认注释不算丢失。用户文件里逐字等于模板原文的注释（`init` 文件首次保存时被空行冲散的模板注释块）也不算丢失，因为模板打底会重新写出它们。
 
-注释文本写入前必须同行化转义：`\n` → `\\n`、`\r` → `\\r`、NEL/LS/PS → `\\x85`/`\\u2028`/`\\u2029`（与 §6.7 的转义口径一致），保证程序化构造的 `Comments` 不能用换行注入配置行。
+注释文本写入前必须同行化转义：`\n` → `\\n`、`\r` → `\\r`、NEL/LS/PS → `\\x85`/`\\u2028`/`\\u2029`，保证程序化构造的 `Comments` 不能用换行注入配置行。
 
 - **段序**：`name` → `description` → `artifact.jar` → `runtime.java` → `runtime.opts` → `env` → `properties` → `workdir` → `path-links` → `logs` → `lifecycle`；段间空一行。
 - **排序**：`env` / `properties` 的键按字符串自然序（`TreeMap`）输出，与输入 map 的插入顺序无关，保证同一份配置在任何机器上产生相同 diff；`opts` / `path-links` 是位置敏感的列表，保持原顺序。
@@ -295,7 +296,7 @@ s → 草稿 spec → Schema + ValidationRunner
 - `path → List<String> leading`（紧邻上一行）
 - `orphans`：文件末尾游离、被空行隔开的注释块、重复列表值的第二份注释（格式 `duplicate comment for <path>: <text>`），带行号前缀
 
-列表项以**值**而不是下标作键（`path-links[./conf:/opt/conf]`），编辑器重排后注释仍跟随原元素；同一个值出现多次时第一条注释保留，其余进入 `orphans` 并计入 `dropped`。
+列表项以**值**而不是下标作键（`path-links[./conf:/opt/conf]`），编辑器重排后注释仍跟随原元素；同一个值出现多次时第一条注释保留，其余进入 `orphans` 并计入 `dropped`。重复判定按路径的**出现次数**，不区分同行/前置形态：一条 inline 加一条 leading 挂在同一个重复值上时，第二条同样进 `orphans`。
 
 挂回规则：
 
@@ -305,7 +306,7 @@ s → 草稿 spec → Schema + ValidationRunner
 | 前置注释 | 同上，输出为该字段上方若干行 |
 | 段头注释 | 段路径（如 `env`） |
 
-`SpecWriter` 按固定顺序输出（与模板一致）。模板打底由 `scanTemplate()` 完成：它解析随包分发的 `xac.yaml.template`，被注释掉的示例段（`# env:`、`#   workdir: /opt/x`）只作为路径锚点，示例行本身不产出注释；`apply(rendered, source, template)` 先 `merge(template, source)`（用户文件同路径覆盖模板）再挂回。这样 init 生成的包首次保存后模板说明仍在，用户改过的字段用用户注释；模板里没有对应字段的默认注释不计入 `dropped`。`env`/`properties` 的键按字符串自然序输出（与插入顺序无关），`opts`/`path-links` 保持原顺序；结尾单个 `\n`，LF。完整契约（含引号、转义、路径与落盘语义）见 §6.7。
+`SpecWriter` 按固定顺序输出（与模板一致）。模板打底由 `scanTemplate(String name)` 完成：它解析随包分发的 `xac.yaml.template`，把注释里的 `{{name}}` 换成真实服务名（与 `init` 的替换口径一致），被注释掉的示例段（`# env:`、`#   workdir: /opt/x`）只作为路径锚点，示例行本身不产出注释；`apply(rendered, source, template)` 先 `merge(template, source)`（用户文件同路径覆盖模板）再挂回。这样 init 生成的包首次保存后模板说明仍在、不会出现字面量 `{{name}}`，用户改过的字段用用户注释；模板里没有对应字段的默认注释不计入 `dropped`，用户文件里逐字等于模板原文（含被空行冲散的模板块）也不计入。`env`/`properties` 的键按字符串自然序输出（与插入顺序无关），`opts`/`path-links` 保持原顺序；结尾单个 `\n`，LF。完整契约（含引号、转义、路径与落盘语义）见 §6.7。
 
 块标量（`|`/`>`）内部的 `#` 是标量内容，既不是注释，也不计入 `dropped`。`apply` 只增注释行，不重排配置行；对 `scan` 结果 apply 是幂等的，对已合并文本再次 apply 也不会重复插入。
 
