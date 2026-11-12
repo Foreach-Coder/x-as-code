@@ -9,7 +9,7 @@ import picocli.CommandLine.Model.CommandSpec;
 
 @Command(name = "xac",
         mixinStandardHelpOptions = true,
-        version = "0.1.0",
+        version = "0.1.1",
         description = "install a Java service as a systemd unit",
         subcommands = {ApplyCommand.class, StatusCommand.class, LogsCommand.class,
                 DestroyCommand.class})

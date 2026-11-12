@@ -41,9 +41,9 @@ mvn -f java-systemd-service-as-code/pom.xml test
 
 # 打包：fat jar + 发行包
 mvn -f java-systemd-service-as-code/pom.xml -DskipTests package
-#   → java-systemd-service-as-code/target/java-systemd-service-cli-0.1.0.jar
-#   → java-systemd-service-as-code/target/java-systemd-service-cli-0.1.0.tar.gz
-#      解压后 java-systemd-service-cli-0.1.0/{bin/java-systemd-service-cli, libs/*.jar}
+#   → java-systemd-service-as-code/target/java-systemd-service-cli-0.1.1.jar
+#   → java-systemd-service-as-code/target/java-systemd-service-cli-0.1.1.tar.gz
+#      解压后 java-systemd-service-cli-0.1.1/{bin/java-systemd-service-cli, libs/*.jar}
 
 # 真 systemd e2e（Testcontainers；需要 Docker + 镜像 xac-e2e:24.04，见 e2e/README.md）
 mvn -f java-systemd-service-as-code/pom.xml -Pe2e verify
