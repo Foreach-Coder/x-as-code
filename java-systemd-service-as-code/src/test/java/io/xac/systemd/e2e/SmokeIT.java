@@ -434,6 +434,7 @@ class SmokeIT {
         assertContains(cat(FILELOG_LOG), "FILELOG-READY");
     }
 
+    @Test
     @Order(11)
     void tuiRefusesToStartWithoutATty() throws Exception {
         // 容器里 exec 没有 TTY：tui 必须一行提示后退出 2，绝不尝试打开终端。

@@ -26,7 +26,8 @@
       <version>2.2</version>
     </dependency>
     <!-- TUI 的唯一新增运行期依赖（design §9）。Linux/SSH 终端由 Lanterna 的
-         UnixTerminal 处理；shade 不得加 filters/includes，避免误删终端相关资源。 -->
+         UnixTerminal 走 stty；3.1.5 不带 terminfo，shade 不声明 filters/includes
+         只是保持通用、避免误伤。 -->
     <dependency>
       <groupId>com.googlecode.lanterna</groupId>
       <artifactId>lanterna</artifactId>
@@ -73,9 +74,8 @@
             <phase>package</phase>
             <goals><goal>shade</goal></goals>
             <configuration>
-              <!-- 不要加 filters/includes：Lanterna 的终端适配依赖 jar 内资源
-                   （3.1.5 未带 terminfo/，但新版本可能带），
-                   过滤掉会让 Linux/SSH 终端上的 TUI 起不来。 -->
+              <!-- 不要加 filters/includes：Lanterna 3.1.5 不带 terminfo/，
+                   Linux/SSH 走 stty；过滤本身没有必要，且容易误伤其他资源。 -->
               <createDependencyReducedPom>false</createDependencyReducedPom>
               <transformers>
                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">

@@ -624,7 +624,7 @@ Expected: COMPILATION ERROR —— `io.xac.systemd.tui` 不存在。
 - `LanternaKeySource`：Lanterna 3.1.5 的 `InputProvider` 没有带超时的读，用 `pollInput()` + 10ms 轮询实现 `next(timeoutMillis)`（超时返回 null），`KeyStroke` → `KeyEvent`（`KeyType.ArrowUp` → UP 等；`Character` → CHAR）。
 - `TuiApp`：状态机字段 `running`、`failed`、`notice`；`tick` 取一个事件（测试用注入的 `ScriptedKeySource`），`QUIT`/`ESC` 停；渲染 → `display.show(canvas)`。`run()` 用 try 包住「读事件 + 渲染」：`IOException` → `input error: ...`；任意 `RuntimeException`（含 `UncheckedIOException`）→ `tui failed: ...`、停循环、返回 1；正常退出 0。
 - `TuiCommand`：非 TTY 判定 = 已附加 console 且 `TERM` 非空、trim+lowercase 后不是 `dumb`/`unknown` → 否则 stderr `tui requires an interactive terminal` + 退 2；`ServicePackage.open` 失败 → 打印 violations + 退 2；正常返回 `TuiApp.run()` 的退出码（故障时把 `statusNote()` 打到 stderr）。
-- e2e：`SmokeIT` 新增 `tuiRequiresTerminal`，容器内 `java -jar xac.jar tui /opt/demo`（无 TTY）断言退出 2 且 stderr 含该行。
+- e2e：`SmokeIT` 新增 `tuiRefusesToStartWithoutATty`，容器内 `java -jar xac.jar tui /opt/demo`（无 TTY）断言退出 2 且 stderr 含该行。
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -998,12 +998,14 @@ git add -A && git commit -m "feat: TUI 结构化编辑与规范化保存"
 
 ```java
 ExecResult r = container.execInContainer("sh", "-c",
-        "printf 'q' | script -qec 'java -jar /opt/xac/xac.jar tui /opt/demo' /dev/null");
+        "printf 'q' | TERM=xterm script -qec 'java -jar /opt/xac/xac.jar tui /opt/demo' /dev/null");
 assertEquals(0, r.getExitCode(), r.getStderr());
 assertTrue(r.getStdout().contains("demo"));
 assertTrue(r.getStdout().contains("unit"));
 assertFalse(r.getStdout().contains("tui requires an interactive terminal"));
 ```
+
+命令必须显式带 `TERM=xterm`：Testcontainers 的 `execInContainer` 没有 TTY、也不设置 `TERM`，`script` 只分配 pty 不补环境变量；`TERM` 为空时 `TuiCommand` 会按非 TTY 退 2，`assertEquals(0)` 必然失败。
 
 理由：Lanterna 3.1.5 的 Linux 终端走 `UnixTerminal`/`stty`，fat jar 内没有 `terminfo/` 资源（见设计文档 §9），所以「jar 里有没有 terminfo」这个前提本身不成立；而且原来的非 TTY 用例在 `System.console() == null` 处就返回 2，根本走不到终端初始化，永远通过、证明不了打包正确。真实 pty 才覆盖「创建终端 → 画首帧 → 读键 → 退出」整条链。
 
