@@ -79,7 +79,7 @@ class InitCommandTest {
         assertTrue(content.contains("name: demo"), content);
         assertTrue(content.contains("jar: app.jar"), content);
         assertTrue(content.contains("java: /usr/bin/java"), content);
-        assertTrue(content.contains("opts: []"), content);
+        assertTrue(content.contains("# opts:"), content);
         assertTrue(content.contains("# path-links:"), content);
         assertTrue(content.endsWith("\n"), "template should end with a newline");
     }

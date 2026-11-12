@@ -17,9 +17,9 @@ runtime:
   # Java executable used to start the service.
   java: {{java}}
   # JVM arguments, one list item per argument, passed verbatim, for example:
+  # opts:
   #   - -Xmx512m
   #   - -XX:+UseG1GC
-  opts: []
 
 # Environment variables, written to /etc/xac/xac.{{name}}.env with mode 0600.
 # Values are literal; ${VAR} inside opts/properties is expanded by systemd when

@@ -43,7 +43,7 @@ public final class Schema {
                     scalar("jar", Type.STRING, true)),
             section("runtime", true,
                     scalar("java", Type.STRING, true),
-                    scalar("opts", Type.STRING_LIST, true)),
+                    scalar("opts", Type.STRING_LIST, false)),
             scalar("env", Type.STRING_MAP, false),
             scalar("properties", Type.STRING_MAP, false),
             scalar("workdir", Type.STRING, false),
