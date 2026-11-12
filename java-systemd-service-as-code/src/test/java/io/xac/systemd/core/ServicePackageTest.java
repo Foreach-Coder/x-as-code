@@ -4,6 +4,7 @@ import io.xac.systemd.apply.ApplyOutcome;
 import io.xac.systemd.apply.DestroyOutcome;
 import io.xac.systemd.apply.EnvironmentProbe;
 import io.xac.systemd.apply.StepPlan;
+import io.xac.systemd.apply.StepResult;
 import io.xac.systemd.exec.ExecResult;
 import io.xac.systemd.exec.RecordingRunner;
 import io.xac.systemd.logs.FileLogStream;
@@ -20,6 +21,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -376,5 +378,69 @@ class ServicePackageTest {
         assertTrue(stream instanceof FileLogStream, stream.getClass().getName());
         assertFalse(stream.isFollow(), "logs(int) must be non-follow");
         stream.close();
+    }
+
+    @Test
+    void restartRunsSystemctlRestartWithoutWritingUnit() throws Exception {
+        Files.createFile(pkg.resolve("app.jar"));
+        writePlainSpec();
+        Files.createDirectories(target().unitDir);
+        Files.createDirectories(target().envDir);
+        runner.addResultForCommand("systemctl", show("LoadState=not-found\nFragmentPath=\n"));
+        ServicePackage opened = open();
+
+        StepResult result = opened.restart();
+
+        assertTrue(result.ok, result.message);
+        assertNull(result.message);
+        assertEquals("systemctl restart xac.demo.service", result.plan.description);
+        assertFalse(Files.exists(UnitNaming.unitPath(opened.spec(), target())),
+                "restart must not write the unit");
+        assertFalse(Files.exists(UnitNaming.envPath(opened.spec(), target())),
+                "restart must not write the env file");
+        assertEquals(2, runner.calls().size(), runner.calls().toString());
+        assertEquals(Arrays.asList("systemctl", "restart", "xac.demo.service"),
+                runner.calls().get(1));
+    }
+
+    @Test
+    void restartRequiresRoot() throws Exception {
+        Files.createFile(pkg.resolve("app.jar"));
+        writePlainSpec();
+        probe.root = false;
+        ServicePackage opened = open();
+
+        InvalidSpecException failure = assertThrows(InvalidSpecException.class, opened::restart);
+
+        assertEquals("apply / destroy require root", failure.violations.get(0).message);
+        assertFalse(hasRestartCall(), "non-root must not touch the service: " + runner.calls());
+    }
+
+    private boolean hasRestartCall() {
+        for (List<String> call : runner.calls()) {
+            if (call.size() >= 2 && "systemctl".equals(call.get(0))
+                    && "restart".equals(call.get(1))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Test
+    void restartReportsSystemctlFailure() throws Exception {
+        Files.createFile(pkg.resolve("app.jar"));
+        writePlainSpec();
+        runner.addResultForCommand("systemctl", show("LoadState=not-found\nFragmentPath=\n"));
+        runner.addResult(Arrays.asList("systemctl", "restart", "xac.demo.service"),
+                new ExecResult(1, "", "unit not found"));
+        ServicePackage opened = open();
+
+        StepResult result = opened.restart();
+
+        assertFalse(result.ok);
+        assertTrue(result.message.contains("exit 1"), result.message);
+        assertTrue(result.message.contains("unit not found"), result.message);
+        assertFalse(Files.exists(UnitNaming.unitPath(opened.spec(), target())),
+                "failed restart must not write the unit");
     }
 }

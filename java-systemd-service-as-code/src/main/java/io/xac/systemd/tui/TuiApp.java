@@ -15,10 +15,17 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import io.xac.systemd.apply.ApplyOutcome;
+import io.xac.systemd.apply.DestroyOutcome;
+import io.xac.systemd.apply.StepResult;
+import io.xac.systemd.core.InvalidSpecException;
 import io.xac.systemd.core.ServicePackage;
 import io.xac.systemd.core.StatusReport;
 import io.xac.systemd.logs.LogSink;
 import io.xac.systemd.logs.LogStream;
+import io.xac.systemd.systemd.UnitNaming;
+import io.xac.systemd.tui.actions.ActionKind;
+import io.xac.systemd.tui.actions.ActionOverlay;
 
 /**
  * TUI 外壳。只依赖 {@link Display} 与 {@link KeySource}，因此测试不用启动终端；
@@ -43,7 +50,7 @@ public final class TuiApp {
     /** 标题 1 + 状态 4 + 日志头 1 + notice 1 + 键栏 1 = 8 行固定开销。 */
     private static final int FIXED_ROWS = 8;
     private static final String FULL_KEY_BAR =
-            "q quit  a apply  r restart  d destroy  e edit  ? help";
+            "a apply  r restart  d destroy  e edit  ? help  q quit";
     private static final String NARROW_KEY_BAR = "? help";
 
     /** 日志源工厂：显式带走 follow 参数，测试可断言 TUI 请求的是跟随模式。 */
@@ -78,6 +85,15 @@ public final class TuiApp {
     private boolean logsVisible = true;
     private boolean logsToggled;
     private boolean overlayOpen;
+    /** 当前动作确认面板；null 表示主屏。 */
+    private ActionOverlay overlay;
+    /** 关闭覆盖层后强制补一次状态查询，不必等 2s 节流。 */
+    private volatile boolean statusPollDue;
+    /** 动作执行线程；非 null 表示后台还有一个动作在跑。 */
+    private volatile Thread actionThread;
+    private volatile boolean actionRunning;
+    private volatile ActionKind actionKind;
+    private volatile String actionResult;
     private volatile boolean logsEnded;
 
     private volatile boolean running = true;
@@ -133,7 +149,9 @@ public final class TuiApp {
                         handle(event);
                         dirty = true;
                     }
-                    pollStatus(clock.millis());
+                    long nowMillis = clock.millis();
+                    completeAction(nowMillis);
+                    pollStatus(nowMillis);
                     renderIfDirty();
                 } catch (IOException e) {
                     notice = "input error: " + messageOf(e);
@@ -168,6 +186,7 @@ public final class TuiApp {
                 handle(event);
                 dirty = true;
             }
+            completeAction(nowMillis);
             pollStatus(nowMillis);
             renderIfDirty();
         } catch (IOException e) {
@@ -186,7 +205,8 @@ public final class TuiApp {
     }
 
     public String statusNote() {
-        return notice;
+        // 动作执行期间用固定文案占住 notice 行，避免旧的 notice 被误读成执行结果。
+        return actionRunning ? "running..." : notice;
     }
 
     /**
@@ -207,7 +227,21 @@ public final class TuiApp {
      * Task 9 的 ACTION 覆盖层通过这个接缝接入。
      */
     void setOverlayOpen(boolean open) {
+        if (this.overlayOpen && !open) {
+            // 关闭覆盖层后立即补一次状态，保证面板期间错过的变化马上可见（design §6.4）。
+            statusPollDue = true;
+        }
         this.overlayOpen = open;
+    }
+
+    /** 测试接缝：等后台动作线程收尾；返回 false 表示超时。 */
+    boolean awaitAction(long millis) throws InterruptedException {
+        Thread thread = actionThread;
+        if (thread == null) {
+            return true;
+        }
+        thread.join(millis);
+        return !thread.isAlive();
     }
 
     /**
@@ -250,13 +284,16 @@ public final class TuiApp {
     }
 
     private void pollStatus(long nowMillis) {
-        if (overlayOpen) {
+        if (overlayOpen || actionRunning) {
             return;
         }
-        long elapsed = nowMillis - lastStatusAt;
-        if (elapsed >= 0 && elapsed < STATUS_POLL_MILLIS) {
-            return;
+        if (!statusPollDue) {
+            long elapsed = nowMillis - lastStatusAt;
+            if (elapsed >= 0 && elapsed < STATUS_POLL_MILLIS) {
+                return;
+            }
         }
+        statusPollDue = false;
         // elapsed < 0 说明墙钟被往回拨：立即补一次并重建基线，不能冻结到时间追上来。
         lastStatusAt = nowMillis;
         state = loadStateSafely();
@@ -399,6 +436,14 @@ public final class TuiApp {
         if (event == null) {
             return;
         }
+        if (actionRunning) {
+            // 动作执行期间忽略所有输入（design §6.6）：不重复提交，也不让 UI 状态与落盘竞争。
+            return;
+        }
+        if (overlay != null) {
+            handleOverlay(event);
+            return;
+        }
         if (event.key == NavKey.QUIT || event.key == NavKey.ESC) {
             running = false;
             return;
@@ -442,6 +487,19 @@ public final class TuiApp {
             running = false;
         } else if (event.ch == 'R') {
             refresh();
+        } else if (event.ch == 'a') {
+            openApply();
+        } else if (event.ch == 'r') {
+            openRestart();
+        } else if (event.ch == 'd') {
+            openDestroy();
+        } else if (event.ch == 'e') {
+            // edit 还没实现：明确告诉用户，而不是假装按键生效。
+            notice = "edit is not implemented yet";
+            dirty = true;
+        } else if (event.ch == '?') {
+            notice = "help is not implemented yet";
+            dirty = true;
         } else if (event.ch == 'l') {
             logsToggled = true;
             logsVisible = !logsVisible;
@@ -457,6 +515,179 @@ public final class TuiApp {
             logPane.toBottom();
         }
     }
+
+    /** 覆盖层内只认 y（确认）与 enter/n/esc（取消）；其它键一律不生效。 */
+    private void handleOverlay(KeyEvent event) {
+        ActionOverlay current = overlay;
+        if (current == null) {
+            return;
+        }
+        if (isConfirmKey(event)) {
+            if (current.accepts(NavKey.YES)) {
+                confirmCurrent();
+            }
+            // 非 root：y 不生效，面板保持打开，让 "requires root" 一直可见。
+            return;
+        }
+        if (isCancelKey(event)) {
+            closeOverlay();
+        }
+    }
+
+    private static boolean isConfirmKey(KeyEvent event) {
+        if (event.key == NavKey.YES) {
+            return true;
+        }
+        return event.key == NavKey.CHAR && (event.ch == 'y' || event.ch == 'Y');
+    }
+
+    private static boolean isCancelKey(KeyEvent event) {
+        if (event.key == NavKey.ESC || event.key == NavKey.ENTER
+                || event.key == NavKey.NO || event.key == NavKey.QUIT) {
+            return true;
+        }
+        return event.key == NavKey.CHAR && (event.ch == 'n' || event.ch == 'N');
+    }
+
+    private void openApply() {
+        if (!servicePackage.isRoot()) {
+            openOverlay(ActionOverlay.rootRequired(ActionKind.APPLY));
+            return;
+        }
+        openOverlay(ActionOverlay.applyPlan(servicePackage.plan()));
+    }
+
+    private void openRestart() {
+        if (!servicePackage.isRoot()) {
+            openOverlay(ActionOverlay.rootRequired(ActionKind.RESTART));
+            return;
+        }
+        openOverlay(ActionOverlay.restartConfirm(UnitNaming.unitName(servicePackage.spec())));
+    }
+
+    private void openDestroy() {
+        if (!servicePackage.isRoot()) {
+            openOverlay(ActionOverlay.rootRequired(ActionKind.DESTROY));
+            return;
+        }
+        try {
+            openOverlay(ActionOverlay.destroyPlan(servicePackage.destroyPlan()));
+        } catch (InvalidSpecException e) {
+            notice = "destroy failed: " + firstViolation(e);
+            dirty = true;
+        }
+    }
+
+    private void openOverlay(ActionOverlay actionOverlay) {
+        this.overlay = actionOverlay;
+        setOverlayOpen(true);
+        dirty = true;
+    }
+
+    private void closeOverlay() {
+        this.overlay = null;
+        setOverlayOpen(false);
+        dirty = true;
+    }
+
+    private void confirmCurrent() {
+        ActionKind kind = overlay.kind();
+        closeOverlay();
+        startAction(kind);
+    }
+
+    /**
+     * 动作放在独立 daemon 线程：UI 继续按 50ms 节奏取键/重绘，每 tick 只检查完成标志。
+     * 动作结果只有执行线程写、UI 线程读，靠 volatile 发布。
+     */
+    private void startAction(ActionKind kind) {
+        actionKind = kind;
+        actionResult = null;
+        actionRunning = true;
+        dirty = true;
+        Thread thread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                String result;
+                try {
+                    result = runAction(actionKind);
+                } catch (RuntimeException e) {
+                    result = actionKind.label() + " failed: " + messageOf(e);
+                }
+                actionResult = result;
+                actionRunning = false;
+                dirty = true;
+            }
+        }, "xac-tui-action");
+        thread.setDaemon(true);
+        actionThread = thread;
+        thread.start();
+    }
+
+    /** UI 线程收口：动作完成后写 notice、立即刷新状态。 */
+    private void completeAction(long nowMillis) {
+        if (actionRunning || actionResult == null) {
+            return;
+        }
+        String result = actionResult;
+        actionResult = null;
+        actionThread = null;
+        notice = result;
+        lastStatusAt = nowMillis;
+        state = loadStateSafely();
+        dirty = true;
+    }
+
+    private String runAction(ActionKind kind) {
+        try {
+            switch (kind) {
+                case APPLY:
+                    ApplyOutcome applied = servicePackage.apply(false);
+                    if (applied.failed != null) {
+                        return "apply failed: " + stepMessage(applied.failed);
+                    }
+                    return withWarnings("apply ok", applied.steps);
+                case RESTART:
+                    StepResult restarted = servicePackage.restart();
+                    if (!restarted.ok) {
+                        return "restart failed: " + stepMessage(restarted);
+                    }
+                    return "restart ok";
+                case DESTROY:
+                    DestroyOutcome destroyed = servicePackage.destroy(false);
+                    if (destroyed.failed != null) {
+                        return "destroy failed: " + stepMessage(destroyed.failed);
+                    }
+                    return withWarnings("destroy ok", destroyed.steps);
+                default:
+                    return kind.label() + " failed: unsupported action";
+            }
+        } catch (InvalidSpecException e) {
+            return kind.label() + " failed: " + firstViolation(e);
+        }
+    }
+
+    private static String withWarnings(String ok, List<StepResult> steps) {
+        int warnings = 0;
+        for (StepResult step : steps) {
+            if (step.ok && step.message != null && !step.message.isEmpty()) {
+                warnings++;
+            }
+        }
+        return warnings == 0 ? ok : ok + " (" + warnings + " warning(s))";
+    }
+
+    private static String firstViolation(InvalidSpecException e) {
+        if (!e.violations.isEmpty()) {
+            return e.violations.get(0).toString();
+        }
+        return messageOf(e);
+    }
+
+    private static String stepMessage(StepResult step) {
+        return step.message == null || step.message.isEmpty() ? "unknown error" : step.message;
+    }
+
 
     private void refresh() {
         state = loadStateSafely();
@@ -501,10 +732,52 @@ public final class TuiApp {
             }
         }
 
-        if (!notice.isEmpty() && height >= 4) {
+        if (actionRunning) {
+            paintFrameRow(canvas, noticeRow, "running...");
+        } else if (!notice.isEmpty() && height >= 4) {
             paintFrameRow(canvas, noticeRow, "notice: " + notice);
         }
+        if (overlay != null) {
+            paintOverlay(canvas);
+        }
         paintKeyBar(canvas);
+    }
+
+    /**
+     * 居中画确认面板：标题 + 内容行 + 底部提示。先把面板区域抹空，
+     * 避免底下的状态/日志文字从内容行之间透出来。
+     */
+    private void paintOverlay(Canvas canvas) {
+        int width = canvas.width();
+        int height = canvas.height();
+        if (width < 8 || height < 6) {
+            return;
+        }
+        List<String> lines = overlay.lines();
+        String title = overlay.kind().label();
+        String hint = overlay.hint();
+        int inner = Math.max(title.length(), hint.length());
+        for (String line : lines) {
+            inner = Math.max(inner, line.length());
+        }
+        int boxWidth = Math.min(width - 2, inner + 4);
+        int boxHeight = Math.min(height - 2, lines.size() + 4);
+        int left = Math.max(0, (width - boxWidth) / 2);
+        int top = Math.max(0, (height - boxHeight) / 2);
+        for (int y = top; y < top + boxHeight; y++) {
+            canvas.hline(y, ' ');
+        }
+        canvas.box(left, top, boxWidth, boxHeight);
+        int textX = Math.min(left + 2, width - 1);
+        canvas.text(textX, top + 1, title);
+        int row = top + 2;
+        for (String line : lines) {
+            if (row >= top + boxHeight - 2) {
+                break;
+            }
+            canvas.text(textX, row++, line);
+        }
+        canvas.text(textX, top + boxHeight - 2, hint);
     }
 
     private static int logRows(int height) {

@@ -7,6 +7,7 @@ import java.util.Collections;
 import java.util.List;
 
 import io.xac.systemd.apply.Action;
+import io.xac.systemd.apply.ActionFailure;
 import io.xac.systemd.apply.ApplyContext;
 import io.xac.systemd.apply.ApplyOutcome;
 import io.xac.systemd.apply.ApplyRunner;
@@ -16,6 +17,8 @@ import io.xac.systemd.apply.EnvironmentProbe;
 import io.xac.systemd.apply.Preflight;
 import io.xac.systemd.apply.RealEnvironmentProbe;
 import io.xac.systemd.apply.StepPlan;
+import io.xac.systemd.apply.StepResult;
+import io.xac.systemd.apply.actions.RestartAction;
 import io.xac.systemd.exec.CommandRunner;
 import io.xac.systemd.exec.ProcessRunner;
 import io.xac.systemd.logs.FileLogStream;
@@ -128,6 +131,24 @@ public final class ServicePackage {
     public ApplyOutcome apply(boolean dryRun) throws InvalidSpecException {
         requirePreflight(Preflight.check(spec, probe, runner, target));
         return new ApplyRunner().run(new ApplyContext(spec, target, runner, dryRun));
+    }
+
+    /**
+     * 只重启已部署的 unit：预检后执行 {@code systemctl restart}，不重写 unit/env、
+     * 不跑 daemon-reload，也不改 enabled 状态。失败不抛异常，而是返回 {@code ok=false}
+     * 的 {@link StepResult}，方便 TUI/CLI 统一按 notice 展示。
+     */
+    public StepResult restart() throws InvalidSpecException {
+        requirePreflight(Preflight.check(spec, probe, runner, target));
+        RestartAction action = new RestartAction();
+        ApplyContext ctx = new ApplyContext(spec, target, runner, false);
+        StepPlan plan = new StepPlan(action.describe(ctx), false);
+        try {
+            action.run(ctx);
+            return new StepResult(plan, true, null);
+        } catch (ActionFailure e) {
+            return new StepResult(plan, false, e.getMessage());
+        }
     }
 
     /** destroy 的只读计划：预检后只读文件系统，零动作，供确认面板使用。 */

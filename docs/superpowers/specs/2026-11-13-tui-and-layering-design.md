@@ -172,10 +172,10 @@ java-systemd-service-cli tui [<package-dir>]
 │ links   ok        /opt/demo/app.jar -> /srv/demo/app.jar │
 ├ logs ─ /var/log/demo/app.log · follow ───────────────────┤
 │ …                                                         │
-└ q quit  a apply  r restart  d destroy  e edit  ? help ───┘
+└ a apply  r restart  d destroy  e edit  ? help  q quit ───┘
 ```
 
-覆盖层：apply 预览（七步）、destroy 确认（删除清单 + 保留项）、edit 表单、help。均为居中面板，`Esc` 关闭。
+覆盖层：apply 预览（七步）、restart 确认、destroy 确认（删除清单 + 保留项）、edit 表单、help。均为居中面板，只有确认键才执行，`Esc` 关闭。
 
 窄屏（< 80 列）键位条收起为 `? help`；矮屏（< 20 行）日志区默认隐藏，`l` 切换。
 
@@ -188,7 +188,8 @@ java-systemd-service-cli tui [<package-dir>]
 ### 6.4 线程与刷新
 
 - UI 线程：50ms 轮询按键，脏标记才刷新；状态查询不在这里执行。
-- 状态 worker：单线程 daemon 执行器，每 2 秒 `ServicePackage.status()`；UI 侧 `Future.get(3s)`，预算 3 秒，超时或异常显示 `unknown` 并 `cancel(true)`，**UI 最多阻塞 3 秒**（本轮取结果，不跨 tick 异步收）；**覆盖层/编辑中暂停提交**，关闭后恢复；`run()` 退出时 `shutdownNow()`。
+- 状态 worker：单线程 daemon 执行器，每 2 秒 `ServicePackage.status()`；UI 侧 `Future.get(3s)`，预算 3 秒，超时或异常显示 `unknown` 并 `cancel(true)`，**UI 最多阻塞 3 秒**（本轮取结果，不跨 tick 异步收）；**覆盖层/编辑中暂停提交**，关闭后立即补一次；`run()` 退出时 `shutdownNow()`。
+- 动作线程：apply/restart/destroy 在独立 daemon 线程执行，UI 每 tick 检查完成标志；执行期间显示 `running...`、暂停状态轮询，完成后立即刷新状态。
 - 日志线程：`LogStream.start` 阻塞；`close()` 停止；切换来源或保存成功后重建。TUI 请求 follow 模式；流正常结束置 `logsEnded`，表头显示 `follow (ended)`，通知行提示 `log stream ended`。
 - 日志关闭：`close()` 放到独立 daemon 线程，UI 最多 `join(250ms)`；超时放弃等待，daemon 线程不阻塞 JVM 退出。
 - 线程间只传不可变值；绘制只在 UI 线程发生，`LogPane` 的读写由自身锁保护（日志线程可 `append`）。
@@ -197,15 +198,15 @@ java-systemd-service-cli tui [<package-dir>]
 
 - 逐项显示 `unit / env / process / links`，各自带状态与原因；漂移行标红并用 `StatusResult.drift()` 的同源判断：unit 行同时覆盖 unit 文件不同步、systemd 未加载（`not-found`）与 auto-start 期望不符；env 行覆盖配置了却不同步以及未配置但文件多余；process 行覆盖查询失败与非 active；links 行覆盖链接问题。
 - `systemctl` 查询失败（无 systemd、D-Bus 不可用）显示 `unknown` + 原因；不阻止退出与编辑，但禁用所有动作键。
-- 非 root：标题栏标 `not root`，动作面板可打开但 `enter` 不可用并提示需要 root。
+- 非 root：标题栏标 `not root`，动作面板可打开但 `y` 不可用并提示需要 root。
 - 通知行显示成功/失败/“N 条注释无法定位”，3 秒淡出；错误保留到下次动作。
 
 ### 6.6 动作
 
-- `a`：预览面板列七步；`enter` 执行，逐步显示 `pending → ok/failed`，失败停在该步并显示消息，提示按 `l` 看日志。
-- `r`：确认后 `restart`。
-- `d`：面板列出 willRemove/willKeep；只有 `y` 执行，`Enter` 无效。
-- 动作执行期间禁用其它动作键，避免并发改动。
+- `a`：预览面板列七步；只有 `y` 执行，`enter`/`n`/`esc` 取消；执行期间通知行显示 `running...`、暂停状态轮询，完成后 notice `apply ok` / `apply failed: <msg>` 并立即刷新状态。
+- `r`：确认面板列出 `systemctl restart <unit>`；只有 `y` 执行，`enter`/`n`/`esc` 取消；notice `restart ok` / `restart failed: <msg>`。
+- `d`：面板列出 willRemove/willKeep；只有 `y` 执行，`enter`/`n`/`esc` 取消（不执行，也不需要输入服务名）；notice `destroy ok` / `destroy failed: <msg>`。
+- 动作在独立 daemon 线程执行，UI 不阻塞、每 tick 检查完成标志；执行期间忽略其它动作键并暂停状态轮询，完成后立即刷新状态。
 
 ## 7. 编辑
 

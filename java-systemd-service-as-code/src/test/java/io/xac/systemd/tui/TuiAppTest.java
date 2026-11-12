@@ -24,6 +24,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayDeque;
+import java.util.Arrays;
 import java.util.Deque;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -797,5 +798,309 @@ class TuiAppTest {
         assertFalse(display.line(1).contains("unknown"), display.line(1));
 
         app.close();
+    }
+
+    /** 用来在测试里模拟「动作执行到一半」，验证 UI 不被阻塞、动作键在执行期间被忽略。 */
+    private static final class BlockingActionRunner implements CommandRunner {
+
+        private final CommandRunner delegate;
+        final CountDownLatch entered = new CountDownLatch(1);
+        private final CountDownLatch release = new CountDownLatch(1);
+
+        BlockingActionRunner(CommandRunner delegate) {
+            this.delegate = delegate;
+        }
+
+        void release() {
+            release.countDown();
+        }
+
+        @Override
+        public ExecResult run(List<String> argv) {
+            if (argv.size() >= 2 && "systemctl".equals(argv.get(0))
+                    && "restart".equals(argv.get(1))) {
+                entered.countDown();
+                try {
+                    release.await(5, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("restart interrupted");
+                }
+            }
+            return delegate.run(argv);
+        }
+
+        @Override
+        public RunningCommand start(List<String> argv) {
+            return delegate.start(argv);
+        }
+
+        @Override
+        public void runInheritIo(List<String> argv) {
+            delegate.runInheritIo(argv);
+        }
+    }
+
+    /** 动作测试只需要一个能写出 artifact.jar 的普通服务包。 */
+    private void prepareActionPackage() throws IOException {
+        Files.createFile(pkg.resolve("app.jar"));
+        Files.createDirectories(pkg.resolve("units"));
+        Files.createDirectories(pkg.resolve("env"));
+        runner.addResultForCommand("systemctl",
+                new ExecResult(0, "LoadState=not-found\nFragmentPath=\n", ""));
+    }
+
+    private Path unitPath() {
+        return pkg.resolve("units").resolve("xac.demo.service");
+    }
+
+    private Path envPath() {
+        return pkg.resolve("env").resolve("xac.demo.env");
+    }
+
+    private TuiApp actionApp(ServicePackage opened, RecordingDisplay display, KeySource keys,
+            FakeLogStream logs) {
+        return new TuiApp(opened, display, keys, FIXED_CLOCK,
+                new TuiApp.LogStreamFactory() {
+                    @Override
+                    public LogStream open(int lines, boolean follow) {
+                        logs.openedWithFollow = follow;
+                        return logs;
+                    }
+                });
+    }
+
+    private static String screen(RecordingDisplay display) {
+        Canvas canvas = display.last();
+        StringBuilder out = new StringBuilder();
+        for (int y = 0; y < canvas.height(); y++) {
+            out.append(canvas.line(y)).append('\n');
+        }
+        return out.toString();
+    }
+
+    private static boolean hasCall(RecordingRunner runner, String... argv) {
+        return countCalls(runner, argv) > 0;
+    }
+
+    private static int countCalls(RecordingRunner runner, String... argv) {
+        int count = 0;
+        for (List<String> call : runner.calls()) {
+            if (call.equals(Arrays.asList(argv))) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    @Test
+    void applyPreviewListsThePlanWithoutExecuting() throws Exception {
+        prepareActionPackage();
+        RecordingDisplay display = new RecordingDisplay(80, 24);
+        FakeLogStream logs = new FakeLogStream();
+        logs.blockUntilClosed = true;
+        TuiApp app = actionApp(openPackage(), display,
+                new ScriptedKeySource(KeyEvent.character('a')), logs);
+        int before = runner.calls().size();
+
+        assertTrue(app.tick(0));
+
+        String screen = screen(display);
+        assertTrue(screen.contains("would create path-links: []"), screen);
+        assertTrue(screen.contains("would systemctl restart xac.demo.service"), screen);
+        assertEquals(before, runner.calls().size(), "preview must not execute anything");
+    }
+
+    @Test
+    void applyRunsOnceAfterY() throws Exception {
+        prepareActionPackage();
+        RecordingDisplay display = new RecordingDisplay(80, 24);
+        FakeLogStream logs = new FakeLogStream();
+        logs.blockUntilClosed = true;
+        QueuedKeySource keys = new QueuedKeySource();
+        TuiApp app = actionApp(openPackage(), display, keys, logs);
+
+        keys.enqueue(KeyEvent.character('a'));
+        assertTrue(app.tick(0));
+        assertFalse(hasCall(runner, "systemctl", "restart", "xac.demo.service"));
+        assertTrue(screen(display).contains("would create path-links: []"));
+
+        keys.enqueue(KeyEvent.character('y'));
+        assertTrue(app.tick(0));
+        assertTrue(app.awaitAction(5000), "apply did not finish");
+        assertTrue(app.tick(0));
+
+        assertTrue(app.statusNote().startsWith("apply ok"), app.statusNote());
+        assertTrue(Files.isRegularFile(unitPath()), "apply must write the unit");
+        assertEquals(1, countCalls(runner, "systemctl", "restart", "xac.demo.service"));
+    }
+
+    @Test
+    void enterCancelsApplyPreviewWithoutExecuting() throws Exception {
+        prepareActionPackage();
+        RecordingDisplay display = new RecordingDisplay(80, 24);
+        FakeLogStream logs = new FakeLogStream();
+        logs.blockUntilClosed = true;
+        TuiApp app = actionApp(openPackage(), display,
+                new ScriptedKeySource(KeyEvent.character('a'), KeyEvent.of(NavKey.ENTER)), logs);
+
+        assertTrue(app.tick(0));
+
+        assertEquals(0, countCalls(runner, "systemctl", "restart", "xac.demo.service"),
+                "enter must not execute apply");
+        assertFalse(Files.exists(unitPath()));
+        assertFalse(screen(display).contains("would create path-links"), screen(display));
+    }
+
+    @Test
+    void nonRootActionsAreBlocked() throws Exception {
+        prepareActionPackage();
+        probe.root = false;
+        RecordingDisplay display = new RecordingDisplay(80, 24);
+        FakeLogStream logs = new FakeLogStream();
+        logs.blockUntilClosed = true;
+        TuiApp app = actionApp(openPackage(), display,
+                new QueuedKeySource(KeyEvent.character('a'), KeyEvent.character('y')), logs);
+
+        assertTrue(app.tick(0));
+
+        assertTrue(screen(display).contains("apply requires root"), screen(display));
+        assertEquals(0, countCalls(runner, "systemctl", "restart", "xac.demo.service"),
+                "non-root must not run apply");
+        assertFalse(Files.exists(unitPath()));
+    }
+
+    @Test
+    void editKeyReportsNotImplemented() throws Exception {
+        RecordingDisplay display = new RecordingDisplay(80, 24);
+        FakeLogStream logs = new FakeLogStream();
+        logs.blockUntilClosed = true;
+        TuiApp app = actionApp(openPackage(), display,
+                new ScriptedKeySource(KeyEvent.character('e')), logs);
+
+        assertTrue(app.tick(0));
+
+        assertEquals("edit is not implemented yet", app.statusNote());
+    }
+
+    @Test
+    void keyBarListsActions() throws Exception {
+        RecordingDisplay display = new RecordingDisplay(80, 24);
+        TuiApp app = app(display, new ScriptedKeySource(KeyEvent.of(NavKey.QUIT)));
+
+        assertFalse(app.tick());
+
+        String keyBar = display.line(23);
+        assertTrue(keyBar.contains("a apply  r restart  d destroy  e edit  ? help  q quit"),
+                keyBar);
+    }
+
+    @Test
+    void restartRunsOnlyAfterConfirmationAndDoesNotWriteUnit() throws Exception {
+        prepareActionPackage();
+        RecordingDisplay display = new RecordingDisplay(80, 24);
+        FakeLogStream logs = new FakeLogStream();
+        logs.blockUntilClosed = true;
+        QueuedKeySource keys = new QueuedKeySource();
+        TuiApp app = actionApp(openPackage(), display, keys, logs);
+
+        keys.enqueue(KeyEvent.character('r'));
+        assertTrue(app.tick(0));
+        assertTrue(screen(display).contains("systemctl restart xac.demo.service"), screen(display));
+        assertFalse(hasCall(runner, "systemctl", "restart", "xac.demo.service"));
+
+        keys.enqueue(KeyEvent.character('y'));
+        assertTrue(app.tick(0));
+        assertTrue(app.awaitAction(5000), "restart did not finish");
+        assertTrue(app.tick(0));
+
+        assertTrue(app.statusNote().startsWith("restart ok"), app.statusNote());
+        assertEquals(1, countCalls(runner, "systemctl", "restart", "xac.demo.service"));
+        assertFalse(Files.exists(unitPath()), "restart must not write the unit");
+        assertFalse(Files.exists(envPath()), "restart must not write the env file");
+    }
+
+    @Test
+    void destroyPreviewRequiresYAndRemovesUnit() throws Exception {
+        prepareActionPackage();
+        ServicePackage opened = openPackage();
+        opened.apply(false);
+        assertTrue(Files.isRegularFile(unitPath()), "setup must write the unit");
+        RecordingDisplay display = new RecordingDisplay(80, 24);
+        FakeLogStream logs = new FakeLogStream();
+        logs.blockUntilClosed = true;
+        QueuedKeySource keys = new QueuedKeySource();
+        TuiApp app = actionApp(opened, display, keys, logs);
+
+        keys.enqueue(KeyEvent.character('d'));
+        assertTrue(app.tick(0));
+        String panel = screen(display);
+        assertTrue(panel.contains("will remove:"), panel);
+        assertTrue(panel.contains("xac.dem"), panel);
+        assertTrue(panel.contains("keep:"), panel);
+
+        keys.enqueue(KeyEvent.of(NavKey.ENTER));
+        assertTrue(app.tick(0));
+        assertTrue(Files.isRegularFile(unitPath()), "enter must not destroy the unit");
+        assertEquals(0, countCalls(runner, "systemctl", "stop", "xac.demo.service"),
+                "enter must not stop the service");
+        assertEquals(0, countCalls(runner, "systemctl", "disable", "xac.demo.service"),
+                "enter must not disable the service");
+
+        keys.enqueue(KeyEvent.character('d'));
+        assertTrue(app.tick(0));
+        keys.enqueue(KeyEvent.character('y'));
+        assertTrue(app.tick(0));
+        assertTrue(app.awaitAction(5000), "destroy did not finish");
+        assertTrue(app.tick(0));
+
+        assertTrue(app.statusNote().startsWith("destroy ok"), app.statusNote());
+        assertFalse(Files.exists(unitPath()), "destroy must remove the unit");
+    }
+
+    @Test
+    void actionRunsOffTheUiThread() throws Exception {
+        prepareActionPackage();
+        BlockingActionRunner blocking = new BlockingActionRunner(runner);
+        RecordingDisplay display = new RecordingDisplay(80, 24);
+        FakeLogStream logs = new FakeLogStream();
+        logs.blockUntilClosed = true;
+        QueuedKeySource keys = new QueuedKeySource();
+        TuiApp app = actionApp(openPackage(blocking), display, keys, logs);
+
+        keys.enqueue(KeyEvent.character('r'));
+        assertTrue(app.tick(0));
+        keys.enqueue(KeyEvent.character('y'));
+        assertTrue(app.tick(0));
+        assertTrue(blocking.entered.await(5, TimeUnit.SECONDS), "restart did not start");
+
+        keys.enqueue(KeyEvent.character('q'));
+        long started = System.nanoTime();
+        assertTrue(app.tick(0));
+        long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+
+        assertTrue(elapsedMillis < 1000L, "tick() blocked " + elapsedMillis + "ms on restart");
+        assertTrue(screen(display).contains("running..."), screen(display));
+        assertTrue(app.running(), "action keys must be ignored while an action runs");
+
+        blocking.release();
+        assertTrue(app.awaitAction(5000), "restart did not finish");
+        assertTrue(app.tick(0));
+
+        assertTrue(app.statusNote().startsWith("restart ok"), app.statusNote());
+    }
+
+    @Test
+    void escapeClosesOverlayInsteadOfQuitting() throws Exception {
+        RecordingDisplay display = new RecordingDisplay(80, 24);
+        FakeLogStream logs = new FakeLogStream();
+        logs.blockUntilClosed = true;
+        TuiApp app = actionApp(openPackage(), display,
+                new ScriptedKeySource(KeyEvent.character('a'), KeyEvent.of(NavKey.ESC)), logs);
+
+        assertTrue(app.tick(0));
+
+        assertTrue(app.running(), "escape must only close the overlay");
+        assertFalse(screen(display).contains("would create path-links"), screen(display));
     }
 }
