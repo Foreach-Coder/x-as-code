@@ -19,6 +19,7 @@ public final class ServiceSpec {
         private Map<String, String> properties;
         private String workdir;
         private List<String> pathLinks;
+        private String logFile;
         private Lifecycle lifecycle = new Lifecycle(null, null, null, null);
 
         public Builder(Path packageDir) {
@@ -43,6 +44,8 @@ public final class ServiceSpec {
 
         public Builder pathLinks(List<String> pathLinks) { this.pathLinks = pathLinks; return this; }
 
+        public Builder logFile(String logFile) { this.logFile = logFile; return this; }
+
         public Builder lifecycle(Lifecycle lifecycle) { this.lifecycle = lifecycle; return this; }
 
         public ServiceSpec build() {
@@ -59,6 +62,7 @@ public final class ServiceSpec {
     public final LinkedHashMap<String, String> properties;
     public final Path workdir;
     public final List<String> pathLinks;
+    public final String logFile;
     public final Lifecycle lifecycle;
     public final Path packageDir;
 
@@ -77,6 +81,7 @@ public final class ServiceSpec {
                 : new LinkedHashMap<String, String>(b.properties);
         this.workdir = b.workdir == null ? null : root.resolve(b.workdir).normalize();
         this.pathLinks = b.pathLinks == null ? new ArrayList<String>() : b.pathLinks;
+        this.logFile = b.logFile;
         this.lifecycle = b.lifecycle;
         this.packageDir = root;
     }

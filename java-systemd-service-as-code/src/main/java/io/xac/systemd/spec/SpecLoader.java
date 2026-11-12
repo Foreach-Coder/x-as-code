@@ -130,6 +130,7 @@ public final class SpecLoader {
         Map<Object, Object> m = (Map<Object, Object>) root;
         Map<Object, Object> artifact = (Map<Object, Object>) m.get("artifact");
         Map<Object, Object> runtime = (Map<Object, Object>) m.get("runtime");
+        Map<Object, Object> logs = (Map<Object, Object>) m.get("logs");
         Map<Object, Object> lifecycle = (Map<Object, Object>) m.get("lifecycle");
         Lifecycle lc = new Lifecycle(
                 (Boolean) get(lifecycle, "auto-start"),
@@ -161,6 +162,7 @@ public final class SpecLoader {
                 .properties(Schema.stringMap(m.get("properties")))
                 .workdir(workdirRaw)
                 .pathLinks(pathLinks)
+                .logFile((String) get(logs, "file"))
                 .lifecycle(lc)
                 .build();
     }

@@ -6,6 +6,7 @@ import java.util.List;
 
 import io.xac.systemd.spec.validators.EnvValidator;
 import io.xac.systemd.spec.validators.LifecycleValidator;
+import io.xac.systemd.spec.validators.LogsValidator;
 import io.xac.systemd.spec.validators.NameValidator;
 import io.xac.systemd.spec.validators.NewlineValidator;
 import io.xac.systemd.spec.validators.PathLinksValidator;
@@ -20,7 +21,8 @@ public final class ValidationRunner {
             new NewlineValidator(),
             new PathLinksValidator(),
             new PlaceholderValidator(),
-            new LifecycleValidator());
+            new LifecycleValidator(),
+            new LogsValidator());
 
     public static List<Violation> run(ServiceSpec spec) {
         List<Violation> out = new ArrayList<Violation>();

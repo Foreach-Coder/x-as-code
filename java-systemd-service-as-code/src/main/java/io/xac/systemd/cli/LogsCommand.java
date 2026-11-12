@@ -11,7 +11,7 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
-@Command(mixinStandardHelpOptions = true, name = "logs", description = "show service logs (journalctl)")
+@Command(mixinStandardHelpOptions = true, name = "logs", description = "show service logs (journald, or logs.file when configured)")
 public final class LogsCommand implements Callable<Integer> {
 
     @Parameters(index = "0", arity = "0..1", defaultValue = ".", paramLabel = "<package-dir>",
@@ -38,7 +38,11 @@ public final class LogsCommand implements Callable<Integer> {
         if (!result.ok()) {
             System.err.println(result.stderr.trim());
         } else if (!follow) {
-            System.out.print(result.stdout);
+            String text = result.stdout;
+            System.out.print(text);
+            if (!text.isEmpty() && !text.endsWith("\n")) {
+                System.out.println();
+            }
         }
         return result.ok() ? 0 : 2;
     }

@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -122,5 +123,43 @@ class SpecLoaderTest {
         ServiceSpec spec = ServiceSpec.builder(pkg).jar("app.jar").workdir("run").build();
         assertEquals(pkg.resolve("app.jar").toAbsolutePath().normalize(), spec.jar);
         assertEquals(pkg.resolve("run").toAbsolutePath().normalize(), spec.workdir);
+    }
+
+    @Test
+    void loadsLogsFile() throws IOException {
+        Path log = pkg.resolve("app.log").toAbsolutePath();
+        write(minimal() + "logs:\n  file: " + log.toString().replace("\\", "/") + "\n");
+        SpecLoader.Result result = SpecLoader.load(pkg);
+        assertTrue(result.violations.isEmpty(), result.violations.toString());
+        assertNotNull(result.spec);
+        assertTrue(result.spec.logFile.endsWith("app.log"), result.spec.logFile);
+    }
+
+    @Test
+    void rejectsUnknownFieldInsideLogsSection() throws IOException {
+        write(minimal() + "logs:\n  file: /var/log/demo/app.log\n  rotate: true\n");
+        SpecLoader.Result result = SpecLoader.load(pkg);
+        assertNull(result.spec);
+        assertTrue(result.violations.toString().contains("logs.rotate: unknown field"),
+                result.violations.toString());
+    }
+
+    @Test
+    void requiresLogsFileWhenSectionPresent() throws IOException {
+        write(minimal() + "logs:\n");
+        SpecLoader.Result result = SpecLoader.load(pkg);
+        assertNull(result.spec);
+        assertTrue(result.violations.toString().contains("logs.file: missing required field"),
+                result.violations.toString());
+    }
+
+    @Test
+    void rejectsRelativeLogsFile() throws IOException {
+        write(minimal() + "logs:\n  file: var/log/demo/app.log\n");
+        SpecLoader.Result result = SpecLoader.load(pkg);
+        assertNotNull(result.spec);
+        List<Violation> violations = ValidationRunner.run(result.spec);
+        assertEquals(1, violations.size(), violations.toString());
+        assertEquals("logs.file: must be an absolute path", violations.get(0).toString());
     }
 }

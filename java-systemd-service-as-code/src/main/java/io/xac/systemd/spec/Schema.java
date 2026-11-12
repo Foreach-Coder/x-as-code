@@ -48,6 +48,8 @@ public final class Schema {
             scalar("properties", Type.STRING_MAP, false),
             scalar("workdir", Type.STRING, false),
             scalar("path-links", Type.STRING_LIST, false),
+            section("logs", false,
+                    scalar("file", Type.STRING, true)),
             section("lifecycle", false,
                     scalar("auto-start", Type.BOOLEAN, false),
                     scalar("restart", Type.STRING, false),
@@ -145,13 +147,24 @@ public final class Schema {
         }
         for (Node child : node.children) {
             String childPath = path.isEmpty() ? child.name : path + "." + child.name;
-            Object value = map == null ? null : map.get(child.name);
-            if (value == null && child.required) {
-                out.add(new Violation(childPath, "missing required field"));
+            boolean present = map != null && map.containsKey(child.name);
+            if (!present) {
+                if (child.required) {
+                    out.add(new Violation(childPath, "missing required field"));
+                }
+                continue;
             }
-            if (value != null) {
-                checkNode(child, value, childPath, out);
+            Object value = map.get(child.name);
+            if (value == null) {
+                if (child.type == Type.SECTION) {
+                    // `logs:` 这样的空段按「空映射」处理，让子字段的必填错误带上精确路径。
+                    checkSection(child, new LinkedHashMap<Object, Object>(), childPath, out);
+                } else if (child.required) {
+                    out.add(new Violation(childPath, "missing required field"));
+                }
+                continue;
             }
+            checkNode(child, value, childPath, out);
         }
         if (map != null) {
             for (Object key : map.keySet()) {

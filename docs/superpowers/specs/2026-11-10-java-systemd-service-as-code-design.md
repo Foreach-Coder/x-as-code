@@ -459,6 +459,17 @@ journalctl -u xac.<name>.service --no-pager -n <N> --follow    # -f 时，走 ru
 - 参数以 argv 逐项传，不经过 shell
 - 不需要 root（能否看系统日志取决于用户是否在 `systemd-journal` 组）
 
+**配了 `logs.file` 时改为读文件**（`xac.yaml` 见规范 §4.8）。纯 JDK 实现，不调用 `tail`：
+
+- 来源选择只看有没有 `logs.file`：有就读文件，没有就走 journald；两者不会同时用
+- `-n`：`RandomAccessFile` 从尾部按块向前找换行符，定位起点后一次读出，不把整个文件读进内存，
+  也不会在按字节拼接时破坏 UTF-8 多字节字符
+- `-f`：先打印最后 N 行，然后每 200ms 查一次 `length()`，从上次偏移继续读；`length` 小于偏移
+  视为文件被截断，偏移归零重读
+- 文件不存在 → `log file not found: <path>`，退 2；存在但不可读 →
+  `log file is not readable: <path>`，退 2
+- 不创建、不轮转日志文件：那是服务的责任；`-f` 只跟路径，不跟轮转后的新文件（§11）
+
 ### 6.5 destroy
 
 ```
@@ -519,7 +530,9 @@ systemd 起不来时（`degraded`），reload 失败也挡不住「文件已经�
 
 `2` 可以安全重试，`1` 需要人看一眼。
 
-`logs` 的两种失败都退 2：`-n` 非正整数（输出 `-n must be a positive integer`），以及 `journalctl` 起不来（这台机器没有 journalctl）。
+`logs` 的两种失败都退 2：`-n` 非正整数（输出 `-n must be a positive integer`），以及
+`journalctl` 起不来（这台机器没有 journalctl）。文件模式同样退 2：文件不存在
+（`log file not found: <path>`）、文件不可读（`log file is not readable: <path>`）、读取出错。
 理由同「什么都没改动」——用户没拿到日志，但机器状态没变，重跑无害。
 
 ### 6.7 输出格式
@@ -680,6 +693,8 @@ CMD：本机缓存的镜像元数据可能是 `ENTRYPOINT ["/bin/sh"]`，不覆�
 - `destroy` 只处理带管理头的 unit 文件；手工删掉 unit 文件后仍在跑的进程不会被停掉（只警告）
 - 符号链接形式的「管理 unit」会被 destroy 整体跳过（xac 自己从不这样写 unit）
 - `path-links` 的受保护目录策略是保守的：`/var`、`/home` 下面也不能建链接（需要时先改用其它位置）
+- `logs -f` 读文件时只跟路径，不跟轮转后的新文件：logback 把 `app.log` 改名、再新建同名文件时，
+  会继续停在旧文件上；需要重新执行 `logs`
 - 不防恶意 `xac.yaml`：`runtime.java` 与 `opts` 等价于「以 root 执行任意命令」，`xac` 只保证
   「人写错或不一致时不波及系统」，不承担权限隔离职责
 

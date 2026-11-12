@@ -91,6 +91,10 @@ workdir: /opt/demo/work
 path-links:
   - ./conf:/opt/demo/conf
 
+# 服务不往控制台打日志、自己写日志文件时，让 logs 读它；不写这段则读 journald。
+# logs:
+#   file: /var/log/demo/app.log
+
 lifecycle:
   auto-start: true
   restart: on-failure
@@ -114,11 +118,15 @@ sudo java-systemd-service-cli apply .             # 写入文件、reload、enab
 
 ```bash
 java-systemd-service-cli status .              # 只读，0=一致 1=漂移
-java-systemd-service-cli logs . -n 100         # journalctl 最近 100 行
+java-systemd-service-cli logs . -n 100         # 最近 100 行（journald，或 logs.file 指定的文件）
 java-systemd-service-cli logs . -f             # 跟随
 sudo java-systemd-service-cli destroy .        # 停止并清理（交互确认）
 sudo java-systemd-service-cli destroy . -y     # 非交互环境用 -y
 ```
+
+`logs` 默认读 `journalctl -u xac.<name>`。如果服务自己不往控制台打日志，在 `xac.yaml` 里写
+`logs.file: <绝对路径>`，`logs` 就改读那个文件（`-n` / `-f` 一样可用）；文件不存在时退 2。
+`xac` 不创建也不轮转这个文件。
 
 升级 CLI 本身：解压新版本到新目录，在新目录里再跑一次 `sudo .../bin/java-systemd-service-cli install`，链接自动改指；旧目录随后可以删除。不需要先 `uninstall`。
 
@@ -128,13 +136,13 @@ sudo java-systemd-service-cli destroy . -y     # 非交互环境用 -y
 |---|---|---|
 | `apply` | `[包目录] [--dry-run]` | 渲染并写入 unit/env、建 `path-links`、`daemon-reload`、`enable\|disable`、`restart` |
 | `status` | `[包目录]` | 只读；比对磁盘与期望、查询 `systemctl show`；一致退 0，有漂移退 1 |
-| `logs` | `[包目录] [-n N] [-f]` | `journalctl -u xac.<name>.service --no-pager`；`-f` 跟随 |
+| `logs` | `[包目录] [-n N] [-f]` | 读 `journalctl -u xac.<name>.service --no-pager`，或 `logs.file` 指定的文件；`-f` 跟随 |
 | `destroy` | `[包目录] [--dry-run] [-y]` | 停止、禁用、删 unit/env/软链接；非交互环境必须加 `-y` |
 | `init` | `[父目录]` | 交互式创建 `<父目录>/<服务名>/xac.yaml` 模板，不覆盖已有文件 |
 | `install` | `--dry-run` | 把当前发行包的启动脚本软链到 `/usr/local/bin`（root） |
 | `uninstall` | `--dry-run` | 删掉 `install` 建的那条软链（root） |
 
-包目录缺省为当前目录。`apply` / `destroy` 需要 root；`status` / `logs` 不需要（能否看日志取决于是否在 `systemd-journal` 组）。
+包目录缺省为当前目录。`apply` / `destroy` 需要 root；`status` / `logs` 不需要（读 journald 时取决于是否在 `systemd-journal` 组，读文件时取决于文件的读权限）。
 
 退出码：`0` 成功；`1` 执行失败或 `status` 检出漂移；`2` 输入/环境问题且**什么都没改动**。
 

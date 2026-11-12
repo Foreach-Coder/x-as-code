@@ -31,6 +31,7 @@ systemd 的说法，但不做指令直通表——systemd 有几百条指令，�
 | `properties` | 否 | 映射 | 空 | 展开成 `-Dkey=value`，见 §4.4 |
 | `workdir` | 否 | 字符串 | 包目录 | 进程的工作目录，见 §4.5 |
 | `path-links` | 否 | 字符串列表 | 空 | 路径链接表，见 §4.6 |
+| `logs` | 否 | 映射 | journald | `logs` 命令的日志来源，见 §4.8 |
 | `lifecycle` | 否 | 映射 | 见 §4.7 | 自启与启停，见 §4.7 |
 
 未知字段一律视为错误，不会忽略——拼错的键如果被静默跳过，问题要到服务启动时才暴露。
@@ -192,6 +193,27 @@ lifecycle:
   timeout-stop-sec: 60
 ```
 
+### 4.8 logs
+
+`logs` 命令读哪里的日志。不写这一段时读 journald（`journalctl -u xac.<name>`）；写了就读指定文件，
+适合那些不往控制台打日志、自己写日志文件的 Java 程序。
+
+| 子字段 | 必填 | 说明 |
+|--------|------|------|
+| `file` | 是 | 日志文件的绝对路径 |
+
+- 路径必须是绝对路径。相对路径会相对进程的 `workdir` 解析，而 `workdir` 在不同机器上可能不同。
+- 只改变 `logs` 的读取来源；**不改变服务的日志去向**——unit 里仍然只设 `SyslogIdentifier`，
+  文件由服务自己写、自己轮转。
+- 文件不存在或不可读时，`logs` 报错并退 2。
+- `-n` 与 `-f` 对文件模式同样有效：`-n` 从文件尾部取最后 N 行，`-f` 轮询追加；文件变短视为被截断，
+  从头重读。v1 不跟随轮转后的新文件（见 §8）。
+
+```yaml
+logs:
+  file: /var/log/messystemservice/app.log
+```
+
 ## 5. 值的写法约定
 
 - 路径：相对路径一律相对**包目录**写。
@@ -218,12 +240,13 @@ lifecycle:
    `restart-sec`、`timeout-stop-sec` 是正整数。
 10. 会写进 unit 的字符串不含换行：`description`、`artifact.jar`、`runtime.java`、`workdir`、
     `runtime.opts` 的每一项、`properties` 的键与值。
+11. `logs.file` 是绝对路径（见 §4.8）。
 
 以下三条需要在本机看文件，由 CLI 在动手前检查：
 
-11. `artifact.jar` 指向的文件存在。
-12. `runtime.java` 指向的文件存在且可执行。
-13. `path-links` 的源存在，且目标要么不存在、要么已是指向源的软链接——只有 `apply` 检查，
+12. `artifact.jar` 指向的文件存在。
+13. `runtime.java` 指向的文件存在且可执行。
+14. `path-links` 的源存在，且目标要么不存在、要么已是指向源的软链接——只有 `apply` 检查，
     `status`、`logs`、`destroy` 不需要产物还在。
 
 ## 7. 样例
@@ -297,6 +320,8 @@ lifecycle:
 以下由工具内置策略决定，不在文件里配置：
 
 - systemd 加固项与进程属性（`User=`、`PrivateTmp=` 等）
-- 日志去向与标识（统一走 journald，标识符 = `xac.<name>`）
+- 服务的日志去向与标识（标识符 = `xac.<name>`；写 stdout 进 journald 还是自己写文件，由服务决定；
+  `logs` 读哪里由 §4.8 决定）
+- 日志文件的创建、权限与轮转（文件由服务自己管理；`logs -f` 不跟随轮转后的新文件）
 - unit 文件的位置与命名（`/etc/systemd/system/xac.<name>.service`）
 - 环境变量文件的位置与权限（`/etc/xac/xac.<name>.env`，`0600`）
