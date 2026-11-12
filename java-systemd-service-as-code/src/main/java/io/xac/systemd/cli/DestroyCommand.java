@@ -8,11 +8,9 @@ import java.nio.file.Paths;
 import java.util.List;
 import java.util.concurrent.Callable;
 
-import io.xac.systemd.apply.ApplyContext;
 import io.xac.systemd.apply.DestroyOutcome;
 import io.xac.systemd.apply.DestroyRunner;
 import io.xac.systemd.apply.EnvironmentProbe;
-import io.xac.systemd.apply.Preflight;
 import io.xac.systemd.apply.RealEnvironmentProbe;
 import io.xac.systemd.apply.StepResult;
 import io.xac.systemd.core.InvalidSpecException;
@@ -49,35 +47,10 @@ public final class DestroyCommand implements Callable<Integer> {
     static int run(Path packageDir, boolean dryRun, boolean yes, EnvironmentProbe probe,
                    CommandRunner runner, SystemdTarget target, PrintStream out, PrintStream err)
             throws IOException {
-        ServicePackage pkg;
-        try {
-            pkg = ServicePackage.open(packageDir, runner, probe, target);
-        } catch (InvalidSpecException e) {
-            report(e.violations, err);
-            return 2;
-        }
-        DestroyOutcome plan;
-        try {
-            plan = pkg.destroyPlan();
-        } catch (InvalidSpecException e) {
-            report(e.violations, err);
-            return 2;
-        }
-        printPlan(plan, out);
-        if (!yes && !dryRun && !confirm(pkg.spec().name, err)) {
-            return 2;
-        }
-        DestroyOutcome outcome;
-        try {
-            outcome = pkg.destroy(dryRun);
-        } catch (InvalidSpecException e) {
-            report(e.violations, err);
-            return 2;
-        }
-        return printOutcome(outcome, dryRun, out);
+        return run(packageDir, dryRun, yes, probe, runner, target, out, err, new DestroyRunner());
     }
 
-    /** 测试专用：注入 DestroyRunner 以覆盖动作失败分支。 */
+    /** 测试专用：注入 DestroyRunner 以覆盖动作失败分支；编排仍全部委托门面。 */
     static int run(Path packageDir, boolean dryRun, boolean yes, EnvironmentProbe probe,
                    CommandRunner runner, SystemdTarget target, PrintStream out, PrintStream err,
                    DestroyRunner destroyRunner) throws IOException {
@@ -88,18 +61,24 @@ public final class DestroyCommand implements Callable<Integer> {
             report(e.violations, err);
             return 2;
         }
-        List<Violation> violations = Preflight.checkDestroy(probe);
-        if (!violations.isEmpty()) {
-            report(violations, err);
+        DestroyOutcome plan;
+        try {
+            plan = pkg.destroyPlan(destroyRunner);
+        } catch (InvalidSpecException e) {
+            report(e.violations, err);
             return 2;
         }
-        DestroyOutcome plan = destroyRunner.plan(pkg.spec(), target);
         printPlan(plan, out);
         if (!yes && !dryRun && !confirm(pkg.spec().name, err)) {
             return 2;
         }
-        DestroyOutcome outcome = destroyRunner.run(
-                new ApplyContext(pkg.spec(), target, runner, dryRun));
+        DestroyOutcome outcome;
+        try {
+            outcome = pkg.destroy(dryRun, destroyRunner);
+        } catch (InvalidSpecException e) {
+            report(e.violations, err);
+            return 2;
+        }
         return printOutcome(outcome, dryRun, out);
     }
 

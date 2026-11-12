@@ -10,6 +10,7 @@ import io.xac.systemd.spec.Violation;
 import io.xac.systemd.systemd.SystemdTarget;
 import io.xac.systemd.systemd.UnitNaming;
 import io.xac.systemd.systemd.UnitRenderer;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -95,6 +96,19 @@ class ServicePackageTest {
                 "    - -Xmx512m",
                 "path-links:",
                 "  - missing:/opt/xac-target",
+                "");
+    }
+
+    private void writeSpecWithExistingLinkTarget(Path existingTarget) throws java.io.IOException {
+        write("name: demo",
+                "artifact:",
+                "  jar: app.jar",
+                "runtime:",
+                "  java: /usr/bin/java",
+                "  opts:",
+                "    - -Xmx512m",
+                "path-links:",
+                "  - ./payload:" + existingTarget,
                 "");
     }
 
@@ -287,22 +301,29 @@ class ServicePackageTest {
     }
 
     @Test
-    void logsReadConfiguredFileWithoutRoot() throws Exception {
-        Path log = pkg.resolve("app.log");
-        Files.write(log, "one\ntwo\n".getBytes(StandardCharsets.UTF_8));
-        write("name: demo",
-                "artifact:",
-                "  jar: app.jar",
-                "runtime:",
-                "  java: /usr/bin/java",
-                "logs:",
-                "  file: " + log,
-                "");
-        probe.root = false;
+    void openAcceptsExistingPathLinkTarget() throws Exception {
+        Assumptions.assumeTrue(java.io.File.separatorChar == '/',
+                "path-links 目标只支持 POSIX 绝对路径");
+        Path existingTarget = pkg.resolve("srv");
+        Files.createDirectories(existingTarget);
+        writeSpecWithExistingLinkTarget(existingTarget);
 
-        ExecResult result = open().logs(10);
+        ServicePackage opened = open();
 
-        assertTrue(result.ok(), result.stderr);
-        assertEquals("one\ntwo\n", result.stdout);
+        assertEquals("demo", opened.spec().name);
+    }
+
+    @Test
+    void destroyPlanAcceptsExistingPathLinkTarget() throws Exception {
+        Assumptions.assumeTrue(java.io.File.separatorChar == '/',
+                "path-links 目标只支持 POSIX 绝对路径");
+        Path existingTarget = pkg.resolve("srv");
+        Files.createDirectories(existingTarget);
+        writeSpecWithExistingLinkTarget(existingTarget);
+
+        DestroyOutcome plan = open().destroyPlan();
+
+        assertTrue(plan.willRemove.isEmpty(), plan.willRemove.toString());
+        assertNull(plan.failed);
     }
 }

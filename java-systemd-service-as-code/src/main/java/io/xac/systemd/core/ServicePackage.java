@@ -16,9 +16,7 @@ import io.xac.systemd.apply.Preflight;
 import io.xac.systemd.apply.RealEnvironmentProbe;
 import io.xac.systemd.apply.StepPlan;
 import io.xac.systemd.exec.CommandRunner;
-import io.xac.systemd.exec.ExecResult;
 import io.xac.systemd.exec.ProcessRunner;
-import io.xac.systemd.logs.LogsRunner;
 import io.xac.systemd.spec.ServiceSpec;
 import io.xac.systemd.spec.SpecLoader;
 import io.xac.systemd.spec.ValidationRunner;
@@ -108,19 +106,25 @@ public final class ServicePackage {
         return new ApplyRunner().run(new ApplyContext(spec, target, runner, dryRun));
     }
 
-    /** destroy 的只读计划；CLI 用它先打印「将删除 / 保留」，再确认。 */
+    /** destroy 的只读计划：预检后只读文件系统，零动作，供确认面板使用。 */
     public DestroyOutcome destroyPlan() throws InvalidSpecException {
+        return destroyPlan(new DestroyRunner());
+    }
+
+    public DestroyOutcome destroyPlan(DestroyRunner destroyRunner) throws InvalidSpecException {
         requirePreflight(Preflight.checkDestroy(probe));
-        return new DestroyRunner().plan(spec, target);
+        return destroyRunner.plan(spec, target);
     }
 
     public DestroyOutcome destroy(boolean dryRun) throws InvalidSpecException {
-        requirePreflight(Preflight.checkDestroy(probe));
-        return new DestroyRunner().run(new ApplyContext(spec, target, runner, dryRun));
+        return destroy(dryRun, new DestroyRunner());
     }
 
-    public ExecResult logs(int lines) {
-        return new LogsRunner().run(spec, runner, lines, false);
+    /** 唯一编排入口：预检 + `DestroyRunner.run`；runner 参数只用于注入测试替身。 */
+    public DestroyOutcome destroy(boolean dryRun, DestroyRunner destroyRunner)
+            throws InvalidSpecException {
+        requirePreflight(Preflight.checkDestroy(probe));
+        return destroyRunner.run(new ApplyContext(spec, target, runner, dryRun));
     }
 
     private static void requirePreflight(List<Violation> violations)

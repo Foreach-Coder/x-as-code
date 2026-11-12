@@ -106,7 +106,7 @@ class DestroyCommandTest {
         return capture(dryRun, yes, runner, null);
     }
 
-    /** destroyRunner 为 null 时走生产路径（ServicePackage 门面），否则走注入的动作失败路径。 */
+    /** 两条重载都委托 ServicePackage；destroyRunner 非 null 时用它覆盖动作失败分支。 */
     private Captured capture(boolean dryRun, boolean yes, RecordingRunner runner,
                              DestroyRunner destroyRunner) throws IOException {
         writeSpec();

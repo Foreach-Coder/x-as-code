@@ -724,7 +724,7 @@ Expected: COMPILATION ERROR。
 
 - [ ] **Step 3: 最小实现**
 
-- `TuiApp` 状态：`overlay` 增加 `ACTION` + `ActionOverlay` 实例；`a/r/d` 创建覆盖层（`a` 调 `pkg.plan()`；`d` 调 `pkg.destroy(true)` 取计划——dry-run 不落盘）。
+- `TuiApp` 状态：`overlay` 增加 `ACTION` + `ActionOverlay` 实例；`a/r/d` 创建覆盖层（`a` 调 `pkg.plan()`；`d` 调 `pkg.destroyPlan()` 取计划——纯读计划，不落盘）。
 - 执行：apply → `pkg.apply(false)`；restart → 新增的 `pkg.restart()`（`Preflight.check` + `RestartAction.run`，结果包装成单个 `StepResult`）；destroy → `pkg.destroy(false)`。结果面板显示 `ok/failed` 与 warnings；失败停在该步。
 - `ServicePackage.restart()`：
 ```java

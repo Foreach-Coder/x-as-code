@@ -1,12 +1,13 @@
 package io.xac.systemd.cli;
 
+import java.io.PrintStream;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.List;
 import java.util.concurrent.Callable;
 
 import io.xac.systemd.core.InvalidSpecException;
 import io.xac.systemd.core.ServicePackage;
+import io.xac.systemd.exec.CommandRunner;
 import io.xac.systemd.exec.ExecResult;
 import io.xac.systemd.exec.ProcessRunner;
 import io.xac.systemd.logs.LogsRunner;
@@ -32,24 +33,29 @@ public final class LogsCommand implements Callable<Integer> {
     @Override
     public Integer call() {
         Path packageDir = Paths.get(packageDirArg).toAbsolutePath().normalize();
+        return run(packageDir, new ProcessRunner(), lines, follow, System.out, System.err);
+    }
+
+    /** 日志读取仍在 LogsRunner（Task 6 才换成 LogStream）；这里只复用门面的加载与校验。 */
+    static int run(Path packageDir, CommandRunner runner, int lines, boolean follow,
+                   PrintStream out, PrintStream err) {
         ServicePackage pkg;
         try {
             pkg = ServicePackage.open(packageDir);
         } catch (InvalidSpecException e) {
             for (Violation violation : e.violations) {
-                System.err.println(violation);
+                err.println(violation);
             }
             return 2;
         }
-        ExecResult result = new LogsRunner()
-                .run(pkg.spec(), new ProcessRunner(), lines, follow);
+        ExecResult result = new LogsRunner().run(pkg.spec(), runner, lines, follow);
         if (!result.ok()) {
-            System.err.println(result.stderr.trim());
+            err.println(result.stderr.trim());
         } else if (!follow) {
             String text = result.stdout;
-            System.out.print(text);
+            out.print(text);
             if (!text.isEmpty() && !text.endsWith("\n")) {
-                System.out.println();
+                out.println();
             }
         }
         return result.ok() ? 0 : 2;
