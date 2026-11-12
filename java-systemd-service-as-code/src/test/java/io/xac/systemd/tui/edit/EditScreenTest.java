@@ -382,6 +382,45 @@ class EditScreenTest {
     }
 
     @Test
+    void externalChangeAfterConfirmingBothReopensThePrompt() throws Exception {
+        Path file = write();
+        EditScreen screen = new EditScreen(model(), file);
+        press(screen, NavKey.ENTER);
+        type(screen, " plus");
+        press(screen, NavKey.ENTER);
+
+        // 第一次 s 同时命中两个原因：注释将丢失 + 文件已被外部改动。
+        Files.write(file, "\n# stray tail note\n".getBytes(StandardCharsets.UTF_8),
+                StandardOpenOption.APPEND);
+        screen.handle(NavKey.CHAR, 's');
+        assertFalse(screen.closed());
+        List<String> firstPrompt = screen.lines(120, 0);
+        assertTrue(anyContains(firstPrompt,
+                "comment(s) will be dropped and the file changed outside"), firstPrompt.toString());
+
+        // 确认之后再改一次：确认必须作废，第二次 s 只重新提示，不能落盘。
+        Files.write(file, "\n# late edit\n".getBytes(StandardCharsets.UTF_8),
+                StandardOpenOption.APPEND);
+        byte[] afterLateEdit = Files.readAllBytes(file);
+        screen.handle(NavKey.CHAR, 's');
+
+        assertFalse(screen.closed(), "confirmation is bound to the stamped file");
+        List<String> secondPrompt = screen.lines(120, 0);
+        assertTrue(anyContains(secondPrompt, "file changed outside"), secondPrompt.toString());
+        assertTrue(anyContains(secondPrompt, "press s again to confirm"), secondPrompt.toString());
+        assertArrayEqualsQuiet(afterLateEdit, Files.readAllBytes(file));
+
+        // 两个原因都在最新指纹上确认后，第三次 s 才写规范文本。
+        screen.handle(NavKey.CHAR, 's');
+        assertTrue(screen.closed());
+        assertTrue(screen.saved());
+        String text = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+        assertTrue(text.contains("description: demo service plus"), text);
+        assertFalse(text.contains("stray tail note"), text);
+        assertFalse(text.contains("late edit"), text);
+    }
+
+    @Test
     void unchangedBufferDoesNotMarkScreenDirty() throws Exception {
         EditScreen screen = new EditScreen(model(), write());
 
@@ -444,6 +483,52 @@ class EditScreenTest {
                 EditorModel.from(fullSpec(), comments), write());
 
         assertTrue(anyContains(screen.lines(120, 0), "# my note"));
+    }
+
+    // ------------------------------------------------- nested validation paths
+
+    @Test
+    void focusesOptsRowForIndexedValidationPath() throws Exception {
+        EditScreen screen = new EditScreen(
+                model().with("runtime.opts", list("${MISSING}")), write());
+
+        List<String> lines = screen.lines(120, 0);
+
+        assertEquals("runtime.opts", currentPath(screen));
+        assertTrue(lines.get(4).contains("! "), lines.get(4));
+    }
+
+    @Test
+    void focusesEnvRowForKeyedValidationPath() throws Exception {
+        EditScreen screen = new EditScreen(
+                model().with("env", list("1BAD=x")), write());
+
+        List<String> lines = screen.lines(120, 0);
+
+        assertEquals("env", currentPath(screen));
+        assertTrue(lines.get(5).contains("! "), lines.get(5));
+    }
+
+    @Test
+    void focusesPathLinksRowForIndexedValidationPath() throws Exception {
+        EditScreen screen = new EditScreen(
+                model().with("path-links", list("./conf:/var")), write());
+
+        List<String> lines = screen.lines(120, 0);
+
+        assertEquals("path-links", currentPath(screen));
+        assertTrue(lines.get(8).contains("! "), lines.get(8));
+    }
+
+    @Test
+    void focusesExactFieldWhenValidationPathHasNoSuffix() throws Exception {
+        EditScreen screen = new EditScreen(
+                model().with("runtime.java", list("")), write());
+
+        List<String> lines = screen.lines(120, 0);
+
+        assertEquals("runtime.java", currentPath(screen));
+        assertTrue(lines.get(3).contains("! "), lines.get(3));
     }
 
     // --------------------------------------------------------------- details

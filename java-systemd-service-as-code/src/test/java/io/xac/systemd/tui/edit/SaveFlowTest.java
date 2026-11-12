@@ -143,8 +143,7 @@ class SaveFlowTest {
         assertEquals(2, result.lostComments, result.orphanNotes.toString());
         assertEquals(1, result.exampleComments, result.orphanNotes.toString());
         assertEquals(1, result.orphanNotes.size(), result.orphanNotes.toString());
-        assertTrue(result.orphanNotes.get(0).contains(
-                        "1 of them are commented-out field examples"),
+        assertTrue(result.orphanNotes.get(0).contains("1 commented-out example"),
                 result.orphanNotes.toString());
     }
 
@@ -158,9 +157,22 @@ class SaveFlowTest {
         assertEquals(1, result.lostComments, result.orphanNotes.toString());
         assertEquals(1, result.exampleComments, result.orphanNotes.toString());
         assertEquals(1, result.orphanNotes.size(), result.orphanNotes.toString());
-        assertTrue(result.orphanNotes.get(0).contains(
-                        "all of them are commented-out field examples"),
+        assertTrue(result.orphanNotes.get(0).contains("1 commented-out example"),
                 result.orphanNotes.toString());
+    }
+
+    @Test
+    void freeTextThatLooksLikeAKeyIsCountedAsProse() throws IOException {
+        // 只有 DSL 键名才算「被注释掉的字段示例」；# Note: ... 是散文。
+        Path file = write(SpecWriter.render(fullSpec())
+                + "\n# Note: this is prose\n");
+
+        SaveFlow.Result result = SaveFlow.prepare(model(), file);
+
+        assertTrue(result.ok(), String.valueOf(result.violations));
+        assertEquals(1, result.lostComments, result.orphanNotes.toString());
+        assertEquals(0, result.exampleComments, result.orphanNotes.toString());
+        assertTrue(result.orphanNotes.isEmpty(), result.orphanNotes.toString());
     }
 
     @Test
@@ -279,10 +291,11 @@ class SaveFlowTest {
     @Test
     void commitWritesExactBytesAndLeavesNoTempFile() throws IOException {
         Path file = write(SpecWriter.render(fullSpec()));
+        FileStamp baseline = FileStamp.of(file);
         EditorModel changed = model().with("description", list("changed"));
-        SaveFlow.Result result = SaveFlow.prepare(changed, file);
+        SaveFlow.Result result = SaveFlow.prepare(changed, file, baseline);
 
-        SaveFlow.commit(file, result.newText);
+        SaveFlow.commit(file, result.newText, baseline);
 
         assertArrayEquals(result.newText.getBytes(StandardCharsets.UTF_8),
                 Files.readAllBytes(file));
@@ -298,7 +311,7 @@ class SaveFlowTest {
     void commitCreatesMissingFile() throws IOException {
         Path file = pkg.resolve("new.yaml");
 
-        SaveFlow.commit(file, "name: demo\n");
+        SaveFlow.commit(file, "name: demo\n", FileStamp.of(file));
 
         assertEquals("name: demo\n", new String(Files.readAllBytes(file),
                 StandardCharsets.UTF_8));

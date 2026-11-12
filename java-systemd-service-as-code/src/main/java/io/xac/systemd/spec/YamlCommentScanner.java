@@ -423,9 +423,24 @@ public final class YamlCommentScanner {
     private static final int LOST_PROSE = 1;
     private static final int LOST_EXAMPLE = 2;
 
+    /** DSL 里真实存在的字段名；只有这些键的 {@code # key: value} 才算「被注释掉的字段示例」。 */
+    private static final Set<String> DSL_KEYS = new HashSet<String>();
+
+    static {
+        String[] keys = {
+            "name", "description", "artifact", "jar", "runtime", "java", "opts",
+            "env", "properties", "workdir", "path-links", "logs", "file",
+            "lifecycle", "auto-start", "restart", "restart-sec", "timeout-stop-sec",
+        };
+        for (String key : keys) {
+            DSL_KEYS.add(key);
+        }
+    }
+
     /**
      * 用户文件里无法挂回的注释分三类：与模板逐字相同的（模板打底会重新写出来，不算丢失）、
-     * 被注释掉的字段示例（{@code key: value} 形态，单列计数），以及其余散文注释（真正丢失）。
+     * 被注释掉的字段示例（{@code key: value} 且 key 属于 DSL，单列计数），以及其余散文注释
+     * （真正丢失）。{@code # Note: ...} 这类自由文本即使长得像键值也按散文算。
      */
     private static int lostKind(String text, Comments template) {
         if (text == null) {
@@ -434,7 +449,12 @@ public final class YamlCommentScanner {
         if (template != null && template.templateLines.contains(text)) {
             return LOST_NONE;
         }
-        return anchorKey(text) != null ? LOST_EXAMPLE : LOST_PROSE;
+        return isExampleField(text) ? LOST_EXAMPLE : LOST_PROSE;
+    }
+
+    private static boolean isExampleField(String text) {
+        String key = anchorKey(text);
+        return key != null && DSL_KEYS.contains(key);
     }
 
     private static String orphanText(String orphan) {

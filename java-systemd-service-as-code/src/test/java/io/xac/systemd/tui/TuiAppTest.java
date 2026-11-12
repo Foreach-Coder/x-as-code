@@ -1119,7 +1119,8 @@ class TuiAppTest {
         RecordingDisplay display = new RecordingDisplay(80, 24);
         Path file = pkg.resolve("xac.yaml");
         String text = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
-        Files.write(file, (text + "\n# tail note\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(file, (text + "\n# workdir: /opt/prod/work\n")
+                .getBytes(StandardCharsets.UTF_8));
         TuiApp app = new TuiApp(openPackage(), display,
                 new ScriptedKeySource(
                         KeyEvent.character('e'),
@@ -1159,9 +1160,12 @@ class TuiAppTest {
                 app.statusNote());
         assertTrue(app.statusNote().contains("1 comment(s) were dropped"),
                 app.statusNote());
+        assertTrue(app.statusNote().contains("1 commented-out example"),
+                app.statusNote());
         String noticeRow = display.line(22);
         assertTrue(noticeRow.contains("notice: saved"), noticeRow);
         assertTrue(noticeRow.contains("1 comment(s) were dropped"), noticeRow);
+        assertTrue(noticeRow.contains("1 commented-out example"), noticeRow);
     }
 
     @Test

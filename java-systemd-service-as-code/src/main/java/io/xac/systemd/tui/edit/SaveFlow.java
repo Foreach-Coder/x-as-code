@@ -143,20 +143,10 @@ public final class SaveFlow {
         }
     }
 
-    /** 原子写入规范文本（UTF-8、0644、同目录临时文件 + ATOMIC_MOVE）。 */
-    public static void commit(Path yamlFile, String text) throws IOException {
-        if (yamlFile == null) {
-            throw new IllegalArgumentException("yamlFile must not be null");
-        }
-        if (text == null) {
-            throw new IllegalArgumentException("text must not be null");
-        }
-        SpecWriter.save(yamlFile, text);
-    }
-
     /**
      * 原子写入，并在落盘前再验一次指纹：prepare 到 commit 之间文件又被改过就拒绝写入，
-     * 让用户带着最新内容重新进编辑器，而不是覆盖别人的修改。
+     * 让用户带着最新内容重新进编辑器，而不是覆盖别人的修改。调用方必须传 baseline，
+     * 没有「跳过复验」的公开入口。
      */
     public static void commit(Path yamlFile, String text, FileStamp baseline) throws IOException {
         if (yamlFile == null) {
@@ -184,11 +174,7 @@ public final class SaveFlow {
         if (examples <= 0) {
             return notes;
         }
-        if (examples == applied.dropped + examples) {
-            notes.add("all of them are commented-out field examples");
-        } else {
-            notes.add(examples + " of them are commented-out field examples");
-        }
+        notes.add(examples + " commented-out example" + (examples == 1 ? "" : "s"));
         return notes;
     }
 

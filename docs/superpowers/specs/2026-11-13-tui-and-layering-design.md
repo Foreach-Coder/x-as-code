@@ -200,7 +200,7 @@ java-systemd-service-cli tui [<package-dir>]
 - 逐项显示 `unit / env / process / links`，各自带状态与原因；漂移行标红并用 `StatusResult.drift()` 的同源判断：unit 行同时覆盖 unit 文件不同步、systemd 未加载（`not-found`）与 auto-start 期望不符；env 行覆盖配置了却不同步以及未配置但文件多余；process 行覆盖查询失败与非 active；links 行覆盖链接问题。
 - `systemctl` 查询失败（无 systemd、D-Bus 不可用）显示 `unknown` + 原因；不阻止退出与编辑，但禁用所有动作键。
 - 非 root：标题栏标 `not root`，动作面板可打开但 `y` 不可用并提示需要 root。
-- 通知行显示成功/失败/“N comment(s) were dropped”，3 秒淡出；错误保留到下次动作。保存成功后主屏 notice 也带上丢失注释的条数（示例行另以 `; M were commented-out field examples` 补充）。
+- 通知行显示成功/失败/“N comment(s) were dropped”，3 秒淡出；错误保留到下次动作。保存成功后主屏 notice 也带上丢失注释的条数（示例行另以 `; M commented-out example` 补充，复数加 `s`）。
 
 ### 6.6 动作
 
@@ -230,7 +230,7 @@ Comments merge(Comments base, Comments override)            // 同路径 overrid
 ApplyResult apply(String rendered, Comments comments)
 ApplyResult apply(String rendered, Comments source, Comments template)  // 模板打底、用户覆盖
 
-final class ApplyResult { String text; int kept; int dropped; }
+final class ApplyResult { String text; int kept; int dropped; int examplesDropped; }
 ```
 
 `apply` 不重排、不重写任何配置行，只在目标行前插入注释行、在行尾追加同行注释，因此结果仍能被 `SpecLoader` 读回与 `render` 等价的 spec。`kept` 是实际写入的注释条数；无法挂回的用户注释按 §7.4 拆成两个互斥计数：`dropped` 是散文注释，`examplesDropped` 是被注释掉的字段示例（`# workdir: /opt/prod/work` 这类 `key: value`），两者之和供 §6.5 的 “N comment(s) were dropped” 使用。三参重载只统计用户注释，模板里没有对应字段的默认注释不算丢失。用户文件里逐字等于模板原文的注释（`init` 文件首次保存时被空行冲散的模板注释块）也不算丢失，因为模板打底会重新写出它们；比较是逐字相等，用户改动过的模板示例行会被明确计数。模板打底只回写散文注释：`# env:`、`#   GREETING: hello world` 这类列表/字段示例行按 §7.4 只作路径锚点，首次保存后不会重新出现。
@@ -274,8 +274,8 @@ final class ApplyResult { String text; int kept; int dropped; }
 
 ### 7.2 校验
 
-- 失焦校验：用草稿构建 `ServiceSpec`，跑 `ValidationRunner`，取路径前缀匹配当前字段的 `Violation` 显示在行尾；不阻塞编辑。
-- 保存前全量校验：有错则停留，底部列错误，光标跳到第一条。
+- 失焦校验：用草稿构建 `ServiceSpec`，跑 `ValidationRunner`，行尾显示当前字段的 `Violation`；不阻塞编辑。错误归属按**路径前缀**：`runtime.opts[3]`、`env.FOO`、`path-links[0]`、`properties.k` 分别归到 `runtime.opts`、`env`、`path-links`、`properties`，一条字段行只显示该字段的第一条消息。
+- 保存前全量校验：有错则停留，底部列错误，光标跳到第一条。进入编辑屏时也先跑一次全量校验并把光标放到第一条错误；保存失败同样重新定位。
 - 保存前二次确认：有注释将丢失（`lostComments = dropped + examplesDropped > 0`）或文件被外部改动时，第一次 `s` 只提示，第二次 `s` 才真正写入。三种文案：
   - 仅注释：`! N comment(s) will be dropped; press s again to confirm`
   - 仅外部改动：`! file changed outside; press s again to overwrite`
@@ -336,10 +336,11 @@ s → 草稿 spec → EditorModel.validate（必填非空 + Schema + ValidationR
 
 无法定位的用户注释由 `ApplyResult` 拆成两个互斥计数：`dropped` 是散文注释，`examplesDropped`
 是被注释掉的字段示例（`# workdir: /opt/prod/work` 这类 `key: value` 形态）；与模板逐字相同的
-orphan 两栏都不计。总数 `lost = dropped + examplesDropped`，提示语为 `N comment(s) will be dropped`，
-`note:` 行只在有示例时补充 `M of them are commented-out field examples`（全部是示例时写
-`all of them are commented-out field examples`），不重复总数。保存成功后主屏 notice 用
-`N comment(s) were dropped`（示例同样以 `; M were...` 补充）。
+orphan 两栏都不计。示例识别只认 DSL 键名（`name`/`description`/`artifact`/`runtime`/`env`/
+`properties`/`workdir`/`path-links`/`logs`/`lifecycle` 及其子键），`# Note: this is prose` 这类
+自由文本算散文。总数 `lost = dropped + examplesDropped`，提示语为 `N comment(s) will be dropped`，
+`note:` 行只在有示例时补充 `M commented-out example`（复数加 `s`），不重复总数。保存成功后主屏
+notice 用 `N comment(s) were dropped`（示例同样以 `; M commented-out example` 补充）。
 保存前必须显示条数并要求二次确认（第一次 `s` 不写），避免这类用户手写内容无声消失；diff 面板留待后续迭代。
 
 ### 7.5 限制

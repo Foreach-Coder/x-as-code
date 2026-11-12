@@ -53,6 +53,11 @@ public final class EditScreen {
     private boolean confirmExternal;
     private List<Violation> saveError = Collections.emptyList();
     private List<String> saveNote = Collections.emptyList();
+    /**
+     * 最近一次全量校验的结果，用来画行尾 {@code !} 并定位光标；与 {@link #saveError}
+     * 分开，避免二次确认提示被一次普通移动覆盖。
+     */
+    private List<Violation> validation = Collections.emptyList();
 
     public EditScreen(EditorModel model, Path yamlFile) throws IOException {
         this(model, yamlFile, FileStamp.of(yamlFile));
@@ -72,6 +77,10 @@ public final class EditScreen {
         this.yamlFile = yamlFile;
         this.baseline = baseline;
         this.focus = firstEditable();
+        refreshValidation();
+        if (!validation.isEmpty()) {
+            focusFirst(validation);
+        }
     }
 
     // ------------------------------------------------------------- accessors
@@ -390,6 +399,7 @@ public final class EditScreen {
         clearConfirm();
         saveError = Collections.emptyList();
         saveNote = Collections.emptyList();
+        refreshValidation();
     }
 
     private void undo() {
@@ -402,6 +412,7 @@ public final class EditScreen {
         clearConfirm();
         saveError = Collections.emptyList();
         saveNote = Collections.emptyList();
+        refreshValidation();
         if (focus >= model.fields().size()) {
             focus = firstEditable();
         }
@@ -425,6 +436,7 @@ public final class EditScreen {
 
     /** 保存：校验 → 渲染/合并注释 → （必要时二次确认）→ 原子写入。 */
     private void save() {
+        refreshValidation();
         if (baseline == null) {
             try {
                 baseline = FileStamp.of(yamlFile);
@@ -516,26 +528,48 @@ public final class EditScreen {
         StringBuilder note = new StringBuilder();
         note.append(result.lostComments).append(" comment(s) were dropped");
         if (result.exampleComments > 0) {
-            note.append("; ");
-            if (result.exampleComments == result.lostComments) {
-                note.append("all were commented-out field examples");
-            } else {
-                note.append(result.exampleComments)
-                        .append(" were commented-out field examples");
-            }
+            note.append("; ").append(result.exampleComments)
+                    .append(" commented-out example")
+                    .append(result.exampleComments == 1 ? "" : "s");
         }
         return Collections.singletonList(note.toString());
     }
 
     private void focusFirst(List<Violation> violations) {
         for (Violation violation : violations) {
-            if (violation.path == null || violation.path.isEmpty()) {
-                continue;
-            }
-            EditorField field = findField(violation.path);
+            EditorField field = findField(ownerPath(violation.path));
             if (field != null) {
                 focus = model.fields().indexOf(field);
                 return;
+            }
+        }
+    }
+
+    private void refreshValidation() {
+        validation = model.validate();
+    }
+
+    /**
+     * 把带后缀的校验路径归到可编辑字段：{@code runtime.opts[0]} → {@code runtime.opts}，
+     * {@code env.FOO} → {@code env}，{@code path-links[0]} → {@code path-links}，
+     * {@code properties.K} → {@code properties}；精确命中的字段原样返回。
+     */
+    private String ownerPath(String path) {
+        if (path == null || path.isEmpty()) {
+            return path;
+        }
+        if (findField(path) != null) {
+            return path;
+        }
+        String candidate = path;
+        while (true) {
+            int cut = Math.max(candidate.lastIndexOf('.'), candidate.lastIndexOf('['));
+            if (cut <= 0) {
+                return path;
+            }
+            candidate = candidate.substring(0, cut);
+            if (findField(candidate) != null) {
+                return candidate;
             }
         }
     }
@@ -633,13 +667,17 @@ public final class EditScreen {
     }
 
     private Map<String, String> errorsByPath() {
-        if (saveError.isEmpty()) {
+        if (validation.isEmpty()) {
             return Collections.emptyMap();
         }
         Map<String, String> errors = new LinkedHashMap<String, String>();
-        for (Violation violation : saveError) {
-            if (violation.path != null && !violation.path.isEmpty()) {
-                errors.put(violation.path, violation.message);
+        for (Violation violation : validation) {
+            if (violation.path == null || violation.path.isEmpty()) {
+                continue;
+            }
+            String owner = ownerPath(violation.path);
+            if (owner != null && !errors.containsKey(owner)) {
+                errors.put(owner, violation.message);
             }
         }
         return errors;
