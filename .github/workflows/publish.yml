@@ -62,6 +62,12 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.tag || github.ref }}
 
+      # 被测源码取 tag，CI 脚本取默认分支（tag 里可能还没有这些文件）。
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: ci
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -120,7 +126,7 @@ jobs:
         run: |
           set -euo pipefail
           jar=$(ls dist/*.jar | head -n 1)
-          pwsh -NoProfile -File .github/scripts/sync-gitcode-release.ps1 \
+          pwsh -NoProfile -File ci/.github/scripts/sync-gitcode-release.ps1 \
             -Owner "$GITCODE_OWNER" \
             -Repo "$GITCODE_REPO" \
             -Tag "${{ steps.meta.outputs.tag }}" \
