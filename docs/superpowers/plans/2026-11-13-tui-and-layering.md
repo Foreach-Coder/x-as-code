@@ -563,15 +563,20 @@ git add -A && git commit -m "refactor: 日志改为 core.LogStream，CLI 经门�
 **Interfaces:**
 ```java
 public final class Canvas {
+    public static final char PLACEHOLDER = '\0';        // 宽字符占用的第二格
     public Canvas(int width, int height);
     public int width(); public int height();
     public void clear();
-    public void text(int x, int y, String s);           // 超宽截断，不换行
+    public void text(int x, int y, String s);           // 按显示列写；超宽截断，不换行
     public void hline(int y, char c);
-    public String line(int y);                          // 测试断言用
+    public String line(int y);                          // 测试断言用（含 PLACEHOLDER）
 }
 
-public interface Display { void draw(Canvas canvas); }
+public interface Display extends Closeable {
+    void show(Canvas canvas);
+    Size size();                                        // 嵌套类 Size { int width; int height; }
+    void close();
+}
 
 public interface KeySource { KeyEvent next(long timeoutMillis) throws IOException; }  // 超时返回 null
 
@@ -581,10 +586,10 @@ public enum NavKey {
 }
 public final class KeyEvent { public final NavKey key; public final char ch; }
 
-public final class TuiApp implements Runnable {
+public final class TuiApp {
     TuiApp(ServicePackage pkg, Display display, KeySource keys);
-    public void run();          // 主循环
-    void tick();                // 测试用：处理一个事件 + 渲染
+    public int run();           // 主循环；正常退出 0，终端读写故障 1
+    public boolean tick();      // 测试用：处理一个事件 + 渲染；返回是否继续
     boolean running();
     String statusNote();
 }
@@ -596,7 +601,8 @@ public final class TuiApp implements Runnable {
 @Test void drawsTitleStatusAndKeyBar() {
     TuiApp app = newApp(80, 24, new KeyEvent(QUIT, '\0'));
     app.tick();
-    assertEquals("┌ xac.demo " + repeat('─', 60) + " running · auto-start on · root ┐", display.line(0));
+    // 80 列 - 11（"┌ xac.demo "）- 33（" running · auto-start on · root ┐"）= 36
+    assertEquals("┌ xac.demo " + repeat('─', 36) + " running · auto-start on · root ┐", display.line(0));
     assertTrue(display.line(23).contains("q quit"));
 }
 
@@ -613,11 +619,11 @@ Expected: COMPILATION ERROR —— `io.xac.systemd.tui` 不存在。
 - [ ] **Step 3: 最小实现**
 
 - `pom.xml` 加 `com.googlecode.lanterna:lanterna:3.1.5`（compile）。
-- `Canvas`：`char[][] cells`，`text` 逐字符写入，越界跳过；空单元格为 `' '`。
-- `LanternaDisplay`：`Terminal` + `Screen`，`draw` 时 `screen.clear()`，按行列 `setCharacter`，最后 `refresh()`；`TuiCommand` 用 `DefaultTerminalFactory().createTerminal()`，`try/finally` 关闭。
-- `LanternaKeySource`：`terminal.pollInput(timeout)` → `KeyEvent`（`KeyType.ArrowUp` → UP 等；`Character` → CHAR）。
-- `TuiApp`：状态机字段 `running`、`overlay`、`status`；`tick` 取一个事件（测试用注入的 `ScriptedKeySource`），`QUIT`/`ESC` 停；渲染 → `display.draw(canvas)`。
-- `TuiCommand`：非 TTY（`System.console() == null`）→ stderr `tui requires an interactive terminal` + 退 2；`ServicePackage.open` 失败 → 打印 violations + 退 2；正常 `new TuiApp(...).run()` 退 0。
+- `Canvas`：`char[][] cells`，坐标按**显示列**；CJK/全角/代理对占 2 列，第二格写 `PLACEHOLDER`（`'\0'`），`text`/`put` 写前先清掉被覆盖的旧字形（含半格宽字），越界时整个字形丢弃、不写半格；空单元格为 `' '`。
+- `LanternaDisplay`：`Terminal` + `Screen`，`show` 时 `screen.clear()`、按行列 `setCharacter`、最后 `refresh()`；遇到 `PLACEHOLDER` 跳过（宽字形的第二列由终端自己推进），代理对拼成完整字符串再 `TextCharacter.fromString(...)`；`close()` 吞掉 `screen.close()` 的 `IOException`（`terminal.close()` 同样吞），避免 `finally` 覆盖退出码；`TuiCommand` 用 `DefaultTerminalFactory().createTerminal()`，`try/finally` 关闭。
+- `LanternaKeySource`：Lanterna 3.1.5 的 `InputProvider` 没有带超时的读，用 `pollInput()` + 10ms 轮询实现 `next(timeoutMillis)`（超时返回 null），`KeyStroke` → `KeyEvent`（`KeyType.ArrowUp` → UP 等；`Character` → CHAR）。
+- `TuiApp`：状态机字段 `running`、`failed`、`notice`；`tick` 取一个事件（测试用注入的 `ScriptedKeySource`），`QUIT`/`ESC` 停；渲染 → `display.show(canvas)`。`run()` 用 try 包住「读事件 + 渲染」：`IOException` → `input error: ...`；任意 `RuntimeException`（含 `UncheckedIOException`）→ `tui failed: ...`、停循环、返回 1；正常退出 0。
+- `TuiCommand`：非 TTY 判定 = 已附加 console 且 `TERM` 非空、trim+lowercase 后不是 `dumb`/`unknown` → 否则 stderr `tui requires an interactive terminal` + 退 2；`ServicePackage.open` 失败 → 打印 violations + 退 2；正常返回 `TuiApp.run()` 的退出码（故障时把 `statusNote()` 打到 stderr）。
 - e2e：`SmokeIT` 新增 `tuiRequiresTerminal`，容器内 `java -jar xac.jar tui /opt/demo`（无 TTY）断言退出 2 且 stderr 含该行。
 
 - [ ] **Step 4: 跑测试确认通过**
@@ -984,20 +990,31 @@ git add -A && git commit -m "feat: TUI 结构化编辑与规范化保存"
 **Files:**
 - Modify: `pom.xml`（版本 `0.2.0`）、`cli/RootCommand.java`（`version = "0.2.0"`）、`pom.xml` 的 shade 配置注释
 - Modify: `README.md`、`AGENTS.md`、`CONTRIBUTING.md`、`docs/superpowers/specs/2026-11-13-tui-and-layering-design.md`（补「实现落点」小节）
-- Create: `e2e/` 无新增；`SmokeIT` 加 terminfo 冒烟
+- Create: `e2e/` 无新增；`SmokeIT` 加真实 PTY 冒烟
 
 - [ ] **Step 1: 写失败测试**
 
-`SmokeIT` 新增 `tuiLoadsLanternaTerminfo()`：容器内 `java -jar xac.jar tui /opt/demo`（非 TTY）→ 退 2 且 stderr 是 `tui requires an interactive terminal`（若 terminfo 缺失，Lanterna 会在创建终端时抛异常并打印堆栈，此断言即失败）。
+`SmokeIT` 新增 `tuiRunsInARealPty()`：用 `script` 给容器内命令分配真实 pty，喂 `q` 后退出，断言退出码 0、首帧含服务名与状态行、且没有走非 TTY 分支：
 
-- [ ] **Step 2: 跑失败**
+```java
+ExecResult r = container.execInContainer("sh", "-c",
+        "printf 'q' | script -qec 'java -jar /opt/xac/xac.jar tui /opt/demo' /dev/null");
+assertEquals(0, r.getExitCode(), r.getStderr());
+assertTrue(r.getStdout().contains("demo"));
+assertTrue(r.getStdout().contains("unit"));
+assertFalse(r.getStdout().contains("tui requires an interactive terminal"));
+```
 
-Run: `MVN -Pe2e verify -Dtest=SmokeIT#tuiLoadsLanternaTerminfo`
-Expected: 若 shade 过滤了 terminfo，FAILED 且 stderr 含 `NoSuchFileException` 或 `terminfo`。
+理由：Lanterna 3.1.5 的 Linux 终端走 `UnixTerminal`/`stty`，fat jar 内没有 `terminfo/` 资源（见设计文档 §9），所以「jar 里有没有 terminfo」这个前提本身不成立；而且原来的非 TTY 用例在 `System.console() == null` 处就返回 2，根本走不到终端初始化，永远通过、证明不了打包正确。真实 pty 才覆盖「创建终端 → 画首帧 → 读键 → 退出」整条链。
+
+- [ ] **Step 2: 跑冒烟（预期 PASS）**
+
+Run: `MVN -Pe2e verify -Dtest=SmokeIT#tuiRunsInARealPty`
+Expected: PASS。本用例是回归冒烟，没有「先红」状态；若 FAILED，看 stderr 是否 `NoSuchFileException`/`stty`/`Cannot run program`——那是打包或终端工厂的问题，按提示修，不要降低断言。
 
 - [ ] **Step 3: 实现**
 
-- `pom.xml`：版本 `0.2.0`；shade 的 `filters` 里**不得**出现排除 `**/terminfo/**`（当前无 filters，保持无）；`ManifestResourceTransformer` 不变。
+- `pom.xml`：版本 `0.2.0`；shade **不声明任何资源 `filters`/`includes`**（当前没有，保持通用；Lanterna 3.1.5 的 Linux 终端不读 jar 内 terminfo）；`ManifestResourceTransformer` 不变。
 - 全仓替换版本号 `0.1.3` → `0.2.0`（`cli/RootCommand.java`、`README.md`、`AGENTS.md`、`CONTRIBUTING.md`、`.github/workflows/publish.yml`、`.github/scripts/sync-gitcode-release.ps1`）；历史计划/设计文档不改。
 - `AGENTS.md`：分层纪律（`cli → core`、`tui → core`、`spec/systemd/exec` 不反向依赖）；依赖白名单加 Lanterna；命令段加 `tui`；「TUI 仅 Linux/SSH」。
 - `README.md`：新增「TUI」一节（启动、键位表、截图式块、非 TTY 说明、编辑与保存的安全行为）。
@@ -1008,7 +1025,7 @@ Expected: 若 shade 过滤了 terminfo，FAILED 且 stderr 含 `NoSuchFileExcept
 
 ```bash
 MVN clean test          # Expected: 约 230 tests, 0 failures（16 skipped 允许）
-MVN -Pe2e verify        # Expected: 230 + 11 e2e，BUILD SUCCESS
+MVN -Pe2e verify        # Expected: 230 + 12 e2e，BUILD SUCCESS
 MVN -DskipTests package # Expected: target/java-systemd-service-cli-0.2.0.tar.gz
 ```
 
@@ -1040,7 +1057,7 @@ git add -A && git commit -m "build: 发布 0.2.0（TUI 与三层分层）"
 | §6.6 动作 | Task 9（apply 预览、destroy 仅 y、restart 确认） |
 | §7 编辑 | Task 10/11/12/13 |
 | §8 测试 | 每个 Task 的测试步骤；Task 14 e2e |
-| §9 交付 | Task 14（版本、terminfo、文档） |
+| §9 交付 | Task 14（版本、真实 PTY 冒烟、文档） |
 
 **2. 占位符扫描**：本文件不含 `TBD`/`TODO`/`implement later`；所有代码块给出可直接编译的签名或方法体片段。
 

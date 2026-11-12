@@ -280,14 +280,14 @@ s → 草稿 spec → Schema + ValidationRunner
 | 视图模型 | 状态行、漂移着色、编辑字段树、校验定位、diff 文本 | 纯 JUnit，不碰终端 |
 | TUI 壳 | 键位映射、覆盖层开关、resize 不崩 | `DefaultVirtualTerminal` + 注入按键 |
 | CLI 回归 | 输出不变、退出码不变 | 现有 180 单测 |
-| e2e | 现有 10 例 + 非 TTY `tui` 退 2 | Testcontainers `xac-e2e:24.04` |
+| e2e | 现有 11 例 + 真实 PTY `tui` 冒烟 | Testcontainers `xac-e2e:24.04` |
 
 原则：能在视图模型断言的，不在终端断言。
 
 ## 9. 交付
 
 - 依赖：`com.googlecode.lanterna:lanterna:3.1.5`（唯一新增）。
-- 打包：shade 打进 fat jar，**不得过滤 Lanterna 的 terminfo 资源**；预计 850 KB → 约 1.2 MB。
+- 打包：shade 打进 fat jar，**不得声明任何资源 `filters`/`includes`**（保持通用，不要按资源名做白/黑名单）。Lanterna 3.1.5 的 Linux 终端走 `UnixTerminal`/`stty`，jar 内没有 `terminfo/` 资源（实测 409 个条目，只有 theme/multilang 等 properties），所以「为了 terminfo 而保留资源」这个理由不成立；不过滤是因为过滤本身没有必要且容易误伤。预计 850 KB → 约 1.2 MB。
 - 文档：`AGENTS.md`（分层纪律、依赖白名单、`tui` 命令）、`README.md`（TUI 用法与键位）、设计文档新增本章；`xac-yaml-spec.md` 不变。
 - 版本：`0.2.0`。
 - 平台：Linux/SSH 为主；Windows 不作为 TUI 支持目标。
@@ -298,7 +298,7 @@ s → 草稿 spec → Schema + ValidationRunner
 2. **TUI 骨架**：`tui` 命令、主屏、状态轮询、日志区、帮助、退出。
 3. **动作**：apply 预览与执行、restart、destroy 确认。
 4. **编辑**：Schema 表单、校验、`SpecWriter`、`YamlCommentScanner`、diff 与保存。
-5. **打包与文档**：shade 验证、terminfo 冒烟、文档、版本 `0.2.0`、发布。
+5. **打包与文档**：shade 验证、真实 PTY 冒烟、文档、版本 `0.2.0`、发布。
 
 每阶段结束都必须 `mvn test` 全绿；第 1 阶段额外要求 `mvn -Pe2e verify` 全绿，证明重构未改行为。
 
