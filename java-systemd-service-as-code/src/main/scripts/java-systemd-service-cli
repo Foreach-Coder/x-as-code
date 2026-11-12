@@ -1,4 +1,5 @@
 #!/bin/sh
+# xac-launcher: java-systemd-service-cli
 # java-systemd-service-cli - launcher for the xac CLI.
 #
 # Expected layout (the release tarball uses exactly this):
@@ -12,6 +13,9 @@
 #   XAC_JAVA    explicit java executable
 #   JAVA_HOME   $JAVA_HOME/bin/java
 #   PATH        java
+#
+# `install` / `uninstall` are handled here instead of in the jar: only this
+# script knows its own real path, which is exactly what gets linked.
 #
 # Exit codes mirror the CLI: this wrapper only exits non-zero on its own
 # failures (missing jar or JVM), otherwise the CLI's code is passed through.
@@ -33,6 +37,7 @@ while [ -h "$self" ]; do
     esac
 done
 bin_dir=$(cd -P "$(dirname "$self")" && pwd)
+self=$bin_dir/$(basename "$self")
 libs_dir=$bin_dir/../libs
 
 jar=
@@ -59,5 +64,153 @@ if ! command -v "$java" >/dev/null 2>&1; then
     log "java executable not found: $java (set XAC_JAVA or JAVA_HOME)"
     exit 1
 fi
+
+# --- install / uninstall -----------------------------------------------------
+
+link_path=/usr/local/bin/java-systemd-service-cli
+
+resolve_path() {
+    if command -v readlink >/dev/null 2>&1; then
+        readlink -f "$1" 2>/dev/null || printf '%s\n' "$1"
+    else
+        printf '%s\n' "$1"
+    fi
+}
+
+# Same ownership rule as the unit/env files: only a launcher carrying the
+# marker line may be replaced or removed.
+is_ours() {
+    [ -f "$1" ] && grep -q '^# xac-launcher' "$1" 2>/dev/null
+}
+
+install_usage() {
+    cat <<'EOF'
+usage: java-systemd-service-cli install [--dry-run]
+
+Link this distribution's bin/java-systemd-service-cli into /usr/local/bin.
+EOF
+}
+
+uninstall_usage() {
+    cat <<'EOF'
+usage: java-systemd-service-cli uninstall [--dry-run]
+
+Remove the /usr/local/bin/java-systemd-service-cli link created by install.
+EOF
+}
+
+restore_link() {
+    rm -f "$link_path"
+    if [ -n "$prev" ]; then
+        ln -s "$prev" "$link_path" || log "rollback failed: cannot restore $link_path -> $prev"
+    fi
+}
+
+cmd_install() {
+    dry_run=0
+    for arg in "$@"; do
+        case $arg in
+            --dry-run) dry_run=1 ;;
+            -h|--help) install_usage; return 0 ;;
+            *) log "unknown option: $arg"; return 2 ;;
+        esac
+    done
+    if [ "$(id -u)" != 0 ]; then
+        log "install requires root"
+        return 2
+    fi
+    link_dir=$(dirname "$link_path")
+    if [ ! -d "$link_dir" ]; then
+        log "directory does not exist: $link_dir"
+        return 2
+    fi
+
+    prev=
+    if [ -L "$link_path" ]; then
+        prev=$(readlink "$link_path")
+        if [ -e "$link_path" ]; then
+            if ! is_ours "$link_path"; then
+                log "path exists and does not point to a xac launcher: $link_path -> $prev, handle it manually"
+                return 2
+            fi
+            if [ "$(resolve_path "$link_path")" = "$self" ]; then
+                printf 'already installed: %s -> %s\n' "$link_path" "$prev"
+                return 0
+            fi
+        fi
+    elif [ -e "$link_path" ]; then
+        log "path exists and is not a symlink: $link_path, handle it manually"
+        return 2
+    fi
+
+    if [ "$dry_run" = 1 ]; then
+        if [ -n "$prev" ]; then
+            printf 'would relink %s -> %s (was %s)\n' "$link_path" "$self" "$prev"
+        else
+            printf 'would link %s -> %s\n' "$link_path" "$self"
+        fi
+        return 0
+    fi
+
+    rm -f "$link_path" || { log "cannot replace $link_path"; return 1; }
+    if ! ln -s "$self" "$link_path"; then
+        log "cannot create symlink $link_path -> $self"
+        restore_link
+        return 1
+    fi
+
+    expected=$("$java" -jar "$jar" --version 2>/dev/null | head -n 1) || expected=
+    actual=$("$link_path" --version 2>/dev/null | head -n 1) || actual=
+    if [ -z "$actual" ] || [ "$actual" != "$expected" ]; then
+        log "installed launcher failed verification: expected $expected, got $actual"
+        restore_link
+        return 1
+    fi
+    printf 'installed: %s -> %s (%s)\n' "$link_path" "$self" "$actual"
+    return 0
+}
+
+cmd_uninstall() {
+    dry_run=0
+    for arg in "$@"; do
+        case $arg in
+            --dry-run) dry_run=1 ;;
+            -h|--help) uninstall_usage; return 0 ;;
+            *) log "unknown option: $arg"; return 2 ;;
+        esac
+    done
+    if [ "$(id -u)" != 0 ]; then
+        log "uninstall requires root"
+        return 2
+    fi
+    if [ ! -e "$link_path" ] && [ ! -L "$link_path" ]; then
+        printf 'not installed: %s\n' "$link_path"
+        return 0
+    fi
+    if [ ! -L "$link_path" ]; then
+        log "path is not a symlink: $link_path, handle it manually"
+        return 2
+    fi
+    prev=$(readlink "$link_path")
+    if [ -e "$link_path" ] && ! is_ours "$link_path"; then
+        log "path does not point to a xac launcher: $link_path -> $prev, handle it manually"
+        return 2
+    fi
+    if [ "$dry_run" = 1 ]; then
+        printf 'would remove %s -> %s\n' "$link_path" "$prev"
+        return 0
+    fi
+    if ! rm -f "$link_path"; then
+        log "cannot remove $link_path"
+        return 1
+    fi
+    printf 'removed: %s\n' "$link_path"
+    return 0
+}
+
+case ${1:-} in
+    install) shift; cmd_install "$@"; exit $? ;;
+    uninstall) shift; cmd_uninstall "$@"; exit $? ;;
+esac
 
 exec "$java" -jar "$jar" "$@"
