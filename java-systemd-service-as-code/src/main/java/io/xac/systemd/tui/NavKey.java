@@ -18,6 +18,7 @@ public enum NavKey {
     TAB,
     SHIFT_TAB,
     BACKSPACE,
+    DELETE,
     APPLY,
     RESTART,
     DESTROY,

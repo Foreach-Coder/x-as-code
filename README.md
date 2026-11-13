@@ -214,22 +214,32 @@ notice 提示 `actions disabled: systemd is not reachable`。
 | `↑` / `↓` | 移动焦点 |
 | `Enter` | 进入当前字段（多值字段进入行列表） |
 | `→` / `l` | 仅多值字段：进入行列表 |
-| `s` | 保存 |
+| `s` | 打开保存预览（不直接写盘） |
 | `u` | 撤销上一步（恢复整个模型快照） |
 | `c` | 清空当前标量字段 |
 | `Space` | 在 `true` / `false` / 未设置之间切换布尔字段 |
 | `q` / `Esc` | 关闭；有未保存修改时先问 `y discard` / `n keep` |
 
-行列表里 `↑` / `↓` 选行、`Enter` 编辑该行、`a` 加一行、`x` 删一行、`Esc` / `←` 返回；
-编辑单行时 `Enter` 提交、`Esc` 取消、`Backspace` 删除。
+编辑单个值时可以用 `←` / `→` 移动插入点、`Home` / `End` 跳到两端、`Backspace` / `Delete` 删除；
+`Enter` 提交、`Esc` 取消。
 
-保存时先校验再原子写入；校验失败时错误显示在对应字段上并聚焦第一个出错的字段。以下两种情况需要按两次 `s` 确认：
+行列表（`runtime.opts`、`path-links`、`env`、`properties`）是两列表格：映射显示 `key` / `value` 两列，
+列表只有 `value` 列，行尾显示该行的注释。
 
-- 保存会丢弃无法保留的注释：`N comment(s) will be dropped; press s again to confirm`；
-- 文件在编辑期间被外部改过：`file changed outside; press s again to overwrite`。
+| 按键 | 作用 |
+|---|---|
+| `↑` / `↓` | 选行 |
+| `Enter` / `e` | 编辑该行的 value |
+| `k` | 仅映射：编辑该行的 key（value 不变） |
+| `a` / `x` | 加一行 / 删一行 |
+| `J` / `K` | 下移 / 上移当前行（注释跟着值走） |
+| `Esc` / `←` | 返回字段列表 |
 
-两者同时发生会合并成一条提示。保存成功后 notice 显示 `saved`（以及被丢弃的注释数），主屏重新加载状态和日志。
-保存前没有逐行 diff 预览，只有上述二次确认。非 root 且文件不可写时保存会失败并显示错误。
+保存流程：`s` 先出预览（`save preview (+N -M)`），只显示改动行及上下各一行，其余折叠成 `...`；
+可丢弃的注释、文件被外部改过都会在预览里单独提示。`y` 才真正写入，`n` / `Esc` 取消并保留编辑。
+写盘前再验一次文件指纹，期间被改会显示 `! cannot save: file changed outside` 并留在编辑屏。
+保存成功后 notice 显示 `saved`（以及被丢弃的注释数），主屏重新加载状态和日志。
+非 root 且文件不可写时保存会失败并显示错误。
 
 ## 生成什么
 

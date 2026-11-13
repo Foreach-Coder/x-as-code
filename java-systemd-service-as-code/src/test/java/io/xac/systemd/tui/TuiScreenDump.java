@@ -33,6 +33,12 @@ public final class TuiScreenDump {
         dump(pkgDir, outDir, "apply", KeyEvent.character('a'));
         dump(pkgDir, outDir, "destroy", KeyEvent.character('d'));
         dump(pkgDir, outDir, "edit", KeyEvent.character('e'));
+        dump(pkgDir, outDir, "rows", KeyEvent.character('e'),
+                KeyEvent.of(NavKey.TAB), KeyEvent.of(NavKey.TAB), KeyEvent.of(NavKey.TAB),
+                KeyEvent.of(NavKey.RIGHT));
+        dump(pkgDir, outDir, "preview", KeyEvent.character('e'),
+                KeyEvent.of(NavKey.ENTER), KeyEvent.character('X'),
+                KeyEvent.of(NavKey.ENTER), KeyEvent.character('s'));
         System.out.println("DUMPED " + outDir);
     }
 
@@ -53,9 +59,11 @@ public final class TuiScreenDump {
         Thread.sleep(600L);
         app.tick();
         if (keys.length > 0) {
-            app.tick();
-            Thread.sleep(100L);
-            app.tick();
+            // 一键一 tick：ScriptedKeySource 每次只吐一个键，多按几拍才能走完焦点/模式切换。
+            for (int i = 0; i < keys.length + 1; i++) {
+                app.tick();
+                Thread.sleep(80L);
+            }
         }
         write(outDir.resolve(name + ".json"), name, display);
         app.close();

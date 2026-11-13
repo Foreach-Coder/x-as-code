@@ -146,7 +146,37 @@ public final class EditorModel {
                                      List<String> values, List<String> options,
                                      Comments comments) {
         return new EditorField(path, type, readOnly, values, options,
-                label(path), help(comments, path));
+                label(path), help(comments, path),
+                rowComments(comments, path, type, values));
+    }
+
+    /**
+     * 行级注释：列表按值（{@code path[value]}）、映射按 key（{@code path.key}）索引，
+     * 与 {@code YamlCommentScanner} 的路径口径一致，重排后注释仍跟着值走。
+     */
+    private static Map<String, String> rowComments(Comments comments, String path,
+                                                   Schema.Type type, List<String> values) {
+        if (type != Schema.Type.STRING_LIST && type != Schema.Type.STRING_MAP) {
+            return Collections.emptyMap();
+        }
+        Map<String, String> out = new LinkedHashMap<String, String>();
+        for (String row : values) {
+            String key;
+            String rowPath;
+            if (type == Schema.Type.STRING_MAP) {
+                int eq = row.indexOf('=');
+                key = eq < 0 ? row : row.substring(0, eq);
+                rowPath = path + "." + key;
+            } else {
+                key = row;
+                rowPath = path + "[" + row + "]";
+            }
+            String text = help(comments, rowPath);
+            if (!text.isEmpty()) {
+                out.put(key, text);
+            }
+        }
+        return out;
     }
 
     private static String label(String path) {

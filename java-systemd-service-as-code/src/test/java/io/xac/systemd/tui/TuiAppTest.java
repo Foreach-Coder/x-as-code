@@ -1059,7 +1059,8 @@ class TuiAppTest {
                         KeyEvent.character('e'),
                         KeyEvent.character('d'),
                         KeyEvent.of(NavKey.ENTER),
-                        KeyEvent.character('s')),
+                        KeyEvent.character('s'),
+                        KeyEvent.character('y')),
                 FIXED_CLOCK,
                 new TuiApp.LogStreamFactory() {
                     @Override
@@ -1146,7 +1147,7 @@ class TuiAppTest {
                         KeyEvent.character('d'),
                         KeyEvent.of(NavKey.ENTER),
                         KeyEvent.character('s'),
-                        KeyEvent.character('s')),
+                        KeyEvent.character('y')),
                 FIXED_CLOCK,
                 new TuiApp.LogStreamFactory() {
                     @Override

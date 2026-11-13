@@ -1008,6 +1008,15 @@ public final class TuiApp {
         if (line.startsWith("! ")) {
             return Role.WARN;
         }
+        if (line.startsWith("+ ")) {
+            return Role.OK;
+        }
+        if (line.startsWith("- ")) {
+            return Role.WARN;
+        }
+        if (line.startsWith("save preview") || line.startsWith("rows: ")) {
+            return Role.ACCENT;
+        }
         if (line.contains("(read-only)")) {
             return Role.DIM;
         }

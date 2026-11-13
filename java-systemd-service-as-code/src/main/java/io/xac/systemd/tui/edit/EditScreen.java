@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import io.xac.systemd.spec.LineDiff;
 import io.xac.systemd.spec.Schema;
 import io.xac.systemd.spec.Violation;
 import io.xac.systemd.tui.NavKey;
@@ -22,13 +23,15 @@ import io.xac.systemd.tui.NavKey;
  */
 public final class EditScreen {
 
-    public enum Mode { BROWSE, EDIT_SCALAR, EDIT_LINES }
+    public enum Mode { BROWSE, EDIT_SCALAR, EDIT_LINES, CONFIRM_SAVE }
 
     /** Tab 跳转的九个节段起点：name, artifact, runtime, env, properties, workdir, path-links, logs, lifecycle。 */
     private static final int[] SEGMENTS = {0, 2, 3, 5, 6, 7, 8, 9, 10};
 
     private static final int MAX_ERROR_LINES = 3;
     private static final int MAX_ROW_WINDOW = 10;
+    private static final int KEY_WIDTH = 12;
+    private static final int VALUE_WIDTH = 28;
 
     private final Path yamlFile;
     private FileStamp baseline;
@@ -38,21 +41,24 @@ public final class EditScreen {
     private int focus;
     private Mode mode = Mode.BROWSE;
     private String buffer = "";
+    /** 插入点在 {@link #buffer} 里的字符偏移（UTF-16），编辑态才有意义。 */
+    private int cursor;
     private int lineIndex;
     private boolean rowEdit;
+    /** 行编辑时正在改 key（映射才有）而不是 value。 */
+    private boolean keyEdit;
+    private String rowKey = "";
+    private String rowValue = "";
     private boolean dirty;
     private boolean closed;
     private boolean saved;
     private boolean confirmDiscard;
-    /**
-     * 上一次确认时的文件指纹与已确认的原因。确认只对当时看到的那份文件有效：文件再变，
-     * 旧确认就作废，必须重新提示。
-     */
-    private FileStamp confirmedStamp;
-    private boolean confirmLostComments;
-    private boolean confirmExternal;
     private List<Violation> saveError = Collections.emptyList();
     private List<String> saveNote = Collections.emptyList();
+    /** 非空时处于保存预览：这份结果已经算好，等 {@code y} 落盘、{@code n/esc} 取消。 */
+    private SaveFlow.Result pending;
+    private int previewScroll;
+    private boolean pendingExternal;
     /**
      * 最近一次全量校验的结果，用来画行尾 {@code !} 并定位光标；与 {@link #saveError}
      * 分开，避免二次确认提示被一次普通移动覆盖。
@@ -124,6 +130,10 @@ public final class EditScreen {
             handleConfirm(key, ch);
             return;
         }
+        if (mode == Mode.CONFIRM_SAVE) {
+            handlePreview(key, ch);
+            return;
+        }
         if (mode == Mode.EDIT_SCALAR) {
             handleScalar(key, ch);
             return;
@@ -152,24 +162,61 @@ public final class EditScreen {
             case ESC:
                 mode = rowEdit ? Mode.EDIT_LINES : Mode.BROWSE;
                 rowEdit = false;
-                buffer = "";
+                keyEdit = false;
+                clearBuffer();
                 return;
             case ENTER:
                 applyBuffer();
                 return;
+            case LEFT:
+                if (cursor > 0) {
+                    cursor = buffer.offsetByCodePoints(cursor, -1);
+                }
+                return;
+            case RIGHT:
+                if (cursor < buffer.length()) {
+                    cursor = buffer.offsetByCodePoints(cursor, 1);
+                }
+                return;
+            case TOP:
+                cursor = 0;
+                return;
+            case BOTTOM:
+                cursor = buffer.length();
+                return;
             case BACKSPACE:
-                if (!buffer.isEmpty()) {
-                    buffer = buffer.substring(0, buffer.offsetByCodePoints(buffer.length(), -1));
+                if (cursor > 0) {
+                    int from = buffer.offsetByCodePoints(cursor, -1);
+                    buffer = buffer.substring(0, from) + buffer.substring(cursor);
+                    cursor = from;
+                }
+                return;
+            case DELETE:
+                if (cursor < buffer.length()) {
+                    int to = buffer.offsetByCodePoints(cursor, 1);
+                    buffer = buffer.substring(0, cursor) + buffer.substring(to);
                 }
                 return;
             case CHAR:
                 if (ch >= 0x20 && ch != 0x7f) {
-                    buffer = buffer + ch;
+                    buffer = buffer.substring(0, cursor) + ch + buffer.substring(cursor);
+                    cursor++;
                 }
                 return;
             default:
                 return;
         }
+    }
+
+    /** 把缓冲区置成 {@code text}，插入点放在末尾。 */
+    private void setBuffer(String text) {
+        buffer = text == null ? "" : text;
+        cursor = buffer.length();
+    }
+
+    private void clearBuffer() {
+        buffer = "";
+        cursor = 0;
     }
 
     private void applyBuffer() {
@@ -178,8 +225,16 @@ public final class EditScreen {
             List<String> values = new ArrayList<String>(field.values);
             boolean changed;
             if (lineIndex >= 0 && lineIndex < values.size()) {
-                changed = !buffer.equals(values.get(lineIndex));
-                values.set(lineIndex, buffer);
+                String next;
+                if (field.type == Schema.Type.STRING_MAP) {
+                    String key = keyEdit ? buffer : rowKey;
+                    String value = keyEdit ? rowValue : buffer;
+                    next = key + "=" + value;
+                } else {
+                    next = buffer;
+                }
+                changed = !next.equals(values.get(lineIndex));
+                values.set(lineIndex, next);
             } else {
                 values.add(buffer);
                 lineIndex = values.size() - 1;
@@ -189,7 +244,8 @@ public final class EditScreen {
                 mutate(field.path, values);
             }
             rowEdit = false;
-            buffer = "";
+            keyEdit = false;
+            clearBuffer();
             mode = Mode.EDIT_LINES;
             return;
         }
@@ -197,7 +253,7 @@ public final class EditScreen {
         if (!buffer.equals(existing)) {
             mutate(field.path, Collections.singletonList(buffer));
         }
-        buffer = "";
+        clearBuffer();
         mode = Mode.BROWSE;
     }
 
@@ -219,24 +275,61 @@ public final class EditScreen {
                 }
                 return;
             case ENTER:
-                if (field.values.isEmpty()) {
-                    return;
-                }
-                lineIndex = Math.max(0, Math.min(lineIndex, field.values.size() - 1));
-                buffer = field.values.get(lineIndex);
-                rowEdit = true;
-                mode = Mode.EDIT_SCALAR;
+                startRowEdit(field, false);
                 return;
             case CHAR:
                 if (ch == 'a') {
                     addRow(field);
                 } else if (ch == 'x') {
                     deleteRow(field);
+                } else if (ch == 'e') {
+                    startRowEdit(field, false);
+                } else if (ch == 'k' && field.type == Schema.Type.STRING_MAP) {
+                    startRowEdit(field, true);
+                } else if (ch == 'J') {
+                    moveRow(field, 1);
+                } else if (ch == 'K') {
+                    moveRow(field, -1);
                 }
                 return;
             default:
                 return;
         }
+    }
+
+    /** 进入行编辑：映射可以选改 key 还是 value。 */
+    private void startRowEdit(EditorField field, boolean editKey) {
+        if (field.values.isEmpty()) {
+            return;
+        }
+        lineIndex = Math.max(0, Math.min(lineIndex, field.values.size() - 1));
+        String row = field.values.get(lineIndex);
+        if (field.type == Schema.Type.STRING_MAP) {
+            int eq = row.indexOf('=');
+            rowKey = eq < 0 ? row : row.substring(0, eq);
+            rowValue = eq < 0 ? "" : row.substring(eq + 1);
+        } else {
+            rowKey = "";
+            rowValue = row;
+        }
+        keyEdit = editKey;
+        setBuffer(editKey ? rowKey : rowValue);
+        rowEdit = true;
+        mode = Mode.EDIT_SCALAR;
+    }
+
+    /** 上移/下移一行：只交换数组元素，注释按值/key 索引，保存时仍跟对。 */
+    private void moveRow(EditorField field, int delta) {
+        int target = lineIndex + delta;
+        if (lineIndex < 0 || target < 0 || target >= field.values.size()) {
+            return;
+        }
+        List<String> values = new ArrayList<String>(field.values);
+        String moved = values.get(lineIndex);
+        values.set(lineIndex, values.get(target));
+        values.set(target, moved);
+        mutate(field.path, values);
+        lineIndex = target;
     }
 
     private void addRow(EditorField field) {
@@ -357,7 +450,7 @@ public final class EditScreen {
     }
 
     private void enterScalar() {
-        buffer = current().values.isEmpty() ? "" : current().values.get(0);
+        setBuffer(current().values.isEmpty() ? "" : current().values.get(0));
         rowEdit = false;
         mode = Mode.EDIT_SCALAR;
     }
@@ -396,7 +489,6 @@ public final class EditScreen {
         undoStack.add(model);
         model = model.with(path, values);
         dirty = true;
-        clearConfirm();
         saveError = Collections.emptyList();
         saveNote = Collections.emptyList();
         refreshValidation();
@@ -409,20 +501,12 @@ public final class EditScreen {
         }
         model = undoStack.remove(undoStack.size() - 1);
         dirty = !undoStack.isEmpty();
-        clearConfirm();
         saveError = Collections.emptyList();
         saveNote = Collections.emptyList();
         refreshValidation();
         if (focus >= model.fields().size()) {
             focus = firstEditable();
         }
-    }
-
-    /** 放弃上一次确认：文件指纹变了或用户又改了模型，旧确认不再覆盖新情况。 */
-    private void clearConfirm() {
-        confirmedStamp = null;
-        confirmLostComments = false;
-        confirmExternal = false;
     }
 
     private void requestClose() {
@@ -434,93 +518,100 @@ public final class EditScreen {
         }
     }
 
-    /** 保存：校验 → 渲染/合并注释 → （必要时二次确认）→ 原子写入。 */
+    /**
+     * 保存第一步：校验 → 渲染/合并注释 → 算 diff，进入预览。
+     *
+     * <p>预览是唯一的确认面：注释将丢失、文件被外部改动都在这里显示；{@code y} 才落盘。
+     * 预览读取的是「此刻的磁盘内容」，所以 diff 是真实的；落盘前 {@link SaveFlow#commit}
+     * 再验一次指纹，预览之后文件又被改则拒绝写。</p>
+     */
     private void save() {
         refreshValidation();
-        if (baseline == null) {
-            try {
-                baseline = FileStamp.of(yamlFile);
-            } catch (IOException e) {
-                saveError = Collections.singletonList(
-                        new Violation("", "cannot read file: " + messageOf(e)));
+        try {
+            FileStamp current = FileStamp.of(yamlFile);
+            SaveFlow.Result result = SaveFlow.prepare(model, yamlFile, baseline);
+            if (!result.ok()) {
+                saveError = result.violations;
                 saveNote = Collections.emptyList();
+                focusFirst(result.violations);
                 return;
             }
-        }
-        SaveFlow.Result result;
-        try {
-            result = SaveFlow.prepare(model, yamlFile, baseline);
-        } catch (IOException e) {
-            clearConfirm();
-            saveError = Collections.singletonList(new Violation("", "cannot read file: " + messageOf(e)));
-            saveNote = Collections.emptyList();
-            return;
-        }
-        if (!result.ok()) {
-            clearConfirm();
-            saveError = result.violations;
-            saveNote = Collections.emptyList();
-            focusFirst(result.violations);
-            return;
-        }
-
-        FileStamp current;
-        try {
-            current = FileStamp.of(yamlFile);
-        } catch (IOException e) {
-            clearConfirm();
-            saveError = Collections.singletonList(new Violation("", "cannot read file: " + messageOf(e)));
-            saveNote = Collections.emptyList();
-            return;
-        }
-
-        boolean outside = !baseline.matches(current);
-        boolean loses = result.losesComments();
-        boolean stampStale = confirmedStamp != null && !confirmedStamp.matches(current);
-        boolean needComments = loses && !confirmLostComments;
-        boolean needOutside = outside && (!confirmExternal || stampStale);
-        if (needComments || needOutside) {
-            // 确认只覆盖「此刻看到的这份文件」：记下指纹，外部改动确认后把 baseline 前移，
-            // 下一次 s 会重新读文件、重新出 diff；再变则 stampStale 让提示重来。
-            confirmedStamp = current;
-            confirmLostComments = loses;
-            confirmExternal = outside;
-            if (outside) {
-                baseline = current;
-            }
-            saveError = Collections.singletonList(
-                    new Violation("", confirmPrompt(loses, outside, result.lostComments)));
+            pendingExternal = baseline != null && !baseline.matches(current);
+            baseline = current;
+            pending = result;
+            previewScroll = 0;
+            saveError = Collections.emptyList();
             saveNote = result.orphanNotes;
+            mode = Mode.CONFIRM_SAVE;
+        } catch (IOException e) {
+            saveError = Collections.singletonList(
+                    new Violation("", "cannot read file: " + messageOf(e)));
+            saveNote = Collections.emptyList();
+        }
+    }
+
+    /** 预览态：{@code y} 写入，{@code n/esc} 回到表单，方向键滚动 diff。 */
+    private void handlePreview(NavKey key, char ch) {
+        switch (key) {
+            case CHAR:
+                if (ch == 'y' || ch == 'Y') {
+                    commitPending();
+                } else if (ch == 'n' || ch == 'N') {
+                    cancelPreview();
+                }
+                return;
+            case ESC:
+            case QUIT:
+                cancelPreview();
+                return;
+            case UP:
+                previewScroll = Math.max(0, previewScroll - 1);
+                return;
+            case DOWN:
+                previewScroll = Math.min(maxPreviewScroll(), previewScroll + 1);
+                return;
+            case PGUP:
+                previewScroll = Math.max(0, previewScroll - 10);
+                return;
+            case PGDN:
+                previewScroll = Math.min(maxPreviewScroll(), previewScroll + 10);
+                return;
+            default:
+                return;
+        }
+    }
+
+    private void commitPending() {
+        if (pending == null) {
+            mode = Mode.BROWSE;
             return;
         }
-
-        saveError = Collections.emptyList();
+        SaveFlow.Result result = pending;
         try {
-            // 始终带 baseline：写前再验一次，堵住确认之后、落盘之前的改动。
+            // 始终带预览时的指纹：预览之后文件再被改，就拒绝写。
             SaveFlow.commit(yamlFile, result.newText, baseline);
         } catch (IOException e) {
-            clearConfirm();
-            saveError = Collections.singletonList(new Violation("", "cannot save: " + messageOf(e)));
+            pending = null;
+            mode = Mode.BROWSE;
+            saveError = Collections.singletonList(
+                    new Violation("", "cannot save: " + messageOf(e)));
+            saveNote = Collections.emptyList();
             return;
         }
         saveNote = successNote(result);
+        saveError = Collections.emptyList();
+        pending = null;
         dirty = false;
-        clearConfirm();
         saved = true;
         closed = true;
     }
 
-    private static String confirmPrompt(boolean loses, boolean outside, int lostComments) {
-        String comments = lostComments + " comment(s) will be dropped";
-        if (loses && outside) {
-            return comments + " and the file changed outside; press s again to confirm";
-        }
-        if (loses) {
-            return comments + "; press s again to confirm";
-        }
-        return "file changed outside; press s again to overwrite";
+    private void cancelPreview() {
+        pending = null;
+        previewScroll = 0;
+        saveNote = Collections.emptyList();
+        mode = Mode.BROWSE;
     }
-
     private static List<String> successNote(SaveFlow.Result result) {
         if (result.lostComments <= 0) {
             return Collections.emptyList();
@@ -591,16 +682,23 @@ public final class EditScreen {
     public List<String> lines(int width, int rows) {
         int w = Math.max(1, width);
         List<String> out = new ArrayList<String>();
-        if (mode == Mode.EDIT_LINES) {
+        if (mode == Mode.CONFIRM_SAVE) {
+            out.addAll(previewLines(w));
+        } else if (mode == Mode.EDIT_LINES) {
             appendLinesMode(out, w);
         } else {
             String editingPath = mode == Mode.EDIT_SCALAR ? current().path : null;
             out.addAll(EditorView.lines(model, focus, w, errorsByPath(), editingPath,
-                    mode == Mode.EDIT_SCALAR ? buffer : null));
+                    mode == Mode.EDIT_SCALAR ? buffer : null,
+                    mode == Mode.EDIT_SCALAR ? cursor : 0));
+            out.add(clip(statusLine(), w));
+            for (String note : noteLines()) {
+                out.add(clip(note, w));
+            }
         }
-        out.add(clip(statusLine(), w));
-        for (String note : noteLines()) {
-            out.add(clip(note, w));
+        if (mode == Mode.CONFIRM_SAVE && previewScroll > 0 && out.size() > 0) {
+            int from = Math.min(previewScroll, out.size() - 1);
+            out = new ArrayList<String>(out.subList(from, out.size()));
         }
         int limit = rows <= 0 ? 0 : rows;
         if (limit > 0 && out.size() > limit) {
@@ -612,9 +710,90 @@ public final class EditScreen {
         return out;
     }
 
+    /** 保存预览：标题 + 警告 + 行级 diff + 键提示。 */
+    private List<String> previewLines(int width) {
+        List<String> out = new ArrayList<String>();
+        int adds = 0;
+        int dels = 0;
+        for (String line : pending.diff) {
+            if (line.startsWith(LineDiff.INSERT)) {
+                adds++;
+            } else if (line.startsWith(LineDiff.DELETE)) {
+                dels++;
+            }
+        }
+        out.add(clip("save preview  (+" + adds + " -" + dels + ")", width));
+        if (pending.losesComments()) {
+            out.add(clip("! " + pending.lostComments + " comment(s) will be dropped", width));
+        }
+        if (pendingExternal) {
+            out.add(clip("! file changed outside since this screen opened", width));
+        }
+        for (String note : pending.orphanNotes) {
+            out.add(clip("note: " + note, width));
+        }
+        out.addAll(hunks(pending.diff, width));
+        out.add(clip("y save  n/esc cancel  up/down scroll", width));
+        return out;
+    }
+
+    /**
+     * 只显示改动行及其上下各一行，未改动的行折叠成 {@code ...}，避免整篇模板注释把改动埋掉。
+     */
+    private static List<String> hunks(List<String> diff, int width) {
+        int size = diff.size();
+        boolean[] keep = new boolean[size];
+        int changes = 0;
+        for (int i = 0; i < size; i++) {
+            if (isChange(diff.get(i))) {
+                changes++;
+                keep[Math.max(0, i - 1)] = true;
+                keep[i] = true;
+                keep[Math.min(size - 1, i + 1)] = true;
+            }
+        }
+        List<String> out = new ArrayList<String>();
+        if (changes == 0) {
+            out.add(clip("  (no changes)", width));
+            return out;
+        }
+        boolean skipping = false;
+        int skipped = 0;
+        for (int i = 0; i < size; i++) {
+            if (keep[i]) {
+                if (skipping) {
+                    out.add(clip("  ... (" + skipped + " unchanged line"
+                            + (skipped == 1 ? "" : "s") + ")", width));
+                    skipping = false;
+                    skipped = 0;
+                }
+                out.add(clip(diff.get(i), width));
+            } else {
+                skipping = true;
+                skipped++;
+            }
+        }
+        if (skipping) {
+            out.add(clip("  ... (" + skipped + " unchanged line"
+                    + (skipped == 1 ? "" : "s") + ")", width));
+        }
+        return out;
+    }
+
+    private static boolean isChange(String line) {
+        return line.startsWith(LineDiff.INSERT) || line.startsWith(LineDiff.DELETE);
+    }
+
+    private int maxPreviewScroll() {
+        if (pending == null) {
+            return 0;
+        }
+        return Math.max(0, pending.diff.size() + 4 - 10);
+    }
     private void appendLinesMode(List<String> out, int width) {
         EditorField field = current();
         int size = field.values.size();
+        boolean map = field.type == Schema.Type.STRING_MAP;
         out.add(clip("rows: " + field.path + "  (" + size + " row"
                 + (size == 1 ? "" : "s") + ")", width));
         int visible = Math.min(size, MAX_ROW_WINDOW);
@@ -622,25 +801,57 @@ public final class EditScreen {
         if (visible > 0) {
             start = Math.max(0, Math.min(lineIndex - visible / 2, size - visible));
         }
+        out.add(clip("   #  " + (map ? pad("key", KEY_WIDTH) + "  " : "")
+                + pad("value", VALUE_WIDTH) + "  comment", width));
         for (int i = start; i < start + visible; i++) {
             String mark = i == lineIndex ? "> " : "  ";
-            out.add(clip(mark + (i + 1) + "> " + field.values.get(i), width));
+            out.add(clip(mark + pad(String.valueOf(i + 1), 2) + "  "
+                    + rowCells(field, i, map), width));
         }
         if (size == 0) {
             out.add(clip("  (no rows)", width));
         }
-        out.add(clip("up/down select  enter edit  a add  x delete  esc back", width));
+        out.add(clip("up/down select  enter edit  " + (map ? "k edit key  " : "")
+                + "a add  x delete  J/K move  esc back", width));
     }
 
+    /** 一行两列（映射是 key/value）加行尾注释；超宽由外层 clip 截断。 */
+    private static String rowCells(EditorField field, int index, boolean map) {
+        String row = field.values.get(index);
+        String key = "";
+        String value = row;
+        if (map) {
+            int eq = row.indexOf('=');
+            key = eq < 0 ? row : row.substring(0, eq);
+            value = eq < 0 ? "" : row.substring(eq + 1);
+        }
+        String comment = field.rowComments.get(map ? key : row);
+        return (map ? pad(key, KEY_WIDTH) + "  " : "")
+                + pad(value, VALUE_WIDTH) + "  " + (comment == null ? "" : comment);
+    }
+
+    private static String pad(String text, int width) {
+        String value = text == null ? "" : text;
+        if (value.length() >= width) {
+            return value;
+        }
+        StringBuilder out = new StringBuilder(value);
+        while (out.length() < width) {
+            out.append(' ');
+        }
+        return out.toString();
+    }
     private String statusLine() {
         if (confirmDiscard) {
             return "discard unsaved changes?  y discard  n keep";
         }
         String modeText;
         if (mode == Mode.EDIT_SCALAR) {
-            modeText = "edit value";
+            modeText = "edit value (left/right move, home/end jump)";
         } else if (mode == Mode.EDIT_LINES) {
             modeText = "edit rows";
+        } else if (mode == Mode.CONFIRM_SAVE) {
+            modeText = "save preview";
         } else {
             modeText = "browse";
         }

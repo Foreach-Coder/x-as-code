@@ -2,7 +2,9 @@ package io.xac.systemd.tui.edit;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import io.xac.systemd.spec.Schema;
 
@@ -33,6 +35,9 @@ public final class EditorField {
     /** 英文行标签。 */
     public final String label;
 
+    /** 行级注释：列表项按值、映射按 key 索引；没有时为空表。 */
+    public final Map<String, String> rowComments;
+
     /** 来自既有注释的帮助文本；没有注释时为 {@code ""}。 */
     public final String help;
 
@@ -43,6 +48,18 @@ public final class EditorField {
                        List<String> options,
                        String label,
                        String help) {
+        this(path, type, readOnly, values, options, label, help,
+                Collections.<String, String>emptyMap());
+    }
+
+    public EditorField(String path,
+                       Schema.Type type,
+                       boolean readOnly,
+                       List<String> values,
+                       List<String> options,
+                       String label,
+                       String help,
+                       Map<String, String> rowComments) {
         if (path == null) {
             throw new IllegalArgumentException("path must not be null");
         }
@@ -62,10 +79,14 @@ public final class EditorField {
         this.options = Collections.unmodifiableList(new ArrayList<String>(options));
         this.label = label == null ? path : label;
         this.help = help == null ? "" : help;
+        Map<String, String> comments = rowComments == null
+                ? Collections.<String, String>emptyMap() : rowComments;
+        this.rowComments = Collections.unmodifiableMap(
+                new LinkedHashMap<String, String>(comments));
     }
 
     EditorField withValues(List<String> newValues) {
-        return new EditorField(path, type, readOnly, newValues, options, label, help);
+        return new EditorField(path, type, readOnly, newValues, options, label, help, rowComments);
     }
 
     @Override

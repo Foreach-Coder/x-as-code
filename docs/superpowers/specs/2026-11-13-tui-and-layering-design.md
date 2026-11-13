@@ -278,16 +278,19 @@ final class ApplyResult { String text; int kept; int dropped; int examplesDroppe
 `Comments` 中同路径的注释：连续前置注释优先（多行以 `\n` 连接），否则用同行注释，
 都没有则空。空列表 / 空 map 显示 0 行，不插入占位空行（空白行本身是非法输入）。
 
+有值的列表 / 映射进入行编辑后是两列表格：映射分 `key` / `value` 两列（`k` 改 key、`Enter`/`e` 改 value），
+列表只有 `value` 列，行尾显示该行注释（行注释按值或 key 索引，与 §7.4 的挂回口径一致）；
+`a` / `x` 增删行，`J` / `K` 上下移动整行。标量编辑支持 `←` / `→`、`Home` / `End`、`Backspace` / `Delete`。
+
 ### 7.2 校验
 
 - 失焦校验：用草稿构建 `ServiceSpec`，跑 `ValidationRunner`，行尾显示当前字段的 `Violation`；不阻塞编辑。错误归属按**路径前缀**：`runtime.opts[3]`、`env.FOO`、`path-links[0]`、`properties.k` 分别归到 `runtime.opts`、`env`、`path-links`、`properties`，一条字段行只显示该字段的第一条消息。
 - 保存前全量校验：有错则停留，底部列错误，光标跳到第一条。进入编辑屏时也先跑一次全量校验并把光标放到第一条错误；保存失败同样重新定位。
-- 保存前二次确认：有注释将丢失（`lostComments = dropped + examplesDropped > 0`）或文件被外部改动时，第一次 `s` 只提示，第二次 `s` 才真正写入。三种文案：
-  - 仅注释：`! N comment(s) will be dropped; press s again to confirm`
-  - 仅外部改动：`! file changed outside; press s again to overwrite`
-  - 两者同时：`! N comment(s) will be dropped and the file changed outside; press s again to confirm`
+- 保存前预览确认：`s` 不直接写盘，先出预览面板（首行 `save preview  (+N -M)`），列出可丢弃的注释、外部改动提示，以及逐行 diff——只显示改动行及其上下各一行，未改动区间折叠成 `... (N unchanged lines)`，避免整篇模板注释把改动埋掉。`y` 写入、`n` / `Esc` 取消并保留编辑。注释与外部改动都在预览里体现：
+  - 注释：`! N comment(s) will be dropped`（`lostComments = dropped + examplesDropped > 0`）
+  - 外部改动：`! file changed outside since this screen opened`
 
-  确认态绑定当时的文件指纹：确认之后文件再变，旧确认作废，必须重新提示；只有两个原因都已在同一份指纹上确认过，才允许落盘，且落盘前仍再验一次指纹。屏幕上 `!` 行已经带总数，`note:` 行只补充“其中多少是示例”，不重复同一个数字。
+  预览基于生成文本与当前文件的 diff，不在预览态缓存“已确认”语义；`y` 落盘前仍用进入预览时的文件指纹再验一次，失败显示 `! cannot save: file changed outside: <path>` 并留在编辑屏。屏幕上 `!` 行已经带总数，`note:` 行只补充“其中多少是示例”，不重复同一个数字。
 - `EditorModel.validate()` 是**不抛异常**的全量入口：先检查 `name`、`artifact.jar`、
   `runtime.java` 非空（`Violation(path, "must not be empty")`），再做草稿到 spec 的
   转换，最后跑 `ValidationRunner`；转换失败的 `IllegalArgumentException` 折成
@@ -300,9 +303,9 @@ final class ApplyResult { String text; int kept; int dropped; int examplesDroppe
 s → 草稿 spec → EditorModel.validate（必填非空 + Schema + ValidationRunner）
    ├─ 错误 → 停留、列错、跳第一条
    └─ 通过 → SpecWriter 生成规范文本（含保留注释）
-        → 有注释将丢失 / 文件被外部改动 → 记录当前指纹与原因，提示再按一次 s
-        → 两个原因都已在该指纹上确认且指纹未再变 → 始终带 baseline 再验一次
-          mtime + size + sha256
+        → 与当前文件逐行 diff、统计可丢弃注释与外部改动
+        → 预览面板（改动行 ±1 行，其余折叠）→ y 才落盘 / n 取消
+        → 落盘前始终带 baseline 再验一次 mtime + size + sha256
         → 临时文件（新建 0644，已存在则沿用原权限）+ ATOMIC_MOVE
         → 重新 open → 状态刷新 → 通知 saved（并带上丢失注释条数）
 ```
@@ -316,7 +319,7 @@ s → 草稿 spec → EditorModel.validate（必填非空 + Schema + ValidationR
    之间又被改过；复验失败显示 `! cannot save: file changed outside: <path>` 并留在编辑屏。
 2. 不自动备份；会话内保留上一版文本供 `u` 回滚。
 3. 保存与 apply 解耦，不提供“保存并应用”。
-4. 逐行 diff 由 `SaveFlow.Result.diff` 提供；TUI 当前用“二次 `s`”确认代替 diff 面板，面板留待后续迭代。
+4. 逐行 diff 由 `SaveFlow.Result.diff` 提供，编辑屏在保存预览里直接渲染（改动行 ±1 行、其余折叠成 `... (N unchanged lines)`），不再要求连按两次 `s`。
 
 ### 7.4 注释保留
 

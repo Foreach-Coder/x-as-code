@@ -87,6 +87,8 @@ public final class LanternaKeySource implements KeySource {
                 return KeyEvent.of(NavKey.SHIFT_TAB);
             case Backspace:
                 return KeyEvent.of(NavKey.BACKSPACE);
+            case Delete:
+                return KeyEvent.of(NavKey.DELETE);
             default:
                 return null;
         }

@@ -45,6 +45,17 @@ public final class EditorView {
     public static List<String> lines(EditorModel model, int focus, int width,
                                      Map<String, String> errors, String editingPath,
                                      String buffer) {
+        return lines(model, focus, width, errors, editingPath, buffer,
+                buffer == null ? 0 : buffer.length());
+    }
+
+    /**
+     * 渲染表单；{@code cursor} 是 {@code buffer} 里的插入点（UTF-16 偏移），
+     * 画成 {@code _} 光标。
+     */
+    public static List<String> lines(EditorModel model, int focus, int width,
+                                     Map<String, String> errors, String editingPath,
+                                     String buffer, int cursor) {
         if (model == null) {
             throw new IllegalArgumentException("model must not be null");
         }
@@ -57,7 +68,7 @@ public final class EditorView {
             EditorField field = fields.get(i);
             String error = errorMap.get(field.path);
             boolean editing = editingPath != null && editingPath.equals(field.path);
-            out.add(row(field, i == focus, editing, buffer, error, w));
+            out.add(row(field, i == focus, editing, buffer, cursor, error, w));
         }
         if (editingPath != null) {
             out.add(clip("type to edit  enter apply  esc cancel", w));
@@ -70,7 +81,7 @@ public final class EditorView {
     }
 
     private static String row(EditorField field, boolean focused, boolean editing,
-                              String buffer, String error, int width) {
+                              String buffer, int cursor, String error, int width) {
         StringBuilder line = new StringBuilder();
         line.append(focused ? FOCUS : PLAIN).append(field.path);
         while (line.length() < VALUE_COLUMN) {
@@ -80,7 +91,7 @@ public final class EditorView {
             line.append(' ');
         }
         if (editing) {
-            line.append("> ").append(buffer == null ? "" : buffer).append('_');
+            line.append("> ").append(withCursor(buffer, cursor));
         } else {
             line.append(valueText(field));
             if (field.readOnly) {
@@ -93,6 +104,13 @@ public final class EditorView {
             line.append(HELP).append(oneLine(field.help));
         }
         return clip(line.toString(), width);
+    }
+
+    /** 在插入点画 {@code _}；越界按末尾处理，不抛异常。 */
+    private static String withCursor(String buffer, int cursor) {
+        String text = buffer == null ? "" : buffer;
+        int at = Math.max(0, Math.min(cursor, text.length()));
+        return text.substring(0, at) + '_' + text.substring(at);
     }
 
     private static String valueText(EditorField field) {
