@@ -124,6 +124,7 @@
             <configuration>
               <systemPropertyVariables>
                 <xac.build.dir>${project.build.directory}</xac.build.dir>
+                <xac.updateSnapshots>${xac.updateSnapshots}</xac.updateSnapshots>
               </systemPropertyVariables>
             </configuration>
             <executions>

@@ -1,0 +1,17 @@
+┌ xac.demo ──────────────────────────────────── running · auto-start on · root ┐
+│   unit    in sync         /etc/systemd/system/xac.demo.service               │
+│   env     in sync         /etc/xac/xac.demo.env                              │
+│   process active          pid <pid>                                          │
+│   links   ok                                                                 │
+ ┌────────────────────────────────────────────────────────────────────────────┐
+ │ apply                                                                      │
+ │ would create path-links: [app.jar:/opt/links/a/app.jar, app.jar:/opt/links/b/
+ │ would create workdir /opt/demo                                             │
+ │ would write /etc/xac/xac.demo.env (0600)                                   │
+ │ would write /etc/systemd/system/xac.demo.service (0644)                    │
+ │ would systemctl daemon-reload                                              │
+ │ would systemctl enable xac.demo.service                                    │
+ │ would systemctl restart xac.demo.service                                   │
+ │ y apply  n/esc cancel                                                      │
+ └────────────────────────────────────────────────────────────────────────────┘
+└ a apply  r restart  d destroy  e edit  ? help  q quit ───────────────────────┘

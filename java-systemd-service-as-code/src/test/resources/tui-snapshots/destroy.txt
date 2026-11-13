@@ -1,0 +1,20 @@
+┌ xac.demo ──────────────────────────────────── running · auto-start on · root ┐
+│   unit    in sync         /etc/systemd/system/xac.demo.service               │
+│   env     in sync         /etc/xac/xac.demo.env                              │
+│   process active          pid <pid>                                          │
+         ┌────────────────────────────────────────────────────────────┐
+         │ destroy                                                    │
+         │ will remove:                                               │
+         │   /etc/systemd/system/xac.demo.service                     │
+         │   /etc/xac/xac.demo.env                                    │
+         │   /opt/links/a/app.jar                                     │
+         │   /opt/links/b/app.jar                                     │
+         │   /opt/links/c/app.jar                                     │
+         │   /opt/links/d/app.jar                                     │
+         │   /opt/links/e/app.jar                                     │
+         │   /opt/links/f/app.jar                                     │
+         │   /opt/links/g/app.jar                                     │
+         │ keep: package directory /opt/demo, workdir /opt/demo, logs │
+         │ y destroy  n/esc cancel                                    │
+         └────────────────────────────────────────────────────────────┘
+└ a apply  r restart  d destroy  e edit  ? help  q quit ───────────────────────┘

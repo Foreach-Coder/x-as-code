@@ -30,10 +30,10 @@ launcher 段。脚本按自身真实路径定位 jar，所以可以软链到 `/u
 ## 测试
 
 ```bash
-# 单元 + 集成测试：507 个，不需要 root / systemd / Docker
+# 单元 + 集成测试：525 个，不需要 root / systemd / Docker
 mvn -f java-systemd-service-as-code/pom.xml test
 
-# 真 systemd 端到端：13 个用例，需要 Docker
+# 真 systemd 端到端：14 个用例，需要 Docker
 mvn -f java-systemd-service-as-code/pom.xml -Pe2e verify
 ```
 
@@ -57,11 +57,40 @@ TUI 分两层测：
 - 视图层不启动终端：`TuiApp` / `EditScreen` / `StatusView` 等通过 `Display`、`KeySource` 抽象注入
   `RecordingDisplay` / `ScriptedKeySource`，纯 JUnit 断言；Lanterna 适配层用
   `LanternaDisplayTest`（动态代理 + `RecordingScreen`）与 `LanternaKeySourceTest`（匿名 `InputProvider`）验证。
-- 真实终端层进 e2e：`SmokeIT#tuiRendersInARealPtyAndQuits` 用 `script -qec` 分配 PTY、`stty` 设成
-  100×30，`TerminalCapture` 把 ANSI 流回放成字符网格；按键不是定时塞进去的，而是轮询屏幕直到出现
-  预期文本再写下一个键（FIFO 灌 stdin，detached exec 让 TUI 活过 `execInContainer` 调用），所以慢机器
-  也不会和渲染赛跑。`SmokeIT#tuiApplyRunsTheRealLifecycle` 用同样方式送 `a`→`y` 触发 apply，再断言
-  unit/env 真被写回、服务真在跑。另有 `SmokeIT#tuiRefusesToStartWithoutATty` 覆盖非 TTY 退 2。
+- 真实终端层进 e2e：`SmokeIT#tuiRendersInARealPtyAndQuits` 用 `script -qec` 分配 PTY，`AnsiScreen`
+  把 ANSI 流回放成字符网格；按键不是定时塞进去的，而是轮询屏幕直到出现预期文本再写下一个键
+  （FIFO 灌 stdin，detached exec 让 TUI 活过 `execInContainer` 调用），所以慢机器也不会和渲染赛跑。
+  `SmokeIT#tuiApplyRunsTheRealLifecycle` 用同样方式送 `a`→`y` 触发 apply，再断言 unit/env 真被写回、
+  服务真在跑。`SmokeIT#tuiScreensMatchDesignSnapshots` 依次截主屏/apply/destroy/edit/edit-error 五帧，
+  与 `src/test/resources/tui-snapshots/*.txt` 逐字符比对。另有 `SmokeIT#tuiRefusesToStartWithoutATty`
+  覆盖非 TTY 退 2。
+
+  真实 PTY 的尺寸固定是 **80×24**：Lanterna 3.1.5 用 DSR（`ESC[6n`）问光标位置来测尺寸，`script`
+  分配的 pty 没有终端仿真器应答，`stty`/`COLUMNS` 都改不了。所以快照只覆盖 80×24，窄屏/矮屏走单测。
+
+  快照更新：`mvn -Pe2e verify -Dxac.updateSnapshots=true`，然后 **人工 diff**
+  `src/test/resources/tui-snapshots/` 并提交；不要盲更新。
+
+## 截图（人工审图）
+
+颜色分两层断言：`CanvasRoleTest` 锁 Canvas 里的语义角色，`LanternaDisplayRoleTest` 锁角色到
+终端前景/背景色的映射。e2e 的文本快照不锁颜色。想看实际观感：
+
+```bash
+# 1. 容器里跑 TUI 并把帧导成 JSON（Linux 路径，真实 journald）
+docker run -d --name xac-dump --privileged --cgroupns=host \
+  --tmpfs /run --tmpfs /run/lock --tmpfs /tmp --entrypoint /sbin/init xac-e2e:24.04
+# 把 target/classes、target/test-classes、依赖 jar 和 /opt/demo 包拷进去后：
+docker exec xac-dump java -cp '/xac/classes:/xac/test-classes:/xac/deps/*' \
+  io.xac.systemd.tui.TuiScreenDump /opt/demo /xac/out
+docker cp xac-dump:/xac/out/. target/tui-screens/
+
+# 2. 渲染成 PNG
+python3 e2e/screens.py target/tui-screens    # 需要 Pillow
+# → target/tui-screens/{main,apply,destroy,edit}.png
+```
+
+截图只是证据，不参与判红；看到布局/配色问题时改代码并更新快照。
 
 ## 目录
 

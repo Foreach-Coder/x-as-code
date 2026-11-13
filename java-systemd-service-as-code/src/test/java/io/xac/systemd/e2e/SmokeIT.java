@@ -71,6 +71,10 @@ class SmokeIT {
     private static final String FILELOG_LOG = "/var/log/filelog/app.log";
     private static final String CLI_JAR = "/opt/xac.jar";
     private static final String WORKDIR = "/opt/demo";
+    // Lanterna 通过「把光标移到 5001;5001 再问位置」测量终端尺寸；script 分配的 pty
+    // 没有终端仿真器应答 DSR，于是 Lanterna 落在 80x24。这里按它实际看到的尺寸回放。
+    private static int tuiRows = 24;
+    private static int tuiCols = 80;
     private static final String[] LINK_NAMES = {"a", "b", "c", "d", "e", "f", "g"};
 
     @TempDir
@@ -501,11 +505,83 @@ class SmokeIT {
         }
     }
 
+    @Test
+    @Order(14)
+    void tuiScreensMatchDesignSnapshots() throws Exception {
+        // 视觉回归：真 PTY 跑出真实帧，按字符 + 语义角色和仓库快照比对。
+        // 颜色是设计的一部分（漂移行标红、选中行高亮、边框强调色），单色实现会在这里红。
+        Path pngDir = Paths.get("target", "tui-screens");
+        try {
+            // 快照描述「已部署且在跑」的常态；先清掉其它用例留下的链接/unit/env。
+            exec("sh", "-c", "rm -rf /opt/links/*/app.jar; rm -f /etc/systemd/system/xac.demo.service /etc/xac/xac.demo.env");
+            ExecResult applied = exec("java", "-jar", CLI_JAR, "apply", PACKAGE_DIR);
+            assertEquals(0, applied.getExitCode(),
+                    "apply must succeed before snapshots:\n" + applied.getStdout() + applied.getStderr());
+            startTuiPty();
+            awaitScreenContains("a apply", 60000L);
+            AnsiScreen.Screen mainScreen = tuiScreenState();
+            TuiSnapshots.verify("main", mainScreen, pngDir);
+
+            sendKeys("a");
+            awaitScreenContains("y apply", 20000L);
+            TuiSnapshots.verify("apply", tuiScreenState(), pngDir);
+            sendKeys("n");
+            awaitScreenContains("a apply", 20000L);
+
+            sendKeys("d");
+            awaitScreenContains("y destroy", 20000L);
+            TuiSnapshots.verify("destroy", tuiScreenState(), pngDir);
+            sendKeys("n");
+            awaitScreenContains("a apply", 20000L);
+
+            sendKeys("e");
+            awaitScreenContains("mode: browse", 20000L);
+            AnsiScreen.Screen editScreen = tuiScreenState();
+            TuiSnapshots.verify("edit", editScreen, pngDir);
+
+            // 进 runtime.java（初始选中 description），清空后保存：编辑器必须留下并显示必填错误。
+            sendRawKeys("\\033[B\\033[B");
+            awaitScreenContains("> runtime.java", 20000L);
+            sendKeys("\n");
+            awaitScreenContains("mode: edit value", 20000L);
+            StringBuilder backspaces = new StringBuilder();
+            for (int i = 0; i < 40; i++) {
+                backspaces.append("\\177");
+            }
+            sendRawKeys(backspaces.toString());
+            sendKeys("\n");
+            sendKeys("s");
+            awaitScreenContains("must not be empty", 20000L);
+            AnsiScreen.Screen errorScreen = tuiScreenState();
+            TuiSnapshots.verify("edit-error", errorScreen, pngDir);
+
+            // 撤销改动后退出编辑器；脏状态下的 q 会再问一次，按 y 丢弃。
+            sendKeys("uuuuu");
+            sendKeys("q");
+            Thread.sleep(300L);
+            if (tuiScreen().contains("discard")) {
+                sendKeys("y");
+            }
+            awaitScreenContains("a apply", 20000L);
+            sendKeys("q");
+            assertEquals(0, awaitTuiExit(20000L), "tui must exit 0 after snapshots:\n" + tuiScreen());
+        } finally {
+            stopTuiPty();
+        }
+    }
+
     private static void startTuiPty() throws Exception {
+        startTuiPty(tuiRows, tuiCols);
+    }
+
+    private static void startTuiPty(int rows, int cols) throws Exception {
+        tuiRows = rows;
+        tuiCols = cols;
         Path runner = writeHostFile("tui-run.sh", ""
                 + "#!/bin/sh\n"
                 + "exec 3<>/tmp/xac-tui-in\n"
-                + "script -qec 'stty rows 30 cols 100; TERM=xterm-256color exec java -jar "
+                + "script -qec 'stty rows " + rows + " cols " + cols
+                + "; TERM=xterm-256color exec java -jar "
                 + CLI_JAR + " tui " + PACKAGE_DIR + "' /dev/null <&3 > /tmp/xac-tui-out 2>&1\n"
                 + "printf '%s' \"$?\" > /tmp/xac-tui-rc\n");
         exec("rm", "-f", "/tmp/xac-tui-in", "/tmp/xac-tui-out", "/tmp/xac-tui-rc");
@@ -538,6 +614,11 @@ class SmokeIT {
         exec("sh", "-c", "printf '%s' '" + keys + "' > /tmp/xac-tui-in");
     }
 
+    /** 送带转义序列的按键（例如方向键 \033[B）；参数按 printf 的 %b 解释。 */
+    private static void sendRawKeys(String printfArgument) throws Exception {
+        exec("sh", "-c", "printf '%b' '" + printfArgument + "' > /tmp/xac-tui-in");
+    }
+
     private static String tuiRawOutput() throws IOException, InterruptedException {
         if (!exists("/tmp/xac-tui-out")) {
             return "";
@@ -545,8 +626,12 @@ class SmokeIT {
         return exec("cat", "/tmp/xac-tui-out").getStdout();
     }
 
+    private static AnsiScreen.Screen tuiScreenState() throws IOException, InterruptedException {
+        return AnsiScreen.parse(tuiRawOutput(), tuiRows, tuiCols);
+    }
+
     private static String tuiScreen() throws IOException, InterruptedException {
-        return TerminalCapture.render(tuiRawOutput(), 30, 100);
+        return tuiScreenState().text();
     }
 
     private static void awaitScreenContains(String needle, long timeoutMillis) throws Exception {

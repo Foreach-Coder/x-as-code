@@ -7,3 +7,5 @@ Dockerfile text eol=lf
 java-systemd-service-as-code/src/main/scripts/* text eol=lf
 # 生成的模板固定 LF，保证 Windows 构建出的 jar 在 Linux 上生成的 xac.yaml 逐字节一致
 java-systemd-service-as-code/src/main/resources/xac.yaml.template text eol=lf
+java-systemd-service-as-code/src/test/resources/tui-snapshots/*.txt text eol=lf
+java-systemd-service-as-code/e2e/*.py text eol=lf

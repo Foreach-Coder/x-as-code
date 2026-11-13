@@ -1,6 +1,7 @@
 package io.xac.systemd.tui;
 
 import com.googlecode.lanterna.TextCharacter;
+import com.googlecode.lanterna.TextColor;
 import com.googlecode.lanterna.screen.Screen;
 import com.googlecode.lanterna.terminal.Terminal;
 import org.junit.jupiter.api.Test;
@@ -58,6 +59,27 @@ class LanternaDisplayTest {
         // 代理对必须拼成完整字形再写，单独写高代理是非法字符。
         assertEquals(Arrays.asList(0, 2), recording.columns);
         assertEquals(Arrays.asList("\uD83D\uDE00", "x"), recording.glyphs);
+    }
+
+    @Test
+    void styleMapsSemanticRolesToTerminalColors() {
+        TextCharacter plain = new TextCharacter('x');
+
+        assertEquals(TextColor.ANSI.CYAN,
+                LanternaDisplay.style(plain, Role.ACCENT).getForegroundColor());
+        assertEquals(TextColor.ANSI.BLACK_BRIGHT,
+                LanternaDisplay.style(plain, Role.DIM).getForegroundColor());
+        assertEquals(TextColor.ANSI.RED,
+                LanternaDisplay.style(plain, Role.WARN).getForegroundColor());
+        assertEquals(TextColor.ANSI.GREEN,
+                LanternaDisplay.style(plain, Role.OK).getForegroundColor());
+        assertEquals(TextColor.ANSI.WHITE,
+                LanternaDisplay.style(plain, Role.SELECTED).getForegroundColor());
+        assertEquals(TextColor.ANSI.BLUE,
+                LanternaDisplay.style(plain, Role.SELECTED).getBackgroundColor());
+        // 默认角色保持终端默认色，不额外设置。
+        assertEquals(TextColor.ANSI.DEFAULT,
+                LanternaDisplay.style(plain, Role.DEFAULT).getForegroundColor());
     }
 
     private static final class RecordingScreen {

@@ -6,6 +6,7 @@ import java.io.UncheckedIOException;
 import com.googlecode.lanterna.TerminalPosition;
 import com.googlecode.lanterna.TerminalSize;
 import com.googlecode.lanterna.TextCharacter;
+import com.googlecode.lanterna.TextColor;
 import com.googlecode.lanterna.screen.Screen;
 import com.googlecode.lanterna.screen.TerminalScreen;
 import com.googlecode.lanterna.terminal.DefaultTerminalFactory;
@@ -60,10 +61,11 @@ public final class LanternaDisplay implements Display {
                     if (Character.isHighSurrogate(c) && x + 1 < canvas.width()
                             && Character.isLowSurrogate(canvas.charAt(x + 1, y))) {
                         String glyph = new String(new char[]{c, canvas.charAt(x + 1, y)});
-                        screen.setCharacter(x, y, TextCharacter.fromString(glyph)[0]);
+                        screen.setCharacter(x, y, style(TextCharacter.fromString(glyph)[0],
+                                canvas.roleAt(x, y)));
                         x++;
                     } else {
-                        screen.setCharacter(x, y, new TextCharacter(c));
+                        screen.setCharacter(x, y, style(new TextCharacter(c), canvas.roleAt(x, y)));
                     }
                 }
             }
@@ -78,6 +80,31 @@ public final class LanternaDisplay implements Display {
     public Size size() {
         TerminalSize terminalSize = screen.getTerminalSize();
         return new Size(terminalSize.getColumns(), terminalSize.getRows());
+    }
+
+    /**
+     * 把画布角色映射成终端颜色。这是唯一知道具体配色的地方：
+     * Canvas 只记语义角色，换配色不影响绘制代码与测试断言。
+     */
+    static TextCharacter style(TextCharacter character, Role role) {
+        if (role == null || role == Role.DEFAULT) {
+            return character;
+        }
+        switch (role) {
+            case ACCENT:
+                return character.withForegroundColor(TextColor.ANSI.CYAN);
+            case DIM:
+                return character.withForegroundColor(TextColor.ANSI.BLACK_BRIGHT);
+            case WARN:
+                return character.withForegroundColor(TextColor.ANSI.RED);
+            case OK:
+                return character.withForegroundColor(TextColor.ANSI.GREEN);
+            case SELECTED:
+                return character.withForegroundColor(TextColor.ANSI.WHITE)
+                        .withBackgroundColor(TextColor.ANSI.BLUE);
+            default:
+                return character;
+        }
     }
 
     @Override

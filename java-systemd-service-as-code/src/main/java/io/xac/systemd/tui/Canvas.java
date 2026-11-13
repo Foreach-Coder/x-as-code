@@ -18,6 +18,7 @@ public final class Canvas {
     private final int width;
     private final int height;
     private final char[][] cells;
+    private final Role[][] roles;
 
     private int cursorX;
     private int cursorY;
@@ -32,6 +33,7 @@ public final class Canvas {
         this.width = width;
         this.height = height;
         this.cells = new char[height][width];
+        this.roles = new Role[height][width];
         clear();
     }
 
@@ -46,37 +48,56 @@ public final class Canvas {
     public void clear() {
         for (int y = 0; y < height; y++) {
             Arrays.fill(cells[y], ' ');
+            Arrays.fill(roles[y], Role.DEFAULT);
         }
         cursorX = 0;
         cursorY = 0;
     }
 
     /**
-     * 在 (x, y) 写一个字符。宽字符会再占一格占位；越界、占位符与孤立代理忽略。
+     * 在 (x, y) 写一个字符，角色为 {@link Role#DEFAULT}。
+     * 宽字符会再占一格占位；越界、占位符与孤立代理忽略。
      */
     public void put(int x, int y, char c) {
+        put(x, y, c, Role.DEFAULT);
+    }
+
+    /**
+     * 在 (x, y) 写一个带角色的字符。宽字符的第二格（占位格）沿用同一角色。
+     */
+    public void put(int x, int y, char c, Role role) {
         if (x < 0 || x >= width || y < 0 || y >= height
                 || c == PLACEHOLDER || Character.isSurrogate(c)) {
             return;
         }
         eraseGlyphAt(y, x);
         cells[y][x] = c;
+        roles[y][x] = role;
         if (displayWidth(c) == 2) {
             if (x + 1 >= width) {
                 // 右边界只剩一格：不画半个宽字形。
                 cells[y][x] = ' ';
+                roles[y][x] = Role.DEFAULT;
                 return;
             }
             eraseGlyphAt(y, x + 1);
             cells[y][x + 1] = PLACEHOLDER;
+            roles[y][x + 1] = role;
         }
     }
 
     /**
-     * 在 (x, y) 写一行文字。超宽截断、负数 x 从左侧裁剪、y 越界忽略，都不换行。
-     * 宽字符/代理对按两列推进，放不下整个字形时宁可不画。
+     * 在 (x, y) 写一行文字，角色为 {@link Role#DEFAULT}。超宽截断、负数 x 从左侧裁剪、
+     * y 越界忽略，都不换行。宽字符/代理对按两列推进，放不下整个字形时宁可不画。
      */
     public void text(int x, int y, String value) {
+        text(x, y, value, Role.DEFAULT);
+    }
+
+    /**
+     * 在 (x, y) 写一行带角色的文字。宽字符的两格（含占位格）都带同一角色。
+     */
+    public void text(int x, int y, String value, Role role) {
         if (value == null || y < 0 || y >= height) {
             return;
         }
@@ -118,11 +139,15 @@ public final class Canvas {
                     cells[y][col] = (char) codePoint;
                     cells[y][col + 1] = PLACEHOLDER;
                 }
+                roles[y][col] = role;
+                roles[y][col + 1] = role;
             } else if (chars == 1 && !Character.isSurrogate((char) codePoint)) {
                 cells[y][col] = (char) codePoint;
+                roles[y][col] = role;
             } else {
                 // 宽度只有一列的代理码点无法用一格表达：用 '?' 占位，保证列数不变。
                 cells[y][col] = '?';
+                roles[y][col] = role;
             }
             col += glyphWidth;
             i += chars;
@@ -136,6 +161,11 @@ public final class Canvas {
      *         只占一格，破坏「宽字符占两列」的列宽不变量。
      */
     public void hline(int y, char c) {
+        hline(y, c, Role.DEFAULT);
+    }
+
+    /** 用字符和角色填满第 y 行；y 越界忽略。 */
+    public void hline(int y, char c, Role role) {
         if (y < 0 || y >= height) {
             return;
         }
@@ -146,30 +176,37 @@ public final class Canvas {
             throw new IllegalArgumentException("hline does not accept isolated surrogates");
         }
         Arrays.fill(cells[y], c);
+        Arrays.fill(roles[y], role);
     }
 
     /**
-     * 画一个边框盒（只画边，不填内部）。超出画布的部分被裁剪。
+     * 画一个边框盒（只画边，不填内部），角色为 {@link Role#DEFAULT}。
+     * 超出画布的部分被裁剪。
      */
     public void box(int x, int y, int boxWidth, int boxHeight) {
+        box(x, y, boxWidth, boxHeight, Role.DEFAULT);
+    }
+
+    /** 画一个带角色的边框盒（只画边，不填内部）。超出画布的部分被裁剪。 */
+    public void box(int x, int y, int boxWidth, int boxHeight, Role role) {
         if (boxWidth <= 0 || boxHeight <= 0) {
             return;
         }
         int right = x + boxWidth - 1;
         int bottom = y + boxHeight - 1;
         for (int cx = x; cx <= right; cx++) {
-            put(cx, y, '─');
-            put(cx, bottom, '─');
+            put(cx, y, '─', role);
+            put(cx, bottom, '─', role);
         }
         for (int cy = y; cy <= bottom; cy++) {
-            put(x, cy, '│');
-            put(right, cy, '│');
+            put(x, cy, '│', role);
+            put(right, cy, '│', role);
         }
         if (boxWidth >= 2 && boxHeight >= 2) {
-            put(x, y, '┌');
-            put(right, y, '┐');
-            put(x, bottom, '└');
-            put(right, bottom, '┘');
+            put(x, y, '┌', role);
+            put(right, y, '┐', role);
+            put(x, bottom, '└', role);
+            put(right, bottom, '┘', role);
         }
     }
 
@@ -178,6 +215,14 @@ public final class Canvas {
             return ' ';
         }
         return cells[y][x];
+    }
+
+    /** 单元格的语义角色；越界返回 {@link Role#DEFAULT}。 */
+    public Role roleAt(int x, int y) {
+        if (x < 0 || x >= width || y < 0 || y >= height) {
+            return Role.DEFAULT;
+        }
+        return roles[y][x] == null ? Role.DEFAULT : roles[y][x];
     }
 
     /** 第 y 行的完整内容，长度恒为 {@link #width()}（含宽字符的占位格）。 */
@@ -212,8 +257,10 @@ public final class Canvas {
         char current = cells[y][x];
         if (current == PLACEHOLDER) {
             cells[y][x] = ' ';
+            roles[y][x] = Role.DEFAULT;
             if (x > 0) {
                 cells[y][x - 1] = ' ';
+                roles[y][x - 1] = Role.DEFAULT;
             }
             return;
         }
@@ -221,6 +268,8 @@ public final class Canvas {
                 && Character.isLowSurrogate(cells[y][x + 1])) {
             cells[y][x] = ' ';
             cells[y][x + 1] = ' ';
+            roles[y][x] = Role.DEFAULT;
+            roles[y][x + 1] = Role.DEFAULT;
             return;
         }
         if (Character.isLowSurrogate(current) && x > 0
@@ -228,11 +277,15 @@ public final class Canvas {
             // 覆盖代理对的后半格：前半格也必须一起清掉，否则留下孤立高代理。
             cells[y][x] = ' ';
             cells[y][x - 1] = ' ';
+            roles[y][x] = Role.DEFAULT;
+            roles[y][x - 1] = Role.DEFAULT;
             return;
         }
         if (displayWidth(current) == 2 && x + 1 < width && cells[y][x + 1] == PLACEHOLDER) {
             cells[y][x] = ' ';
             cells[y][x + 1] = ' ';
+            roles[y][x] = Role.DEFAULT;
+            roles[y][x + 1] = Role.DEFAULT;
         }
     }
 

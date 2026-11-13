@@ -359,10 +359,13 @@ notice 用 `N comment(s) were dropped`（示例同样以 `; M commented-out exam
 | core | `ServicePackage` 七类返回与副作用 | `RecordingRunner` + 临时目录 |
 | 视图模型 | 状态行、漂移着色、编辑字段树、校验定位、diff 文本 | 纯 JUnit，不碰终端 |
 | TUI 壳 | 键位映射、覆盖层开关、resize 不崩 | 注入 `Display` / `KeySource`；Lanterna 适配层用动态代理 + `RecordingScreen`、匿名 `InputProvider` |
-| CLI 回归 | 输出不变、退出码不变 | 现有 504 单测 |
-| e2e | 现有 11 例（含 `tui` 非 TTY 退 2；无真实 PTY） | Testcontainers `xac-e2e:24.04` |
+| CLI 回归 | 输出不变、退出码不变 | 525 单测 |
+| 颜色 | 语义角色 → 终端颜色映射 | `CanvasRoleTest`（Canvas 只记角色）+ `LanternaDisplayRoleTest`（角色落到 Screen 前景/背景色） |
+| e2e | 14 例：`tui` 非 TTY 退 2、真 PTY 渲染 + `?`/`q`、真 PTY 跑 apply、五个界面文本快照 | Testcontainers `xac-e2e:24.04`；`script` 分配 pty，`AnsiScreen` 回放 |
 
-原则：能在视图模型断言的，不在终端断言。
+原则：能在视图模型断言的，不在终端断言。颜色分两层验证：`Canvas` 只记 `Role`（`CanvasRoleTest`），`LanternaDisplay` 把 `Role` 映射成颜色（`LanternaDisplayRoleTest`），两边任一退化都会红；e2e 的文本快照只锁字符布局，不锁颜色。
+
+界面证据：`mvn test` 里的角色测试通过后，`e2e/screens.py target/tui-screens` 把 `TuiScreenDump` 导出的 JSON 渲染成 PNG（`main`/`apply`/`destroy`/`edit`），由人看图判断视觉是否达标。快照的更新走 `-Dxac.updateSnapshots=true`，更新后必须人工 diff 一遍再提交。
 
 ## 9. 交付
 
@@ -378,7 +381,7 @@ notice 用 `N comment(s) were dropped`（示例同样以 `; M commented-out exam
 2. **TUI 骨架**：`tui` 命令、主屏、状态轮询、日志区、帮助、退出。
 3. **动作**：apply 预览与执行、restart、destroy 确认。
 4. **编辑**：Schema 表单、校验、`SpecWriter`、`YamlCommentScanner`、diff 与保存。
-5. **打包与文档**：shade 验证、真实 PTY 冒烟、文档、版本 `0.2.0`、发布。
+5. **打包与文档**：shade 验证、真实 PTY 冒烟与界面快照、文档、版本 `0.2.0`、发布。
 
 每阶段结束都必须 `mvn test` 全绿；第 1 阶段额外要求 `mvn -Pe2e verify` 全绿，证明重构未改行为。
 
@@ -430,5 +433,5 @@ notice 用 `N comment(s) were dropped`（示例同样以 `; M commented-out exam
 - **失焦校验实现为全量刷新**：`EditorModel.validate()` 在每次 `with(...)` 变更后整份重跑，而不是只校验失焦字段；效果等价，代价是每次按键多一次全量校验（字段数量小，未做增量优化）。
 - **TUI 动作不提供 detached 执行**：`apply` / `restart` / `destroy` 都在 TUI 进程的 daemon 动作线程里执行；执行中退出会放弃等待，只有当前外部命令可能自行跑完，剩余步骤不再执行（notice `left running; current step may finish, remaining steps will not; re-run apply/destroy`）。没有「脱离终端继续跑」的模式。
 - **帮助面板未实现**：`?` 只设置 notice `help is not implemented yet`，没有覆盖式帮助画面；键位仍显示在底栏和本文档中。
-- **没有真实 PTY 冒烟**：§8 测试表与 §10 第 5 项提到的真实 PTY `tui` 冒烟没有落地；e2e 只有 `SmokeIT#tuiRefusesToStartWithoutATty`，验证非 TTY 时退 2。TUI 行为由 `Display` / `KeySource` 注入的单元测试覆盖。
-- **测试数字**：§8 与 §10 中的「180 单测」「11 例 e2e」是写作时的历史值；0.2.0 实际为 504 个单测（`mvn test`）与 11 个 e2e（`mvn -Pe2e verify`，其中 1 个是 `tui` 非 TTY 退 2）。
+- **真实 PTY 的尺寸固定为 80x24**：Lanterna 3.1.5 通过 `ESC[s ESC[5001;5001H ESC[6n` 查询光标位置来测终端尺寸，`script` 分配的 pty 没有终端仿真器应答 DSR，于是退回 80x24；`stty rows/cols` 与 `COLUMNS/LINES` 都改不了它。因此快照只覆盖 80x24，窄屏/矮屏分支（键位条收起、日志区隐藏）由单元测试覆盖。
+- **测试数字**：§8 与 §10 中的「180 单测」「11 例 e2e」是写作时的历史值；当前为 525 个单测（`mvn test`，41 个 POSIX-only 在 Windows 上跳过）与 14 个 e2e（`mvn -Pe2e verify`）。

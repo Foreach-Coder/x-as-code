@@ -8,6 +8,7 @@ import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -402,7 +403,10 @@ public final class TuiApp {
             // 不能再假装还在 follow，否则表头会永远骗人。
             if (logStream == stream) {
                 logsEnded = true;
-                notice = "log stream ended";
+                // 日志源正常结束只是信息；如果已经有错误/动作提示，不要把它盖掉。
+                if (notice == null || notice.isEmpty()) {
+                    notice = "log stream ended";
+                }
                 dirty = true;
             }
             logStart.countDown();
@@ -952,7 +956,7 @@ public final class TuiApp {
         if (actionRunning) {
             paintFrameRow(canvas, noticeRow, "running...");
         } else if (!notice.isEmpty() && height >= 4) {
-            paintFrameRow(canvas, noticeRow, "notice: " + notice);
+            paintNotice(canvas, noticeRow, notice);
         }
         if (overlay != null) {
             paintOverlay(canvas);
@@ -973,16 +977,29 @@ public final class TuiApp {
         int height = canvas.height();
         canvas.clear();
         String service = state == null ? "xac" : state.service;
-        canvas.text(0, 0, "edit " + service);
+        canvas.text(0, 0, "edit " + service, Role.ACCENT);
         List<String> lines = current.lines(Math.max(1, width - 2), Math.max(1, height - 1));
         int row = 1;
         for (String line : lines) {
             if (row >= height) {
                 break;
             }
-            canvas.text(1, row, line);
+            canvas.text(1, row, line, roleOfEditorLine(line));
             row++;
         }
+    }
+
+    private static Role roleOfEditorLine(String line) {
+        if (line.startsWith("> ")) {
+            return Role.SELECTED;
+        }
+        if (line.startsWith("! ")) {
+            return Role.WARN;
+        }
+        if (line.contains("(read-only)")) {
+            return Role.DIM;
+        }
+        return Role.DEFAULT;
     }
 
     /**
@@ -1015,9 +1032,9 @@ public final class TuiApp {
         for (int y = top; y < top + boxHeight; y++) {
             canvas.hline(y, ' ');
         }
-        canvas.box(left, top, boxWidth, boxHeight);
+        canvas.box(left, top, boxWidth, boxHeight, Role.ACCENT);
         int textX = Math.min(left + 2, width - 1);
-        canvas.text(textX, top + 1, title);
+        canvas.text(textX, top + 1, title, Role.ACCENT);
         int contentTop = top + 2;
         int contentBottom = top + boxHeight - 3;
         int capacity = contentBottom - contentTop + 1;
@@ -1027,14 +1044,14 @@ public final class TuiApp {
             if (row > contentBottom) {
                 break;
             }
-            canvas.text(textX, row++, line);
+            canvas.text(textX, row++, line, isWarningLine(line) ? Role.WARN : Role.DEFAULT);
         }
         if (visible.size() < lines.size() && capacity > 0) {
             // 纵向溢出：最后一行固定报出被省略的行数，warning 行优先保留（M2）。
             canvas.text(textX, contentBottom,
-                    "... (" + (lines.size() - visible.size()) + " more lines)");
+                    "... (" + (lines.size() - visible.size()) + " more lines)", Role.DIM);
         }
-        canvas.text(textX, top + boxHeight - 2, hint);
+        canvas.text(textX, top + boxHeight - 2, hint, Role.DIM);
     }
 
     /**
@@ -1080,23 +1097,24 @@ public final class TuiApp {
                 + " · " + (state.root ? "root" : "not root") + " ┐";
         int fill = width - left.length() - right.length();
         if (fill >= 0) {
-            canvas.text(0, 0, left);
-            canvas.text(left.length(), 0, repeat('─', fill));
-            canvas.text(left.length() + fill, 0, right);
+            canvas.text(0, 0, left, Role.ACCENT);
+            canvas.text(left.length(), 0, repeat('─', fill), Role.ACCENT);
+            canvas.text(left.length() + fill, 0, right, Role.ACCENT);
             return;
         }
         // 窄屏：状态信息让位，只保留服务名。
-        canvas.text(0, 0, left);
+        canvas.text(0, 0, left, Role.ACCENT);
         int dashes = width - left.length() - 1;
         if (dashes > 0) {
-            canvas.text(left.length(), 0, repeat('─', dashes));
+            canvas.text(left.length(), 0, repeat('─', dashes), Role.ACCENT);
         }
-        canvas.put(width - 1, 0, '┐');
+        canvas.put(width - 1, 0, '┐', Role.ACCENT);
     }
 
     /**
      * 画一行带左右边框的内容：先写字再补边框，让 Canvas 按显示宽度裁剪；
      * 绝不用 substring 按 char 下标截断（CJK 会切出半个宽字符）。
+     * 行首是 {@code "! "} 的漂移行整行用 WARN 角色（design §6.5）。
      */
     private void paintFrameRow(Canvas canvas, int y, String content) {
         int width = canvas.width();
@@ -1105,10 +1123,40 @@ public final class TuiApp {
             return;
         }
         if (content != null && !content.isEmpty()) {
-            canvas.text(2, y, content);
+            canvas.text(2, y, content, roleOfRow(content));
         }
-        canvas.put(0, y, '│');
-        canvas.put(width - 1, y, '│');
+        canvas.put(0, y, '│', Role.ACCENT);
+        canvas.put(width - 1, y, '│', Role.ACCENT);
+    }
+
+    private static Role roleOfRow(String content) {
+        return content.startsWith("! ") ? Role.WARN : Role.DEFAULT;
+    }
+
+    /**
+     * 通知行：失败类给 WARN、成功类给 OK、其余给 DIM，前缀本身固定 DIM。
+     */
+    private void paintNotice(Canvas canvas, int y, String text) {
+        int width = canvas.width();
+        if (width < 2) {
+            return;
+        }
+        canvas.text(2, y, "notice: ", Role.DIM);
+        canvas.text(10, y, text, roleOfNotice(text));
+        canvas.put(0, y, '│', Role.ACCENT);
+        canvas.put(width - 1, y, '│', Role.ACCENT);
+    }
+
+    private static Role roleOfNotice(String text) {
+        String lower = text.toLowerCase(Locale.ROOT);
+        if (lower.contains("failed") || lower.contains("cannot") || lower.contains("unavailable")
+                || lower.contains("disabled") || lower.contains("error")) {
+            return Role.WARN;
+        }
+        if (lower.endsWith(" ok") || lower.equals("refreshed")) {
+            return Role.OK;
+        }
+        return Role.DIM;
     }
 
     private void paintLogsHeader(Canvas canvas, int y) {
@@ -1122,12 +1170,12 @@ public final class TuiApp {
         }
         String left = "├ logs ─ " + state.logSource + " · " + status + " ";
         if (left.length() + 1 <= width) {
-            canvas.text(0, y, left);
-            canvas.text(left.length(), y, repeat('─', width - left.length() - 1));
+            canvas.text(0, y, left, Role.DIM);
+            canvas.text(left.length(), y, repeat('─', width - left.length() - 1), Role.ACCENT);
         } else {
-            canvas.text(0, y, left);
+            canvas.text(0, y, left, Role.DIM);
         }
-        canvas.put(width - 1, y, '┤');
+        canvas.put(width - 1, y, '┤', Role.ACCENT);
     }
 
     private void paintKeyBar(Canvas canvas) {
@@ -1137,13 +1185,13 @@ public final class TuiApp {
         String left = "└ " + keyBar + " ";
         int fill = width - left.length() - 1;
         if (fill >= 0) {
-            canvas.text(0, y, left);
-            canvas.text(left.length(), y, repeat('─', fill));
+            canvas.text(0, y, left, Role.DIM);
+            canvas.text(left.length(), y, repeat('─', fill), Role.ACCENT);
         } else {
-            canvas.hline(y, '─');
-            canvas.put(0, y, '└');
+            canvas.hline(y, '─', Role.ACCENT);
+            canvas.put(0, y, '└', Role.ACCENT);
         }
-        canvas.put(width - 1, y, '┘');
+        canvas.put(width - 1, y, '┘', Role.ACCENT);
     }
 
     private static String repeat(char c, int count) {

@@ -1,0 +1,6 @@
+┌ xac.demo ──────────────────────────────────── running · auto-start on · root ┐
+│   unit    in sync         /etc/systemd/system/xac.demo.service               │
+│   env     in sync         /etc/xac/xac.demo.env                              │
+│   process active          pid <pid>                                          │
+│   links   ok                                                                 │
+└ a apply  r restart  d destroy  e edit  ? help  q quit ───────────────────────┘
