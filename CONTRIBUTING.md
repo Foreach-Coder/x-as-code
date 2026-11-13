@@ -16,9 +16,9 @@ e2e 用 maven-failsafe-plugin。不新增依赖，不追大版本。
 
 ```bash
 mvn -f java-systemd-service-as-code/pom.xml -DskipTests package
-# → java-systemd-service-as-code/target/java-systemd-service-cli-0.2.3.jar
-# → java-systemd-service-as-code/target/java-systemd-service-cli-0.2.3.tar.gz
-#    解压后：java-systemd-service-cli-0.2.3/{bin/java-systemd-service-cli, libs/java-systemd-service-cli-0.2.3.jar}
+# → java-systemd-service-as-code/target/java-systemd-service-cli-0.2.4.jar
+# → java-systemd-service-as-code/target/java-systemd-service-cli-0.2.4.tar.gz
+#    解压后：java-systemd-service-cli-0.2.4/{bin/java-systemd-service-cli, libs/java-systemd-service-cli-0.2.4.jar}
 ```
 
 `bin/java-systemd-service-cli` 是 POSIX `sh` 启动脚本：先按 `XAC_JAVA` → `$JAVA_HOME/bin/java` → `PATH`
@@ -157,6 +157,6 @@ $env:GITCODE_TOKEN = '<token>'
 git push --prune "https://foreach1991:$env:GITCODE_TOKEN@gitcode.com/foreach1991/x-as-code.git" `
   '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'
 pwsh -NoProfile -File .github/scripts/sync-gitcode-release.ps1 `
-  -Owner foreach1991 -Repo x-as-code -Tag v0.2.3 `
-  -Asset java-systemd-service-as-code/target/java-systemd-service-cli-0.2.3.tar.gz
+  -Owner foreach1991 -Repo x-as-code -Tag v0.2.4 `
+  -Asset java-systemd-service-as-code/target/java-systemd-service-cli-0.2.4.tar.gz
 ```

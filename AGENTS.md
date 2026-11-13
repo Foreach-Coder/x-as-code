@@ -25,7 +25,7 @@
 - **Java 8**：`maven.compiler.release=8`。禁止 record、`var`、switch 表达式、文本块、
   `List.of`/`Map.of`、`Optional.isEmpty()`、`ProcessorHandle`/`ProcessHandle`、`Stream.toList()`。
   测试代码同样按 `--release 8` 编译。
-- 依赖白名单（0.2.3 现状）：运行期只有 picocli 4.7.6、snakeyaml 2.2 与 Lanterna 3.1.5
+- 依赖白名单（0.2.4 现状）：运行期只有 picocli 4.7.6、snakeyaml 2.2 与 Lanterna 3.1.5
   （`com.googlecode.lanterna:lanterna`，仅 `tui` 命令使用；shade 不得声明
   filters/includes 过滤 Lanterna 资源（3.1.5 无 terminfo，Linux 走 stty））；
   测试用 JUnit 5.10.2 与 Testcontainers
@@ -63,19 +63,19 @@ mvn -f java-systemd-service-as-code/pom.xml test
 
 # 打包：fat jar + 发行包
 mvn -f java-systemd-service-as-code/pom.xml -DskipTests package
-#   → java-systemd-service-as-code/target/java-systemd-service-cli-0.2.3.jar
-#   → java-systemd-service-as-code/target/java-systemd-service-cli-0.2.3.tar.gz
-#      解压后 java-systemd-service-cli-0.2.3/{bin/java-systemd-service-cli, libs/*.jar}
+#   → java-systemd-service-as-code/target/java-systemd-service-cli-0.2.4.jar
+#   → java-systemd-service-as-code/target/java-systemd-service-cli-0.2.4.tar.gz
+#      解压后 java-systemd-service-cli-0.2.4/{bin/java-systemd-service-cli, libs/*.jar}
 
 # 挂到 PATH（root；只操作 /usr/local/bin 下自己那条软链）
-sudo java-systemd-service-cli-0.2.3/bin/java-systemd-service-cli install
-sudo java-systemd-service-cli-0.2.3/bin/java-systemd-service-cli uninstall
+sudo java-systemd-service-cli-0.2.4/bin/java-systemd-service-cli install
+sudo java-systemd-service-cli-0.2.4/bin/java-systemd-service-cli uninstall
 
 # 交互式生成 xac.yaml 模板（父目录 → <父目录>/<服务名>/xac.yaml；不需要 root，不覆盖已有文件）
-java -jar java-systemd-service-as-code/target/java-systemd-service-cli-0.2.3.jar init /tmp
+java -jar java-systemd-service-as-code/target/java-systemd-service-cli-0.2.4.jar init /tmp
 
 # 交互式终端界面（需要真实 TTY，仅 Linux/SSH 终端；非 TTY 一行提示并退 2）
-java -jar java-systemd-service-as-code/target/java-systemd-service-cli-0.2.3.jar tui /opt/demo
+java -jar java-systemd-service-as-code/target/java-systemd-service-cli-0.2.4.jar tui /opt/demo
 
 # 真 systemd e2e（Testcontainers；需要 Docker + 镜像 xac-e2e:24.04，见 e2e/README.md）
 mvn -f java-systemd-service-as-code/pom.xml -Pe2e verify

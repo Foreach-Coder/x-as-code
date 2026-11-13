@@ -10,7 +10,7 @@ import picocli.CommandLine.Model.CommandSpec;
 
 @Command(name = "java-systemd-service-cli",
         mixinStandardHelpOptions = true,
-        version = "0.2.3",
+        version = "0.2.4",
         description = "install a Java service as a systemd unit",
         subcommands = {ApplyCommand.class, StatusCommand.class, LogsCommand.class,
                 DestroyCommand.class, InitCommand.class, TuiCommand.class})
