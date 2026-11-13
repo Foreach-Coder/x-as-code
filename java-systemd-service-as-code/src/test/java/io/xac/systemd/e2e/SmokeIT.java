@@ -68,7 +68,7 @@ class SmokeIT {
     private static final String FILELOG_PACKAGE_DIR = "/opt/filelog";
     private static final String BADLOG_PACKAGE_DIR = "/opt/badlog";
     private static final String FILELOG_UNIT = "xac.filelog.service";
-    private static final String FILELOG_LOG = "/var/log/filelog/app.log";
+    private static final String FILELOG_LOG = "/opt/filelog/app.log";
     private static final String CLI_JAR = "/opt/xac.jar";
     private static final String WORKDIR = "/opt/demo";
     // Lanterna 通过「把光标移到 5001;5001 再问位置」测量终端尺寸；script 分配的 pty
@@ -129,7 +129,7 @@ class SmokeIT {
         exec("mkdir", "-p", PACKAGE_DIR, "/opt/links", "/opt/elsewhere",
                 "/opt/links/a", "/opt/links/b", "/opt/links/c", "/opt/links/d",
                 "/opt/links/e", "/opt/links/f", "/opt/links/g");
-        exec("mkdir", "-p", FILELOG_PACKAGE_DIR, BADLOG_PACKAGE_DIR, "/var/log/filelog");
+        exec("mkdir", "-p", FILELOG_PACKAGE_DIR, BADLOG_PACKAGE_DIR);
         copyToContainer(cliJar, CLI_JAR);
         copyToContainer(demoJar, PACKAGE_DIR + "/app.jar");
         copyToContainer(demoYaml, PACKAGE_DIR + "/xac.yaml");
@@ -429,8 +429,7 @@ class SmokeIT {
 
         ExecResult missing = xac("logs", BADLOG_PACKAGE_DIR);
         assertExit(2, missing, "logs with missing log file");
-        assertContains(missing.getStderr(),
-                "log file not found: /var/log/filelog/missing.log");
+        assertContains(missing.getStderr(), "log file not found: missing.log");
 
         ExecResult destroyed = xac("destroy", FILELOG_PACKAGE_DIR, "--yes");
         assertExit(0, destroyed, "destroy filelog");
@@ -1010,7 +1009,7 @@ class SmokeIT {
         yaml.append("  opts:\n");
         yaml.append("    - -Dlog.file=").append(FILELOG_LOG).append("\n");
         yaml.append("logs:\n");
-        yaml.append("  file: ").append(FILELOG_LOG).append("\n");
+        yaml.append("  file: app.log\n");
         yaml.append("workdir: ").append(FILELOG_PACKAGE_DIR).append("\n");
         yaml.append("lifecycle:\n");
         yaml.append("  restart-sec: 2\n");
@@ -1026,7 +1025,7 @@ class SmokeIT {
         yaml.append("runtime:\n");
         yaml.append("  java: /usr/bin/java\n");
         yaml.append("logs:\n");
-        yaml.append("  file: /var/log/filelog/missing.log\n");
+        yaml.append("  file: missing.log\n");
         return yaml.toString();
     }
 

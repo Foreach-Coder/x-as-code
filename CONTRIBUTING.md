@@ -30,7 +30,7 @@ launcher 段。脚本按自身真实路径定位 jar，所以可以软链到 `/u
 ## 测试
 
 ```bash
-# 单元 + 集成测试：525 个，不需要 root / systemd / Docker
+# 单元 + 集成测试：527 个，不需要 root / systemd / Docker
 mvn -f java-systemd-service-as-code/pom.xml test
 
 # 真 systemd 端到端：14 个用例，需要 Docker

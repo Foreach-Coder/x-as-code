@@ -200,9 +200,9 @@ lifecycle:
 
 | 子字段 | 必填 | 说明 |
 |--------|------|------|
-| `file` | 是 | 日志文件的绝对路径 |
+| `file` | 是 | 日志文件路径；相对路径相对包目录 |
 
-- 路径必须是绝对路径。相对路径会相对进程的 `workdir` 解析，而 `workdir` 在不同机器上可能不同。
+- 相对路径按**包目录**解析（与 §5 一致），不按服务进程的 `workdir` 解析；`./logs/app.log` 这类带 `./` 的写法同样有效；绝对路径原样使用。
 - 只改变 `logs` 的读取来源；**不改变服务的日志去向**——unit 里仍然只设 `SyslogIdentifier`，
   文件由服务自己写、自己轮转。
 - 文件不存在或不可读时，`logs` 报错并退 2。
@@ -240,7 +240,7 @@ logs:
    `restart-sec`、`timeout-stop-sec` 是正整数。
 10. 会写进 unit 的字符串不含换行：`description`、`artifact.jar`、`runtime.java`、`workdir`、
     `runtime.opts` 的每一项、`properties` 的键与值。
-11. `logs.file` 是绝对路径（见 §4.8）。
+11. `logs.file` 能解析成路径（相对路径按包目录；非法字符报 `invalid path`，见 §4.8）。
 
 以下三条需要在本机看文件，由 CLI 在动手前检查：
 

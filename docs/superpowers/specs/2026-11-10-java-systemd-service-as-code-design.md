@@ -462,6 +462,8 @@ journalctl -u xac.<name>.service --no-pager -n <N> --follow    # -f 时，走 ru
 **配了 `logs.file` 时改为读文件**（`xac.yaml` 见规范 §4.8）。纯 JDK 实现，不调用 `tail`：
 
 - 来源选择只看有没有 `logs.file`：有就读文件，没有就走 journald；两者不会同时用
+- 路径在解析 `xac.yaml` 时定死：绝对路径原样，相对路径（含 `./logs/app.log` 这类写法）按**包目录**解析（不按服务进程的
+  `workdir`）；解析失败在校验阶段报 `logs.file: invalid path`
 - `-n`：`RandomAccessFile` 从尾部按块向前找换行符，定位起点后一次读出，不把整个文件读进内存，
   也不会在按字节拼接时破坏 UTF-8 多字节字符
 - `-f`：先打印最后 N 行，然后每 200ms 查一次 `length()`，从上次偏移继续读；`length` 小于偏移

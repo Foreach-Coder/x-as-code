@@ -1,5 +1,6 @@
 package io.xac.systemd.spec;
 
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -62,7 +63,10 @@ public final class ServiceSpec {
     public final LinkedHashMap<String, String> properties;
     public final Path workdir;
     public final List<String> pathLinks;
+    /** 原始字符串，只用于展示与错误文案。 */
     public final String logFile;
+    /** 解析后的绝对路径；相对路径按包目录解析，非法时为 null。 */
+    public final Path logFilePath;
     public final Lifecycle lifecycle;
     public final Path packageDir;
 
@@ -82,8 +86,20 @@ public final class ServiceSpec {
         this.workdir = b.workdir == null ? null : root.resolve(b.workdir).normalize();
         this.pathLinks = b.pathLinks == null ? new ArrayList<String>() : b.pathLinks;
         this.logFile = b.logFile;
+        this.logFilePath = resolveLogFile(root, b.logFile);
         this.lifecycle = b.lifecycle;
         this.packageDir = root;
+    }
+
+    private static Path resolveLogFile(Path root, String logFile) {
+        if (logFile == null) {
+            return null;
+        }
+        try {
+            return root.resolve(logFile).normalize();
+        } catch (InvalidPathException e) {
+            return null;
+        }
     }
 
     public static Builder builder(Path packageDir) {

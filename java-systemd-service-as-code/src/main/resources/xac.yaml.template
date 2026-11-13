@@ -42,8 +42,8 @@ runtime:
 
 # Where `logs` reads from. Omit this section to read journald
 # (journalctl -u xac.<name>); set `file` to read that file instead, for services
-# that write their own log file rather than stdout. The path must be absolute;
-# the CLI never creates or rotates the file.
+# that write their own log file rather than stdout. A relative path is resolved
+# against the package directory; the CLI never creates or rotates the file.
 # logs:
 #   file: /var/log/{{name}}/app.log
 

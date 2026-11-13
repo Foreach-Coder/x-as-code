@@ -154,12 +154,42 @@ class SpecLoaderTest {
     }
 
     @Test
-    void rejectsRelativeLogsFile() throws IOException {
+    void resolvesRelativeLogsFileAgainstPackageDir() throws IOException {
         write(minimal() + "logs:\n  file: var/log/demo/app.log\n");
         SpecLoader.Result result = SpecLoader.load(pkg);
+        assertTrue(result.violations.isEmpty(), result.violations.toString());
         assertNotNull(result.spec);
-        List<Violation> violations = ValidationRunner.run(result.spec);
+        assertEquals(pkg.resolve("var/log/demo/app.log").toAbsolutePath().normalize(),
+                result.spec.logFilePath);
+        assertTrue(ValidationRunner.run(result.spec).isEmpty());
+    }
+
+    @Test
+    void resolvesDotSlashLogsFileAgainstPackageDir() throws IOException {
+        write(minimal() + "logs:\n  file: ./logs/root.log\n");
+        SpecLoader.Result result = SpecLoader.load(pkg);
+        assertTrue(result.violations.isEmpty(), result.violations.toString());
+        assertNotNull(result.spec);
+        assertEquals(pkg.resolve("logs/root.log").toAbsolutePath().normalize(),
+                result.spec.logFilePath);
+        assertEquals("./logs/root.log", result.spec.logFile);
+        assertTrue(ValidationRunner.run(result.spec).isEmpty());
+    }
+
+    @Test
+    void relativeLogsFileIgnoresWorkdir() throws IOException {
+        write(minimal() + "workdir: run\nlogs:\n  file: var/log/demo/app.log\n");
+        SpecLoader.Result result = SpecLoader.load(pkg);
+        assertTrue(result.violations.isEmpty(), result.violations.toString());
+        assertEquals(pkg.resolve("var/log/demo/app.log").toAbsolutePath().normalize(),
+                result.spec.logFilePath);
+    }
+
+    @Test
+    void rejectsInvalidLogsFilePath() {
+        ServiceSpec spec = ServiceSpec.builder(pkg).logFile("app\u0000.log").build();
+        List<Violation> violations = ValidationRunner.run(spec);
         assertEquals(1, violations.size(), violations.toString());
-        assertEquals("logs.file: must be an absolute path", violations.get(0).toString());
+        assertEquals("logs.file: invalid path", violations.get(0).toString());
     }
 }
