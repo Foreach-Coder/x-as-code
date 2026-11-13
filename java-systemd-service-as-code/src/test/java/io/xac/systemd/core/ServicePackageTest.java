@@ -9,6 +9,7 @@ import io.xac.systemd.exec.ExecResult;
 import io.xac.systemd.exec.RecordingRunner;
 import io.xac.systemd.logs.FileLogStream;
 import io.xac.systemd.logs.JournaldLogStream;
+import io.xac.systemd.logs.LogSourceException;
 import io.xac.systemd.logs.LogStream;
 import io.xac.systemd.spec.Violation;
 import io.xac.systemd.systemd.SystemdTarget;

@@ -9,7 +9,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-import io.xac.systemd.core.LogSourceException;
 import io.xac.systemd.exec.CommandRunner;
 import io.xac.systemd.exec.RunningCommand;
 import io.xac.systemd.spec.ServiceSpec;

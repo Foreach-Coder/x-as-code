@@ -1,7 +1,5 @@
 package io.xac.systemd.logs;
 
-import io.xac.systemd.core.LogSourceException;
-
 /**
  * 一个可消费的日志来源：journald 或日志文件。
  *

@@ -40,9 +40,9 @@ java-systemd-service-as-code/src/main/java/io/xac/systemd/
   core/ServicePackage.java            新增：唯一门面
   core/InvalidSpecException.java      新增：带 violations 的受检异常
   core/StatusReport.java              新增：StatusResult + drift + healthy
-  core/LogSourceException.java        新增：日志来源不可用
   logs/LogSink.java                   新增：一行回调
   logs/LogStream.java                 新增：start/close
+  logs/LogSourceException.java        新增：日志来源不可用
   logs/FileLogStream.java             新增：FileTail 的流实现
   logs/JournaldLogStream.java         新增：journalctl --follow 的流实现
   logs/LogsRunner.java                删除（能力搬进 core + LogStream）
@@ -486,7 +486,7 @@ git add -A && git commit -m "refactor: 新增 core.ServicePackage，CLI 改为�
 ### Task 6: 日志改为 LogStream，CLI logs 迁移
 
 **Files:**
-- Create: `logs/LogSink.java`、`logs/LogStream.java`、`logs/FileLogStream.java`、`logs/JournaldLogStream.java`、`core/LogSourceException.java`
+- Create: `logs/LogSink.java`、`logs/LogStream.java`、`logs/FileLogStream.java`、`logs/JournaldLogStream.java`、`logs/LogSourceException.java`
 - Modify: `core/ServicePackage.java`（新增 `logs(int)`）、`cli/LogsCommand.java`
 - Delete: `logs/LogsRunner.java`
 - Create: `src/test/java/io/xac/systemd/logs/FileLogStreamTest.java`、`JournaldLogStreamTest.java`
@@ -501,6 +501,7 @@ public interface LogStream extends AutoCloseable {
     void close();                          // 幂等，可从任意线程调用
 }
 
+// logs/LogSourceException.java
 public final class LogSourceException extends RuntimeException {
     public LogSourceException(String message);
 }

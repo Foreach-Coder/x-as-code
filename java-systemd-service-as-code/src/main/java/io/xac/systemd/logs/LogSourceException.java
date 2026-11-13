@@ -1,4 +1,4 @@
-package io.xac.systemd.core;
+package io.xac.systemd.logs;
 
 /**
  * 日志来源不可用：启动日志命令失败，或读取日志文件失败。

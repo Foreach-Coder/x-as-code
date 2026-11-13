@@ -149,8 +149,9 @@ public final class SpecWriter {
     }
 
     /**
-     * 原子地把渲染结果写到 {@code file}：先在同目录创建 {@code .xac-*.tmp}，设 0644
-     * （POSIX；其他文件系统跳过），再用 {@code ATOMIC_MOVE} 覆盖目标。
+     * 原子地把渲染结果写到 {@code file}：先在同目录创建 {@code .xac-*.tmp}，目标不存在时
+     * 设 0644，已存在时沿用其权限位（POSIX；其他文件系统跳过），再用 {@code ATOMIC_MOVE}
+     * 覆盖目标。
      *
      * <p>父目录必须已存在，否则抛 {@link IOException}，目标文件保持原样。失败时临时文件被
      * 删除，目标文件不会被部分写入。这里不做备份，也不做 diff/确认——那是编辑器的职责。</p>
@@ -184,7 +185,7 @@ public final class SpecWriter {
         boolean moved = false;
         try {
             Files.write(temp, yaml.getBytes(StandardCharsets.UTF_8));
-            setReadableMode(temp);
+            applyMode(temp, target);
             try {
                 Files.move(temp, target,
                         StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
@@ -367,11 +368,23 @@ public final class SpecWriter {
         return c == '\u2028' || c == '\u2029';
     }
 
-    private static void setReadableMode(Path temp) throws IOException {
+    /**
+     * 给临时文件设置最终权限：目标已存在就用它原有的权限位（只复制权限，不复制属主），
+     * 否则用新建文件的 0644。非 POSIX 文件系统跳过；声称支持 POSIX 却拒绝读写权限时
+     * 保留临时文件的默认权限。
+     */
+    private static void applyMode(Path temp, Path target) throws IOException {
         if (!temp.getFileSystem().supportedFileAttributeViews().contains("posix")) {
             return;
         }
         Set<PosixFilePermission> mode = PosixFilePermissions.fromString("rw-r--r--");
+        if (Files.exists(target)) {
+            try {
+                mode = Files.getPosixFilePermissions(target);
+            } catch (UnsupportedOperationException e) {
+                // 读不到既有权限：退回新建文件的 0644。
+            }
+        }
         try {
             Files.setPosixFilePermissions(temp, mode);
         } catch (UnsupportedOperationException e) {

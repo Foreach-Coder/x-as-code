@@ -7,8 +7,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-import io.xac.systemd.core.LogSourceException;
-
 /**
  * 文件日志来源：非 follow 只读最后 N 行；follow 复用 {@link FileTail}（200ms 轮询、
  * 截断后从头重读），通过 {@link LineSinkOutputStream} 把字节流切成行交给 {@link LogSink}，

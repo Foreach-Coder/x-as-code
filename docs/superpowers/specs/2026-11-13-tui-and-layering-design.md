@@ -248,7 +248,7 @@ final class ApplyResult { String text; int kept; int dropped; int examplesDroppe
 - **空段**：`description`、`env`、`properties`、`workdir`、`path-links`、`logs` 为空时整段省略（与 `xac.yaml.template` 的默认形态一致）；`opts` 为空时显式写 `opts: []`，让「没有 JVM 参数」在文本里可见；`lifecycle` 恒写四键，缺省值取 `Lifecycle` 的文档默认值。
 - **路径**：`artifact.jar` 与 `workdir` 相对包目录渲染，分隔符统一为 `/`；`workdir: .` 表示包目录本身，保持为 `.`，不展开成机器相关的绝对路径；与包目录不在同一个根（例如 Windows 换盘符）时退回绝对路径。`logs.file` 是运行时路径，原样输出，不做相对化。
 - **软链**：`save` 的目标是软链时，写到 `toRealPath()` 指向的真实文件，链接本身保留；解析失败（悬空链接、无权限）退回普通替换语义。
-- **落盘**：父目录必须已存在；同目录建 `.xac-*.tmp`，内容按 UTF-8 写，POSIX 下设 `0644`；用 `ATOMIC_MOVE + REPLACE_EXISTING` 覆盖目标。文件系统不支持原子移动时**不回退**到普通 move，而是抛 `IOException`（消息以 `atomic move not supported: <path>` 开头），避免「看似成功、实际非原子」。任何失败都删除临时文件、保留原目标；不备份，也不做 diff/确认。
+- **落盘**：父目录必须已存在；同目录建 `.xac-*.tmp`，内容按 UTF-8 写，POSIX 下新建文件设 `0644`，目标已存在时保留其原有权限位（只复制权限，不复制属主，例如既有 `0600` 的 `xac.yaml` 仍是 `0600`）；用 `ATOMIC_MOVE + REPLACE_EXISTING` 覆盖目标。文件系统不支持原子移动时**不回退**到普通 move，而是抛 `IOException`（消息以 `atomic move not supported: <path>` 开头），避免「看似成功、实际非原子」。任何失败都删除临时文件、保留原目标；不备份，也不做 diff/确认。
 
 ## 7. 编辑
 
@@ -300,7 +300,7 @@ s → 草稿 spec → EditorModel.validate（必填非空 + Schema + ValidationR
         → 有注释将丢失 / 文件被外部改动 → 记录当前指纹与原因，提示再按一次 s
         → 两个原因都已在该指纹上确认且指纹未再变 → 始终带 baseline 再验一次
           mtime + size + sha256
-        → 临时文件 + 0644 + ATOMIC_MOVE
+        → 临时文件（新建 0644，已存在则沿用原权限）+ ATOMIC_MOVE
         → 重新 open → 状态刷新 → 通知 saved（并带上丢失注释条数）
 ```
 

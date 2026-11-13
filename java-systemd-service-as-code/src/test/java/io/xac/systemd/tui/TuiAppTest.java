@@ -2,13 +2,13 @@ package io.xac.systemd.tui;
 
 import io.xac.systemd.apply.EnvironmentProbe;
 import io.xac.systemd.core.InvalidSpecException;
-import io.xac.systemd.core.LogSourceException;
 import io.xac.systemd.core.ServicePackage;
 import io.xac.systemd.exec.CommandRunner;
 import io.xac.systemd.exec.ExecResult;
 import io.xac.systemd.exec.RecordingRunner;
 import io.xac.systemd.exec.RunningCommand;
 import io.xac.systemd.logs.LogSink;
+import io.xac.systemd.logs.LogSourceException;
 import io.xac.systemd.logs.LogStream;
 import io.xac.systemd.systemd.SystemdTarget;
 import org.junit.jupiter.api.BeforeEach;

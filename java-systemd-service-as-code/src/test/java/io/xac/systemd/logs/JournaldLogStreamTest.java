@@ -1,6 +1,5 @@
 package io.xac.systemd.logs;
 
-import io.xac.systemd.core.LogSourceException;
 import io.xac.systemd.exec.CommandRunner;
 import io.xac.systemd.exec.ExecResult;
 import io.xac.systemd.exec.RecordingRunner;

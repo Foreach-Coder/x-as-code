@@ -23,6 +23,7 @@ import io.xac.systemd.exec.CommandRunner;
 import io.xac.systemd.exec.ProcessRunner;
 import io.xac.systemd.logs.FileLogStream;
 import io.xac.systemd.logs.JournaldLogStream;
+import io.xac.systemd.logs.LogSourceException;
 import io.xac.systemd.logs.LogStream;
 import io.xac.systemd.spec.ServiceSpec;
 import io.xac.systemd.spec.SpecLoader;

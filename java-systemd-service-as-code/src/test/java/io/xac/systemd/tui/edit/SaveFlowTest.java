@@ -262,6 +262,18 @@ class SaveFlowTest {
     }
 
     @Test
+    void commitRejectsNullBaseline() throws IOException {
+        Path file = write(SpecWriter.render(fullSpec()));
+        byte[] before = Files.readAllBytes(file);
+
+        IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                () -> SaveFlow.commit(file, "name: sneaky\n", null));
+
+        assertEquals("baseline is required", failure.getMessage());
+        assertArrayEquals(before, Files.readAllBytes(file));
+    }
+
+    @Test
     void matchingBaselineIsNotReportedAsModified() throws IOException {
         Path file = write(SpecWriter.render(fullSpec()));
         FileStamp baseline = FileStamp.of(file);

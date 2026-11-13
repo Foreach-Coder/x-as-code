@@ -145,8 +145,8 @@ public final class SaveFlow {
 
     /**
      * 原子写入，并在落盘前再验一次指纹：prepare 到 commit 之间文件又被改过就拒绝写入，
-     * 让用户带着最新内容重新进编辑器，而不是覆盖别人的修改。调用方必须传 baseline，
-     * 没有「跳过复验」的公开入口。
+     * 让用户带着最新内容重新进编辑器，而不是覆盖别人的修改。{@code baseline} 必须非
+     * null（null 抛 {@link IllegalArgumentException}），没有「跳过复验」的公开入口。
      */
     public static void commit(Path yamlFile, String text, FileStamp baseline) throws IOException {
         if (yamlFile == null) {
@@ -155,11 +155,12 @@ public final class SaveFlow {
         if (text == null) {
             throw new IllegalArgumentException("text must not be null");
         }
-        if (baseline != null) {
-            FileStamp now = FileStamp.of(yamlFile);
-            if (!baseline.matches(now)) {
-                throw new IOException("file changed outside: " + yamlFile);
-            }
+        if (baseline == null) {
+            throw new IllegalArgumentException("baseline is required");
+        }
+        FileStamp now = FileStamp.of(yamlFile);
+        if (!baseline.matches(now)) {
+            throw new IOException("file changed outside: " + yamlFile);
         }
         SpecWriter.save(yamlFile, text);
     }

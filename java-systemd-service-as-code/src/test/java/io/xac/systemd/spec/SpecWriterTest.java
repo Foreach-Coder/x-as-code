@@ -563,7 +563,7 @@ class SpecWriterTest {
     }
 
     @Test
-    void saveResetsPermissionsOfExistingFileTo0644() throws IOException {
+    void saveKeepsPermissionsOfExistingFile() throws IOException {
         assumeTrue(isPosix(), "POSIX permissions only");
         Path target = pkg.resolve("xac.yaml");
         Files.write(target, "old\n".getBytes(StandardCharsets.UTF_8));
@@ -572,7 +572,22 @@ class SpecWriterTest {
 
         SpecWriter.save(target, "new\n");
 
-        assertEquals("rw-r--r--", posixMode(target));
+        assertEquals("rw-------", posixMode(target));
+        assertEquals("new\n", new String(Files.readAllBytes(target), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void saveKeepsNonDefaultPermissionsOfExistingFile() throws IOException {
+        assumeTrue(isPosix(), "POSIX permissions only");
+        Path target = pkg.resolve("xac.yaml");
+        Files.write(target, "old\n".getBytes(StandardCharsets.UTF_8));
+        Files.setPosixFilePermissions(target,
+                java.nio.file.attribute.PosixFilePermissions.fromString("rw-r-----"));
+
+        SpecWriter.save(target, "name: demo\n");
+
+        assertEquals("rw-r-----", posixMode(target));
+        assertEquals("name: demo\n", new String(Files.readAllBytes(target), StandardCharsets.UTF_8));
     }
 
     @Test
