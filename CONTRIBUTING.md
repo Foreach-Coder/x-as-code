@@ -30,16 +30,16 @@ launcher 段。脚本按自身真实路径定位 jar，所以可以软链到 `/u
 ## 测试
 
 ```bash
-# 单元 + 集成测试：504 个，不需要 root / systemd / Docker
+# 单元 + 集成测试：507 个，不需要 root / systemd / Docker
 mvn -f java-systemd-service-as-code/pom.xml test
 
-# 真 systemd 端到端：11 个用例，需要 Docker
+# 真 systemd 端到端：13 个用例，需要 Docker
 mvn -f java-systemd-service-as-code/pom.xml -Pe2e verify
 ```
 
 e2e 用 Testcontainers 起一个 `--privileged` 的 Ubuntu 24.04 容器，`systemd` 作为 PID 1，覆盖
 apply/status/logs/destroy、幂等重跑、path-links 拒绝、影子 unit 拒绝、`SuccessExitStatus=143`、
-`logs.file` 从文件读日志，以及 `tui` 在非 TTY 下退 2 等场景。
+`logs.file` 从文件读日志，以及 `tui` 在非 TTY 下退 2、真实 PTY 里渲染/按 `?`/按 `q` 退出，以及从 TUI 里按键触发 apply 等场景。
 镜像缺失时先构建：
 
 ```bash
@@ -52,11 +52,16 @@ e2e 的细节（容器参数、产物怎么进去、`degraded` 状态的容忍�
 
 Windows 上跑 `mvn -Pe2e verify` 需要 Docker Desktop（WSL2 后端），且 `docker version` 可用。
 
-TUI 测试不启动真实终端：`TuiApp` / `EditScreen` / `StatusView` 等通过 `Display`、`KeySource` 抽象
-注入 `RecordingDisplay` / `ScriptedKeySource`，视图模型用纯 JUnit 断言；Lanterna 适配层另用
-`LanternaDisplayTest`（动态代理 + `RecordingScreen`）与 `LanternaKeySourceTest`（匿名 `InputProvider`）
-验证，不需要 TTY。e2e 只覆盖非 TTY 退 2
-（`SmokeIT#tuiRefusesToStartWithoutATty`），不做真实 PTY 全屏驱动。
+TUI 分两层测：
+
+- 视图层不启动终端：`TuiApp` / `EditScreen` / `StatusView` 等通过 `Display`、`KeySource` 抽象注入
+  `RecordingDisplay` / `ScriptedKeySource`，纯 JUnit 断言；Lanterna 适配层用
+  `LanternaDisplayTest`（动态代理 + `RecordingScreen`）与 `LanternaKeySourceTest`（匿名 `InputProvider`）验证。
+- 真实终端层进 e2e：`SmokeIT#tuiRendersInARealPtyAndQuits` 用 `script -qec` 分配 PTY、`stty` 设成
+  100×30，`TerminalCapture` 把 ANSI 流回放成字符网格；按键不是定时塞进去的，而是轮询屏幕直到出现
+  预期文本再写下一个键（FIFO 灌 stdin，detached exec 让 TUI 活过 `execInContainer` 调用），所以慢机器
+  也不会和渲染赛跑。`SmokeIT#tuiApplyRunsTheRealLifecycle` 用同样方式送 `a`→`y` 触发 apply，再断言
+  unit/env 真被写回、服务真在跑。另有 `SmokeIT#tuiRefusesToStartWithoutATty` 覆盖非 TTY 退 2。
 
 ## 目录
 

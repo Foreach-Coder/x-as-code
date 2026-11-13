@@ -1,6 +1,7 @@
 package io.xac.systemd.e2e;
 
 import com.github.dockerjava.api.command.CreateContainerCmd;
+import com.github.dockerjava.api.model.Frame;
 import com.github.dockerjava.api.model.HostConfig;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -15,6 +16,8 @@ import org.testcontainers.containers.Container.ExecResult;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.MountableFile;
+
+import com.github.dockerjava.api.async.ResultCallback;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -444,6 +447,149 @@ class SmokeIT {
         assertContains(result.getStderr(), "tui requires an interactive terminal");
         assertEquals("", result.getStdout(), "tui without a TTY must not write to stdout");
         assertAscii("tui without a TTY", combined(result));
+    }
+
+    @Test
+    @Order(12)
+    void tuiRendersInARealPtyAndQuits() throws Exception {
+        // 真 PTY：runner 脚本里 script 分配 pty，stty 设尺寸；按键按「屏幕上先看到什么」
+        // 再送，不靠固定 sleep，慢机器上也不会和渲染赛跑。
+        try {
+            startTuiPty();
+            awaitScreenContains("a apply", 60000L);
+            sendKeys("?");
+            awaitScreenContains("help is not implemented yet", 20000L);
+            sendKeys("q");
+
+            assertEquals(0, awaitTuiExit(20000L), "tui must exit 0 after q:\n" + tuiScreen());
+            String raw = tuiRawOutput();
+            // 真实终端路径一定产生 ANSI 控制序列；非 TTY 分支不会走到这里。
+            assertContains(raw, "\u001b[");
+            assertFalse(raw.contains("tui requires an interactive terminal"),
+                    "pty run must not take the non-tty fallback:\n" + tuiScreen());
+            assertContains(tuiScreen(), "xac.demo");
+        } finally {
+            stopTuiPty();
+        }
+    }
+
+    @Test
+    @Order(13)
+    void tuiApplyRunsTheRealLifecycle() throws Exception {
+        // 先清掉前面用例留下的链接和 unit/env，再从 TUI 里用真实按键 a -> y 装回来。
+        exec("sh", "-c", "rm -rf /opt/links/*/app.jar");
+        exec("rm", "-f", UNIT_PATH, ENV_PATH);
+        assertFalse(exists(ENV_PATH), "env file must be gone before the tui apply");
+
+        try {
+            startTuiPty();
+            awaitScreenContains("a apply", 60000L);
+            sendKeys("a");
+            awaitScreenContains("y apply", 20000L);
+            sendKeys("y");
+            awaitScreenContains("apply ok", 90000L);
+            sendKeys("q");
+
+            assertEquals(0, awaitTuiExit(20000L), "tui apply run must exit 0:\n" + tuiScreen());
+            assertTrue(exists(ENV_PATH), "tui apply must rewrite the env file");
+            assertContains(cat(ENV_PATH), "GREETING=\"hello world\"");
+            assertTrue(exists(UNIT_PATH), "tui apply must rewrite the unit file");
+            assertEquals("active", exec("systemctl", "is-active", UNIT).getStdout().trim(),
+                    "service must be active after the tui apply");
+        } finally {
+            stopTuiPty();
+        }
+    }
+
+    private static void startTuiPty() throws Exception {
+        Path runner = writeHostFile("tui-run.sh", ""
+                + "#!/bin/sh\n"
+                + "exec 3<>/tmp/xac-tui-in\n"
+                + "script -qec 'stty rows 30 cols 100; TERM=xterm-256color exec java -jar "
+                + CLI_JAR + " tui " + PACKAGE_DIR + "' /dev/null <&3 > /tmp/xac-tui-out 2>&1\n"
+                + "printf '%s' \"$?\" > /tmp/xac-tui-rc\n");
+        exec("rm", "-f", "/tmp/xac-tui-in", "/tmp/xac-tui-out", "/tmp/xac-tui-rc");
+        exec("sh", "-c", "mkfifo /tmp/xac-tui-in");
+        copyToContainer(runner, "/opt/xac-tui-run.sh");
+        exec("chmod", "755", "/opt/xac-tui-run.sh");
+        // 用 detached exec 启动：execInContainer 会在命令返回时收掉整个会话，
+        // 后台 TUI 会被一起杀掉；detached 的 exec 由 daemon 持有，进程继续跑。
+        String execId = container.getDockerClient()
+                .execCreateCmd(container.getContainerId())
+                .withCmd("/bin/sh", "-c",
+                        "setsid /opt/xac-tui-run.sh >/tmp/xac-tui-log 2>&1 < /dev/null")
+                .withAttachStdin(false)
+                .withAttachStdout(false)
+                .withAttachStderr(false)
+                .withTty(false)
+                .exec()
+                .getId();
+        container.getDockerClient().execStartCmd(execId)
+                .withDetach(true)
+                .exec(new ResultCallback.Adapter<Frame>());
+    }
+
+    private static void stopTuiPty() throws Exception {
+        exec("sh", "-c", "pkill -f 'tui /opt/demo' || true");
+        exec("rm", "-f", "/tmp/xac-tui-in");
+    }
+
+    private static void sendKeys(String keys) throws Exception {
+        exec("sh", "-c", "printf '%s' '" + keys + "' > /tmp/xac-tui-in");
+    }
+
+    private static String tuiRawOutput() throws IOException, InterruptedException {
+        if (!exists("/tmp/xac-tui-out")) {
+            return "";
+        }
+        return exec("cat", "/tmp/xac-tui-out").getStdout();
+    }
+
+    private static String tuiScreen() throws IOException, InterruptedException {
+        return TerminalCapture.render(tuiRawOutput(), 30, 100);
+    }
+
+    private static void awaitScreenContains(String needle, long timeoutMillis) throws Exception {
+        long deadline = System.currentTimeMillis() + timeoutMillis;
+        String screen = "";
+        while (System.currentTimeMillis() <= deadline) {
+            screen = tuiScreen();
+            if (screen.contains(needle)) {
+                return;
+            }
+            Thread.sleep(200L);
+        }
+        fail("timed out waiting for [" + needle + "] on the tui screen:\n" + screen
+                + "\nraw tail:\n" + tail(tuiRawOutput(), 4000)
+                + "\ndiagnostics:\n" + tuiDiagnostics());
+    }
+
+    private static int awaitTuiExit(long timeoutMillis) throws Exception {
+        long deadline = System.currentTimeMillis() + timeoutMillis;
+        while (System.currentTimeMillis() <= deadline) {
+            if (exists("/tmp/xac-tui-rc")) {
+                return Integer.parseInt(exec("cat", "/tmp/xac-tui-rc").getStdout().trim());
+            }
+            Thread.sleep(200L);
+        }
+        fail("tui did not exit in time; screen:\n" + tuiScreen());
+        return -1;
+    }
+
+    private static String tuiDiagnostics() {
+        StringBuilder text = new StringBuilder();
+        try {
+            text.append(exec("sh", "-c",
+                    "ls -l /tmp/xac-tui-* 2>&1; echo ---LOG---; cat /tmp/xac-tui-log 2>&1;"
+                            + " echo ---PS---; ps -ef | grep -E 'java -jar|script -qec' | grep -v grep").getStdout());
+        } catch (Exception e) {
+            text.append("diagnostics failed: ").append(e);
+        }
+        return text.toString();
+    }
+
+    private static String tail(String text, int maxChars) {
+        return text.length() <= maxChars ? text : text.substring(text.length() - maxChars);
     }
 
     private static ExecResult xac(String... args) throws IOException, InterruptedException {
