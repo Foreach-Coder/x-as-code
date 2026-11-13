@@ -336,6 +336,17 @@ class TuiAppTest {
         return sb.toString();
     }
 
+    /** 画面四周留给终端背景的 1 格边缘，内容坐标从这里开始。 */
+    private static final int MARGIN_ROWS = 1;
+
+    private static String rowAt(RecordingDisplay display, int contentRow) {
+        Canvas canvas = display.last();
+        boolean framed = canvas != null && canvas.width() >= 24 && canvas.height() >= 12;
+        String line = display.line(contentRow + (framed ? MARGIN_ROWS : 0));
+        return framed && line.length() > 2
+                ? line.substring(MARGIN_ROWS, line.length() - MARGIN_ROWS) : line;
+    }
+
     @Test
     void drawsTitleStatusAndKeyBar() throws Exception {
         RecordingDisplay display = new RecordingDisplay(80, 24);
@@ -343,19 +354,19 @@ class TuiAppTest {
 
         assertFalse(app.tick());
 
-        String expectedTitle = "┌ xac.demo " + repeat('─', 36)
-                + " running · auto-start on · root ┐";
-        assertEquals(expectedTitle, display.line(0));
-        assertEquals(80, display.line(0).length());
+        String expectedTitle = rowAt(display, 0);
+        assertTrue(expectedTitle.startsWith("┌ xac.demo "), expectedTitle);
+        assertTrue(expectedTitle.endsWith(" running · auto-start on · root ┐"), expectedTitle);
+        assertEquals(78, rowAt(display, 0).length());
 
-        assertTrue(display.line(1).contains("unit"), display.line(1));
-        assertTrue(display.line(2).contains("env"), display.line(2));
-        assertTrue(display.line(3).contains("process"), display.line(3));
-        assertTrue(display.line(3).contains("active"), display.line(3));
-        assertTrue(display.line(4).contains("links"), display.line(4));
+        assertTrue(rowAt(display, 1).contains("unit"), rowAt(display, 1));
+        assertTrue(rowAt(display, 2).contains("env"), rowAt(display, 2));
+        assertTrue(rowAt(display, 3).contains("process"), rowAt(display, 3));
+        assertTrue(rowAt(display, 3).contains("active"), rowAt(display, 3));
+        assertTrue(rowAt(display, 4).contains("links"), rowAt(display, 4));
 
-        String keyBar = display.line(23);
-        assertEquals(80, keyBar.length());
+        String keyBar = rowAt(display, 21);
+        assertEquals(78, keyBar.length());
         assertTrue(keyBar.startsWith("└ "), keyBar);
         assertTrue(keyBar.contains("q quit"), keyBar);
         assertTrue(keyBar.contains("? help"), keyBar);
@@ -398,13 +409,13 @@ class TuiAppTest {
 
         assertFalse(app.tick());
 
-        String expectedTitle = "┌ xac.demo " + repeat('─', 16)
-                + " running · auto-start on · root ┐";
-        assertEquals(expectedTitle, display.line(0));
-        assertEquals(60, display.line(0).length());
+        String expectedTitle = rowAt(display, 0);
+        assertTrue(expectedTitle.startsWith("┌ xac.demo "), expectedTitle);
+        assertTrue(expectedTitle.endsWith(" running · auto-start on · root ┐"), expectedTitle);
+        assertEquals(58, rowAt(display, 0).length());
 
-        String keyBar = display.line(23);
-        assertEquals(60, keyBar.length());
+        String keyBar = rowAt(display, 21);
+        assertEquals(58, keyBar.length());
         assertTrue(keyBar.contains("? help"), keyBar);
         assertFalse(keyBar.contains("q quit"), keyBar);
         assertTrue(keyBar.endsWith("┘"), keyBar);
@@ -421,8 +432,8 @@ class TuiAppTest {
         assertNotNull(display.last());
         assertEquals(60, display.last().width());
         assertEquals(20, display.last().height());
-        assertEquals(60, display.line(0).length());
-        assertTrue(display.line(19).endsWith("┘"), display.line(19));
+        assertEquals(58, rowAt(display, 0).length());
+        assertTrue(rowAt(display, 17).endsWith("┘"), rowAt(display, 17));
     }
 
     @Test
@@ -433,8 +444,8 @@ class TuiAppTest {
 
         app.tick();
 
-        assertTrue(display.line(0).contains("not root"), display.line(0));
-        assertFalse(display.line(0).contains("· root ┐"), display.line(0));
+        assertTrue(rowAt(display, 0).contains("not root"), rowAt(display, 0));
+        assertFalse(rowAt(display, 0).contains("· root ┐"), rowAt(display, 0));
     }
 
     @Test
@@ -571,13 +582,13 @@ class TuiAppTest {
 
         assertTrue(app.tick(2000));
         assertTrue(app.running(), "a failed poll must not stop the UI");
-        assertTrue(display.line(1).contains("unknown"), display.line(1));
-        assertTrue(display.line(3).contains("status query failed: boom"), display.line(3));
+        assertTrue(rowAt(display, 1).contains("unknown"), rowAt(display, 1));
+        assertTrue(rowAt(display, 3).contains("status query failed: boom"), rowAt(display, 3));
 
         switchable.failing = false;
         app.tick(4000);
-        assertFalse(display.line(1).contains("unknown"), display.line(1));
-        assertTrue(display.line(3).contains("active"), display.line(3));
+        assertFalse(rowAt(display, 1).contains("unknown"), rowAt(display, 1));
+        assertTrue(rowAt(display, 3).contains("active"), rowAt(display, 3));
     }
 
     @Test
@@ -594,13 +605,13 @@ class TuiAppTest {
 
         assertTrue(app.tick(0));
 
-        assertTrue(display.line(5).contains("logs"), display.line(5));
-        assertTrue(display.line(5).contains("journald"), display.line(5));
-        assertTrue(display.line(5).contains("follow"), display.line(5));
-        assertTrue(display.line(6).contains("line 1"), display.line(6));
-        assertTrue(display.line(7).contains("line 2"), display.line(7));
-        assertTrue(display.line(6).startsWith("│"), display.line(6));
-        assertTrue(display.line(6).endsWith("│"), display.line(6));
+        assertTrue(rowAt(display, 5).contains("logs"), rowAt(display, 5));
+        assertTrue(rowAt(display, 5).contains("journald"), rowAt(display, 5));
+        assertTrue(rowAt(display, 5).contains("follow"), rowAt(display, 5));
+        assertTrue(rowAt(display, 6).contains("line 1"), rowAt(display, 6));
+        assertTrue(rowAt(display, 7).contains("line 2"), rowAt(display, 7));
+        assertTrue(rowAt(display, 6).startsWith("│"), rowAt(display, 6));
+        assertTrue(rowAt(display, 6).endsWith("│"), rowAt(display, 6));
     }
 
     @Test
@@ -613,13 +624,13 @@ class TuiAppTest {
             logs.emit("line " + i);
         }
         app.tick(0);
-        assertTrue(display.line(6).contains("line 4"), display.line(6));
+        assertTrue(rowAt(display, 6).contains("line 4"), rowAt(display, 6));
 
         logs.emit("line 6");
         app.tick(0);
 
-        assertTrue(display.line(6).contains("line 5"), display.line(6));
-        assertTrue(display.line(7).contains("line 6"), display.line(7));
+        assertTrue(rowAt(display, 6).contains("line 5"), rowAt(display, 6));
+        assertTrue(rowAt(display, 7).contains("line 6"), rowAt(display, 7));
     }
 
     @Test
@@ -633,12 +644,12 @@ class TuiAppTest {
             logs.emit("line " + i);
         }
         app.tick(0);
-        assertTrue(display.line(5).contains("follow"), display.line(5));
+        assertTrue(rowAt(display, 5).contains("follow"), rowAt(display, 5));
 
         keys.enqueue(KeyEvent.character('k'));
         app.tick(0);
-        assertTrue(display.line(5).contains("paused"), display.line(5));
-        assertTrue(display.line(6).contains("line 3"), display.line(6));
+        assertTrue(rowAt(display, 5).contains("paused"), rowAt(display, 5));
+        assertTrue(rowAt(display, 6).contains("line 3"), rowAt(display, 6));
 
         int shows = display.shows();
         logs.emit("line 6");
@@ -647,8 +658,8 @@ class TuiAppTest {
 
         keys.enqueue(KeyEvent.character('G'));
         app.tick(0);
-        assertTrue(display.line(5).contains("follow"), display.line(5));
-        assertTrue(display.line(7).contains("line 6"), display.line(7));
+        assertTrue(rowAt(display, 5).contains("follow"), rowAt(display, 5));
+        assertTrue(rowAt(display, 7).contains("line 6"), rowAt(display, 7));
     }
 
     @Test
@@ -665,9 +676,9 @@ class TuiAppTest {
 
         assertFalse(app.tick(0));
 
-        assertTrue(display.line(5).contains("paused"), display.line(5));
-        assertTrue(display.line(6).contains("line 2"), display.line(6));
-        assertTrue(display.line(7).contains("line 3"), display.line(7));
+        assertTrue(rowAt(display, 5).contains("paused"), rowAt(display, 5));
+        assertTrue(rowAt(display, 6).contains("line 2"), rowAt(display, 6));
+        assertTrue(rowAt(display, 7).contains("line 3"), rowAt(display, 7));
     }
 
     @Test
@@ -680,7 +691,7 @@ class TuiAppTest {
 
         app.tick(0);
 
-        assertTrue(display.line(22).contains("notice: journal unavailable"), display.line(22));
+        assertTrue(rowAt(display, 20).contains("notice: journal unavailable"), rowAt(display, 20));
     }
 
     @Test
@@ -690,7 +701,7 @@ class TuiAppTest {
 
         assertTrue(app.tick(0));
 
-        assertTrue(display.line(5).contains("paused"), display.line(5));
+        assertTrue(rowAt(display, 5).contains("paused"), rowAt(display, 5));
     }
 
     @Test
@@ -700,7 +711,7 @@ class TuiAppTest {
 
         app.tick(0);
 
-        assertFalse(display.line(5).contains("logs"), display.line(5));
+        assertFalse(rowAt(display, 5).contains("logs"), rowAt(display, 5));
     }
 
     @Test
@@ -710,7 +721,7 @@ class TuiAppTest {
 
         app.tick(0);
 
-        assertTrue(display.line(5).contains("logs"), display.line(5));
+        assertTrue(rowAt(display, 5).contains("logs"), rowAt(display, 5));
     }
 
     @Test
@@ -739,8 +750,8 @@ class TuiAppTest {
 
         assertTrue(app.tick(0));
 
-        assertTrue(display.line(22).contains("logs unavailable: log file not found"),
-                display.line(22));
+        assertTrue(rowAt(display, 20).contains("logs unavailable: log file not found"),
+                rowAt(display, 20));
     }
 
     @Test
@@ -755,7 +766,7 @@ class TuiAppTest {
 
         assertTrue(app.statusNote().contains("log stream ended"),
                 "ended stream must be visible: " + app.statusNote());
-        assertTrue(display.line(5).contains("follow (ended)"), display.line(5));
+        assertTrue(rowAt(display, 5).contains("follow (ended)"), rowAt(display, 5));
     }
 
     @Test
@@ -793,12 +804,12 @@ class TuiAppTest {
         long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
 
         assertTrue(elapsedMillis < 3500L, "tick() blocked " + elapsedMillis + "ms on status");
-        assertTrue(display.line(1).contains("unknown"), display.line(1));
-        assertTrue(display.line(3).contains("status timed out"), display.line(3));
+        assertTrue(rowAt(display, 1).contains("unknown"), rowAt(display, 1));
+        assertTrue(rowAt(display, 3).contains("status timed out"), rowAt(display, 3));
 
         blocking.blocking = false;
         app.tick(4001);
-        assertFalse(display.line(1).contains("unknown"), display.line(1));
+        assertFalse(rowAt(display, 1).contains("unknown"), rowAt(display, 1));
 
         app.close();
     }
@@ -1162,7 +1173,7 @@ class TuiAppTest {
                 app.statusNote());
         assertTrue(app.statusNote().contains("1 commented-out example"),
                 app.statusNote());
-        String noticeRow = display.line(22);
+        String noticeRow = rowAt(display, 20);
         assertTrue(noticeRow.contains("notice: saved"), noticeRow);
         assertTrue(noticeRow.contains("1 comment(s) were dropped"), noticeRow);
         assertTrue(noticeRow.contains("1 commented-out example"), noticeRow);
@@ -1210,7 +1221,7 @@ class TuiAppTest {
 
         assertFalse(app.tick());
 
-        String keyBar = display.line(23);
+        String keyBar = rowAt(display, 21);
         assertTrue(keyBar.contains("a apply  r restart  d destroy  e edit  ? help  q quit"),
                 keyBar);
     }
@@ -1705,6 +1716,6 @@ class TuiAppTest {
         assertFalse(panel.contains("y destroy"), panel);
         assertFalse(panel.contains("will remove:"), panel);
         // 有面板时第 1 行会被面板边框的 "┌" 覆盖；没有面板时应仍是状态行的 "│"。
-        assertTrue(display.line(1).startsWith("│"), display.line(1));
+        assertTrue(rowAt(display, 1).startsWith("│"), rowAt(display, 1));
     }
 }

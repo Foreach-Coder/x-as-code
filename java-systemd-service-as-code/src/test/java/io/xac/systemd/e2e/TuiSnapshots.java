@@ -51,10 +51,10 @@ final class TuiSnapshots {
         // 统一按内容剔除：表头行与已被掩码成 "│ <log>" 的行都不进快照。
         List<String> out = new ArrayList<String>();
         for (String line : lines) {
-            if (line.startsWith("├ logs")) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("├ logs")) {
                 continue;
             }
-            String trimmed = line.trim();
             // 空行也随日志条数变化（日志区没内容时就是空的），一并剔掉。
             if (trimmed.isEmpty() || trimmed.startsWith("│ <log>") || trimmed.equals("<log>")) {
                 continue;
@@ -105,15 +105,19 @@ final class TuiSnapshots {
         for (String line : lines) {
             String value = line;
             int width = line.length();
-            if (value.matches("^│ [A-Z][a-z]{2} [ 0-9]\\d \\d{2}:\\d{2}:\\d{2} .*")) {
+            String trimmed = value.trim();
+            if (trimmed.matches("^│ [A-Z][a-z]{2} [ 0-9]\\d \\d{2}:\\d{2}:\\d{2} .*")) {
                 // 日志正文每次都不同（时间、PID、消息长度），整段替换成 <log>，
-                // 但保留左右边框，行宽与原帧一致。
-                StringBuilder masked = new StringBuilder(value.length());
-                masked.append("│ <log>");
-                while (masked.length() < value.length() - 1) {
+                // 保留左侧页边距与右边框，行宽与原帧一致。
+                int bar = value.indexOf('│');
+                String prefix = value.substring(0, bar);
+                boolean right = value.endsWith("│");
+                StringBuilder masked = new StringBuilder(prefix).append("│ <log>");
+                int tail = right ? 1 : 0;
+                while (masked.length() < value.length() - tail) {
                     masked.append(' ');
                 }
-                if (value.length() > 0) {
+                if (right) {
                     masked.append('│');
                 }
                 value = masked.toString();

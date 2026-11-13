@@ -57,11 +57,13 @@ public final class TuiApp {
     private static final long CLOSE_WAIT_MILLIS = 250;
     private static final int LOG_LINES = 200;
     private static final int LOG_CAPACITY = 2000;
-    private static final int WIDE_SCREEN = 80;
+    private static final int WIDE_SCREEN = 78;
     /** 屏幕至少 20 行才默认显示日志区，否则让位给状态区（design §6.1）。 */
     private static final int SHORT_SCREEN = 20;
     /** 标题 1 + 状态 4 + 日志头 1 + notice 1 + 键栏 1 = 8 行固定开销。 */
     private static final int FIXED_ROWS = 8;
+    /** 画面四周留出的空格数，让终端边框和内容之间有一点呼吸空间。 */
+    private static final int MARGIN = 1;
     private static final String FULL_KEY_BAR =
             "a apply  r restart  d destroy  e edit  ? help  q quit";
     private static final String NARROW_KEY_BAR = "? help";
@@ -915,9 +917,19 @@ public final class TuiApp {
 
     private void render() {
         Display.Size size = display.size();
-        Canvas canvas = new Canvas(Math.max(1, size.width), Math.max(1, size.height));
-        paint(canvas);
-        display.show(canvas);
+        int width = Math.max(1, size.width);
+        int height = Math.max(1, size.height);
+        Canvas full = new Canvas(width, height);
+        boolean framed = width >= 24 && height >= 12;
+        if (!framed) {
+            paint(full);
+            display.show(full);
+            return;
+        }
+        Canvas inner = new Canvas(width - MARGIN * 2, height - MARGIN * 2);
+        paint(inner);
+        inner.copyTo(full, MARGIN, MARGIN);
+        display.show(full);
     }
 
     private void paint(Canvas canvas) {

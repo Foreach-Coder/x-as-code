@@ -168,6 +168,9 @@ java-systemd-service-cli tui [<package-dir>]
 
 主屏 = 标题栏 + 状态区 + 日志区 + 通知行 + 键位条。
 
+画面四周留 1 格空边（终端宽 ≥24 且高 ≥12 时），内容不贴着终端边框；更小的终端自动取消空边，
+优先保证可用行数。空边只是不绘制，不改变任何键位与状态语义。
+
 ```
 ┌ xac.demo ──────────────── running · auto-start on · root ┐
 │ unit    in sync   /etc/systemd/system/xac.demo.service   │

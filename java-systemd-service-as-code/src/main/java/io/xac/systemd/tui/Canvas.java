@@ -233,6 +233,22 @@ public final class Canvas {
         return new String(cells[y]);
     }
 
+    /**
+     * 把本画布逐格复制到另一个画布的 (dx, dy) 处，角色一并复制；宽字符的占位格跳过，
+     * 由目标画布的 {@link #put(int, int, char, Role)} 重新补上。
+     */
+    public void copyTo(Canvas target, int dx, int dy) {
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                char c = cells[y][x];
+                if (c == PLACEHOLDER) {
+                    continue;
+                }
+                target.put(x + dx, y + dy, c, roleAt(x, y));
+            }
+        }
+    }
+
     public void setCursor(int x, int y) {
         this.cursorX = Math.max(0, Math.min(width - 1, x));
         this.cursorY = Math.max(0, Math.min(height - 1, y));

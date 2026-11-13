@@ -161,6 +161,8 @@ java-systemd-service-cli tui /opt/demo        # 非 root：不能 apply/restart/
 stderr 打印 `tui requires an interactive terminal` 并退出 2；`xac.yaml` 本身无效时打印校验错误并退出 2。
 仅支持 Linux（systemd）和常规 SSH 终端。
 
+画面四周留 1 格边缘，不贴着终端边框（终端至少 24×12 时才留；更小的窗口优先保证内容，边缘自动取消）。
+
 ### 主屏
 
 标题栏显示服务名、活动状态（`running` / `stopped` / `failed` / `unknown`）、`auto-start on|off`、`root` / `not root`。

@@ -1,18 +1,18 @@
-edit xac.demo
-   name                        demo (read-only)
- > description                 e2e demo
-   artifact.jar                app.jar
-   runtime.java                /usr/bin/java
-   runtime.opts                -Xmx256m
-   env                         GREETING=hello world
-   properties                  greeting=${GREETING}, pct=100%, dollar=$$
-   workdir                     .
-   path-links                  app.jar:/opt/links/a/app.jar, app.jar:/opt/links
-   logs.file
-   lifecycle.auto-start        true
-   lifecycle.restart           on-failure
-   lifecycle.restart-sec       2
-   lifecycle.timeout-stop-sec  10
- enter edit  space toggle  s save
- u undo  q cancel
- mode: browse  field: description
+ edit xac.demo
+    name                        demo (read-only)
+  > description                 e2e demo
+    artifact.jar                app.jar
+    runtime.java                /usr/bin/java
+    runtime.opts                -Xmx256m
+    env                         GREETING=hello world
+    properties                  greeting=${GREETING}, pct=100%, dollar=$$
+    workdir                     .
+    path-links                  app.jar:/opt/links/a/app.jar, app.jar:/opt/lin
+    logs.file
+    lifecycle.auto-start        true
+    lifecycle.restart           on-failure
+    lifecycle.restart-sec       2
+    lifecycle.timeout-stop-sec  10
+  enter edit  space toggle  s save
+  u undo  q cancel
+  mode: browse  field: description
