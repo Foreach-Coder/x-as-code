@@ -25,7 +25,7 @@
 - **Java 8**：`maven.compiler.release=8`。禁止 record、`var`、switch 表达式、文本块、
   `List.of`/`Map.of`、`Optional.isEmpty()`、`ProcessorHandle`/`ProcessHandle`、`Stream.toList()`。
   测试代码同样按 `--release 8` 编译。
-- 依赖白名单（0.2.0 现状）：运行期只有 picocli 4.7.6、snakeyaml 2.2 与 Lanterna 3.1.5
+- 依赖白名单（0.2.1 现状）：运行期只有 picocli 4.7.6、snakeyaml 2.2 与 Lanterna 3.1.5
   （`com.googlecode.lanterna:lanterna`，仅 `tui` 命令使用；shade 不得声明
   filters/includes 过滤 Lanterna 资源（3.1.5 无 terminfo，Linux 走 stty））；
   测试用 JUnit 5.10.2 与 Testcontainers
@@ -63,31 +63,38 @@ mvn -f java-systemd-service-as-code/pom.xml test
 
 # 打包：fat jar + 发行包
 mvn -f java-systemd-service-as-code/pom.xml -DskipTests package
-#   → java-systemd-service-as-code/target/java-systemd-service-cli-0.2.0.jar
-#   → java-systemd-service-as-code/target/java-systemd-service-cli-0.2.0.tar.gz
-#      解压后 java-systemd-service-cli-0.2.0/{bin/java-systemd-service-cli, libs/*.jar}
+#   → java-systemd-service-as-code/target/java-systemd-service-cli-0.2.1.jar
+#   → java-systemd-service-as-code/target/java-systemd-service-cli-0.2.1.tar.gz
+#      解压后 java-systemd-service-cli-0.2.1/{bin/java-systemd-service-cli, libs/*.jar}
 
 # 挂到 PATH（root；只操作 /usr/local/bin 下自己那条软链）
-sudo java-systemd-service-cli-0.2.0/bin/java-systemd-service-cli install
-sudo java-systemd-service-cli-0.2.0/bin/java-systemd-service-cli uninstall
+sudo java-systemd-service-cli-0.2.1/bin/java-systemd-service-cli install
+sudo java-systemd-service-cli-0.2.1/bin/java-systemd-service-cli uninstall
 
 # 交互式生成 xac.yaml 模板（父目录 → <父目录>/<服务名>/xac.yaml；不需要 root，不覆盖已有文件）
-java -jar java-systemd-service-as-code/target/java-systemd-service-cli-0.2.0.jar init /tmp
+java -jar java-systemd-service-as-code/target/java-systemd-service-cli-0.2.1.jar init /tmp
 
 # 交互式终端界面（需要真实 TTY，仅 Linux/SSH 终端；非 TTY 一行提示并退 2）
-java -jar java-systemd-service-as-code/target/java-systemd-service-cli-0.2.0.jar tui /opt/demo
+java -jar java-systemd-service-as-code/target/java-systemd-service-cli-0.2.1.jar tui /opt/demo
 
 # 真 systemd e2e（Testcontainers；需要 Docker + 镜像 xac-e2e:24.04，见 e2e/README.md）
 mvn -f java-systemd-service-as-code/pom.xml -Pe2e verify
 #   镜像缺失时先构建：cd java-systemd-service-as-code && docker build -t xac-e2e:24.04 e2e
 ```
 
-TUI 测试不启动真实终端：单测通过 `Display` / `KeySource` 抽象注入假实现（见
-`tui/RecordingDisplay`、`tui/ScriptedKeySource`）；Lanterna 适配层另用 `LanternaDisplayTest`
-（动态代理 + `RecordingScreen`）与 `LanternaKeySourceTest`（匿名 `InputProvider`）验证，
-不需要 TTY。e2e 里的 `tui` 冒烟只验证非 TTY 退 2
-（`SmokeIT#tuiRefusesToStartWithoutATty`），不做真实 PTY 全屏驱动；
-Lanterna 3.1.5 没有 `terminfo/` 资源，也不添加 terminfo 冒烟。
+TUI 测试分两层：
+
+- 单测不启终端：`Display` / `KeySource` 注入假实现（`tui/RecordingDisplay`、
+  `tui/ScriptedKeySource`）；Lanterna 适配层用 `LanternaDisplayTest`（动态代理 + `RecordingScreen`）、
+  `LanternaKeySourceTest`（匿名 `InputProvider`）、`CanvasRoleTest` / `LanternaDisplayRoleTest`
+  （角色与颜色映射）验证。
+- e2e 驱动真实 PTY：`SmokeIT#tuiRendersInARealPtyAndQuits` / `#tuiApplyRunsTheRealLifecycle`
+  用 `script` 分配 pty，按键走 FIFO 且「等屏幕出现预期文本再送下一个键」；
+  `SmokeIT#tuiScreensMatchDesignSnapshots` 用 `AnsiScreen` 回放 ANSI 成字符网格，比对
+  `src/test/resources/tui-snapshots/*.txt`（日志正文与空行按内容过滤；
+  `-Dxac.updateSnapshots=true` 更新后必须人工 diff）。真 PTY 尺寸固定 80×24：Lanterna 用 DSR
+  查询光标位置测尺寸，`script` 的 pty 不应答，`stty` / `COLUMNS` 无效；窄屏/矮屏走单测。
+- 截图不参与判红：`TuiScreenDump` + `e2e/screens.py` 生成 PNG 供人工审图（见 `CONTRIBUTING.md`）。
 
 ## 安全语义（改代码前先读）
 

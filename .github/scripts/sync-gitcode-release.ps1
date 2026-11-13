@@ -6,8 +6,8 @@
     Called by the GitHub Actions workflow "publish"; can also be run locally:
       $env:GITCODE_TOKEN = '<token>'
       pwsh -NoProfile -File .github/scripts/sync-gitcode-release.ps1 `
-        -Owner foreach1991 -Repo x-as-code -Tag v0.2.0 `
-        -Asset dist/java-systemd-service-cli-0.2.0.tar.gz
+        -Owner foreach1991 -Repo x-as-code -Tag v0.2.1 `
+        -Asset dist/java-systemd-service-cli-0.2.1.tar.gz
 
     Idempotent: an existing release is reused; the asset is skipped when its
     sha256 already matches the local file.
