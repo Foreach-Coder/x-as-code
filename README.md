@@ -4,7 +4,7 @@
 
 | 子项目 | 状态 | 一句话 |
 |---|---|---|
-| [`java-systemd-service-as-code`](java-systemd-service-as-code) | **v0.1.3** | 用一个 `xac.yaml` 描述跑在 systemd 上的 Java 服务，用 `java-systemd-service-cli` 管它的全生命周期 |
+| [`java-systemd-service-as-code`](java-systemd-service-as-code) | **v0.2.0** | 用一个 `xac.yaml` 描述跑在 systemd 上的 Java 服务，用 `java-systemd-service-cli` 管它的全生命周期 |
 
 ## 这是什么
 
@@ -25,9 +25,9 @@ sudo java-systemd-service-cli apply /opt/demo
 从 [Releases](https://github.com/Foreach-Coder/x-as-code/releases) 下载发行包，解压到任意目录（下文用 `/opt/xac`），再把启动脚本挂到 PATH：
 
 ```bash
-curl -LO https://github.com/Foreach-Coder/x-as-code/releases/download/v0.1.3/java-systemd-service-cli-0.1.3.tar.gz
-tar -xzf java-systemd-service-cli-0.1.3.tar.gz
-sudo mkdir -p /opt/xac && sudo cp -r java-systemd-service-cli-0.1.3/* /opt/xac/
+curl -LO https://github.com/Foreach-Coder/x-as-code/releases/download/v0.2.0/java-systemd-service-cli-0.2.0.tar.gz
+tar -xzf java-systemd-service-cli-0.2.0.tar.gz
+sudo mkdir -p /opt/xac && sudo cp -r java-systemd-service-cli-0.2.0/* /opt/xac/
 
 sudo /opt/xac/bin/java-systemd-service-cli install
 java-systemd-service-cli --version
@@ -126,7 +126,8 @@ sudo java-systemd-service-cli destroy . -y     # 非交互环境用 -y
 
 `logs` 默认读 `journalctl -u xac.<name>`。如果服务自己不往控制台打日志，在 `xac.yaml` 里写
 `logs.file: <绝对路径>`，`logs` 就改读那个文件（`-n` / `-f` 一样可用）；文件不存在时退 2。
-`xac` 不创建也不轮转这个文件。
+`xac` 不创建也不轮转这个文件。文件 follow 没有 shutdown hook，Ctrl-C 时可能丢掉最后一行
+没有换行符的残余。
 
 升级 CLI 本身：解压新版本到新目录，在新目录里再跑一次 `sudo .../bin/java-systemd-service-cli install`，链接自动改指；旧目录随后可以删除。不需要先 `uninstall`。
 
@@ -139,12 +140,94 @@ sudo java-systemd-service-cli destroy . -y     # 非交互环境用 -y
 | `logs` | `[包目录] [-n N] [-f]` | 读 `journalctl -u xac.<name>.service --no-pager`，或 `logs.file` 指定的文件；`-f` 跟随 |
 | `destroy` | `[包目录] [--dry-run] [-y]` | 停止、禁用、删 unit/env/软链接；非交互环境必须加 `-y` |
 | `init` | `[父目录]` | 交互式创建 `<父目录>/<服务名>/xac.yaml` 模板，不覆盖已有文件 |
+| `tui` | `[包目录]` | 交互式终端界面（Linux/SSH 终端）；没有 TTY 时一行提示并退 2 |
 | `install` | `--dry-run` | 把当前发行包的启动脚本软链到 `/usr/local/bin`（root） |
 | `uninstall` | `--dry-run` | 删掉 `install` 建的那条软链（root） |
 
 包目录缺省为当前目录。`apply` / `destroy` 需要 root；`status` / `logs` 不需要（读 journald 时取决于是否在 `systemd-journal` 组，读文件时取决于文件的读权限）。
 
 退出码：`0` 成功；`1` 执行失败或 `status` 检出漂移；`2` 输入/环境问题且**什么都没改动**。
+
+## TUI
+
+`java-systemd-service-cli tui <package-dir>` 在终端里提供状态面板、动作确认和 `xac.yaml` 行编辑，适合 SSH 上快速查看和操作。
+
+```bash
+sudo java-systemd-service-cli tui /opt/demo   # 可执行 apply / restart / destroy
+java-systemd-service-cli tui /opt/demo        # 非 root：不能 apply/restart/destroy，状态、日志、编辑仍可用
+```
+
+需要真实 TTY 且 `TERM` 可用。`System.console()` 为空（管道、CI、cron）或 `TERM` 为空/`dumb`/`unknown` 时，
+stderr 打印 `tui requires an interactive terminal` 并退出 2；`xac.yaml` 本身无效时打印校验错误并退出 2。
+仅支持 Linux（systemd）和常规 SSH 终端。
+
+### 主屏
+
+标题栏显示服务名、活动状态（`running` / `stopped` / `failed` / `unknown`）、`auto-start on|off`、`root` / `not root`。
+下面四行状态区，行首 `!` 表示该行有漂移：
+
+| 行 | 可能的值 | 含义 |
+|---|---|---|
+| `unit` | `in sync` / `out of sync` / `missing` / `not loaded` | unit 文件与期望一致 / 不一致 / 不存在 / systemd 尚未加载 |
+| `env` | `in sync` / `out of sync` / `missing` / `extra` / `not configured` / `cannot check` | env 文件一致 / 不一致 / 缺失 / 多出 / 未配置 / 配置了但当前用户读不了 |
+| `process` | `systemctl show` 的 `ActiveState` 原值，或 `unknown` | `active` / `inactive` / `failed` / … |
+| `links` | `ok` / `problems` | `path-links` 全部正常 / 有问题 |
+
+`systemctl show` 查询失败时四行都是 `unknown`，失败原因显示在 `process` 行的详情里（不是底部 notice）。
+CLI `status` 的 `(in sync)` / `(missing)` / `(cannot verify: root required)` 描述的是同一批事实；
+TUI 里对应的写法是 `in sync` / `missing` / `cannot check`。
+
+非 root 时标题栏是 `not root`：`a` / `r` / `d` 面板仍可打开，但不展示计划，只显示一行
+`requires root`，`y` 不会执行（只读）；状态、日志和编辑仍可用。systemd 不可达时动作键不生效，
+notice 提示 `actions disabled: systemd is not reachable`。
+
+日志区默认在终端高度 ≥ 20 行时显示，来源是 `journald` 或 `xac.yaml` 的 `logs.file`。
+
+| 按键 | 作用 |
+|---|---|
+| `j` / `↓`，`k` / `↑` | 日志向下 / 向上滚动一行 |
+| `PgDn` / `PgUp` | 向下 / 向上翻一页 |
+| `g` / `G`（`Home` / `End`） | 跳到日志顶部 / 底部 |
+| `L` | 切换日志跟随（`follow` / `paused`） |
+| `l` | 显示 / 隐藏日志区（窄屏默认隐藏） |
+| `R` | 立即重读状态与日志 |
+| `a` | 打开 apply 预览（逐条 `would …`），`y` 执行 |
+| `r` | restart 确认，`y` 执行 |
+| `d` | destroy 确认（列出 `will remove` / `keep` / `warning`），`y` 执行 |
+| `e` | 编辑 `xac.yaml` |
+| `?` | 帮助面板尚未实现，目前只显示 notice `help is not implemented yet` |
+| `q` / `Esc` / `Ctrl-C` | 退出 |
+
+动作在后台 daemon 线程里执行，底部显示 `running...`，完成后自动刷新；**不提供 detached 模式**。
+执行期间按 `q` / `Esc` / `Ctrl-C` 会放弃等待并退出（当前这条外部命令可能跑完，剩余步骤不会再执行，
+需要重新执行 `apply` / `destroy`）。
+
+### 编辑 `xac.yaml`
+
+`e` 打开全屏编辑。字段按 9 个节段组织，注释尽量保留；只改字段值，不提供自由文本编辑。
+
+| 按键 | 作用 |
+|---|---|
+| `Tab` / `Shift-Tab` | 下一个 / 上一个节段 |
+| `↑` / `↓` | 移动焦点 |
+| `Enter` | 进入当前字段（多值字段进入行列表） |
+| `→` / `l` | 仅多值字段：进入行列表 |
+| `s` | 保存 |
+| `u` | 撤销上一步（恢复整个模型快照） |
+| `c` | 清空当前标量字段 |
+| `Space` | 在 `true` / `false` / 未设置之间切换布尔字段 |
+| `q` / `Esc` | 关闭；有未保存修改时先问 `y discard` / `n keep` |
+
+行列表里 `↑` / `↓` 选行、`Enter` 编辑该行、`a` 加一行、`x` 删一行、`Esc` / `←` 返回；
+编辑单行时 `Enter` 提交、`Esc` 取消、`Backspace` 删除。
+
+保存时先校验再原子写入；校验失败时错误显示在对应字段上并聚焦第一个出错的字段。以下两种情况需要按两次 `s` 确认：
+
+- 保存会丢弃无法保留的注释：`N comment(s) will be dropped; press s again to confirm`；
+- 文件在编辑期间被外部改过：`file changed outside; press s again to overwrite`。
+
+两者同时发生会合并成一条提示。保存成功后 notice 显示 `saved`（以及被丢弃的注释数），主屏重新加载状态和日志。
+保存前没有逐行 diff 预览，只有上述二次确认。非 root 且文件不可写时保存会失败并显示错误。
 
 ## 生成什么
 

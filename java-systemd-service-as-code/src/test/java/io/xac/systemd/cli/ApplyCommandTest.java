@@ -85,13 +85,29 @@ class ApplyCommandTest {
         Files.createDirectories(target().envDir);
     }
 
-    private int apply(boolean dryRun) {
+    private static final class Captured {
+        final int code;
+        final String output;
+
+        Captured(int code, String output) {
+            this.code = code;
+            this.output = output;
+        }
+    }
+
+    private Captured capture(boolean dryRun, CommandRunner runner) throws IOException {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        int code = ApplyCommand.run(pkg, dryRun, new FakeProbe(), runner, target(),
+                new PrintStream(buffer, true, "UTF-8"));
+        return new Captured(code, buffer.toString("UTF-8"));
+    }
+
+    private int apply(boolean dryRun) throws IOException {
         return apply(dryRun, new RecordingRunner());
     }
 
-    private int apply(boolean dryRun, CommandRunner runner) {
-        return ApplyCommand.run(pkg, dryRun, new FakeProbe(), runner, target(),
-                new PrintStream(new ByteArrayOutputStream()));
+    private int apply(boolean dryRun, CommandRunner runner) throws IOException {
+        return capture(dryRun, runner).code;
     }
 
     private static RecordingRunner runnerShowing(String stdout) {
@@ -212,5 +228,89 @@ class ApplyCommandTest {
 
         assertEquals(1, runner.calls().size(), runner.calls().toString());
         assertFalse(Files.exists(unitPath()));
+    }
+
+    /** 红线：dry-run 的 7 行输出全文固定，逐字节比对。 */
+    @Test
+    void dryRunPrintsExactPlan() throws IOException {
+        Files.createFile(pkg.resolve("app.jar"));
+        writePlainSpec();
+        createTargetDirs();
+        Captured captured = capture(true, runnerShowing("LoadState=not-found\nFragmentPath=\n"));
+
+        String expected = String.join(System.lineSeparator(),
+                "would create path-links: []",
+                "would skip workdir (not configured)",
+                "would remove " + target().envDir.resolve("xac.demo.env") + " (env is empty)",
+                "would write " + unitPath() + " (0644)",
+                "would systemctl daemon-reload",
+                "would systemctl enable xac.demo.service",
+                "would systemctl restart xac.demo.service") + System.lineSeparator();
+
+        assertEquals(0, captured.code);
+        assertEquals(expected, captured.output);
+    }
+
+    /** 红线：正常执行的 7 行输出全文固定，逐字节比对。 */
+    @Test
+    void runPrintsExactSteps() throws IOException {
+        Files.createFile(pkg.resolve("app.jar"));
+        writePlainSpec();
+        createTargetDirs();
+        Captured captured = capture(false, runnerShowing("LoadState=not-found\nFragmentPath=\n"));
+
+        String expected = String.join(System.lineSeparator(),
+                "create path-links: []",
+                "skip workdir (not configured)",
+                "remove " + target().envDir.resolve("xac.demo.env") + " (env is empty)",
+                "write " + unitPath() + " (0644)",
+                "systemctl daemon-reload",
+                "systemctl enable xac.demo.service",
+                "systemctl restart xac.demo.service") + System.lineSeparator();
+
+        assertEquals(0, captured.code);
+        assertEquals(expected, captured.output);
+    }
+
+    /** 红线：失败时先打印已完成步骤，再打印 failed: 与原因，退出 1；全文固定。 */
+    @Test
+    void failurePrintsExactLinesAndExitsOne() throws IOException {
+        Files.createFile(pkg.resolve("app.jar"));
+        writePlainSpec();
+        createTargetDirs();
+        RecordingRunner runner = runnerShowing("LoadState=not-found\nFragmentPath=\n");
+        runner.addResult(Arrays.asList("systemctl", "daemon-reload"),
+                new ExecResult(1, "", "boom"));
+
+        Captured captured = capture(false, runner);
+
+        String expected = String.join(System.lineSeparator(),
+                "create path-links: []",
+                "skip workdir (not configured)",
+                "remove " + target().envDir.resolve("xac.demo.env") + " (env is empty)",
+                "write " + unitPath() + " (0644)",
+                "systemctl daemon-reload",
+                "failed: systemctl daemon-reload failed (exit 1): boom") + System.lineSeparator();
+
+        assertEquals(1, captured.code);
+        assertEquals(expected, captured.output);
+    }
+
+    /** 红线：缺 xac.yaml 时 stdout 为空、stderr 逐字节固定、退出 2、不碰 systemd。 */
+    @Test
+    void missingXacYamlPrintsExactStderrAndExitsTwo() throws IOException {
+        ByteArrayOutputStream outBuffer = new ByteArrayOutputStream();
+        ByteArrayOutputStream errBuffer = new ByteArrayOutputStream();
+        RecordingRunner runner = new RecordingRunner();
+
+        int code = ApplyCommand.run(pkg, false, new FakeProbe(), runner, target(),
+                new PrintStream(outBuffer, true, "UTF-8"),
+                new PrintStream(errBuffer, true, "UTF-8"));
+
+        assertEquals(2, code);
+        assertEquals("", outBuffer.toString("UTF-8"));
+        assertEquals("xac.yaml: xac.yaml not found in package directory"
+                + System.lineSeparator(), errBuffer.toString("UTF-8"));
+        assertTrue(runner.calls().isEmpty(), runner.calls().toString());
     }
 }

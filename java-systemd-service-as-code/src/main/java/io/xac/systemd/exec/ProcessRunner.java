@@ -47,6 +47,47 @@ public final class ProcessRunner implements CommandRunner {
         }
     }
 
+    @Override
+    public RunningCommand start(List<String> argv) {
+        final Process process;
+        try {
+            process = new ProcessBuilder(argv).start();
+        } catch (IOException e) {
+            throw new IllegalStateException("cannot execute " + argv.get(0) + ": " + e.getMessage(), e);
+        }
+        return new RunningCommand() {
+            @Override
+            public InputStream stdout() {
+                return process.getInputStream();
+            }
+
+            @Override
+            public InputStream stderr() {
+                return process.getErrorStream();
+            }
+
+            @Override
+            public int waitFor() throws InterruptedException {
+                return process.waitFor();
+            }
+
+            @Override
+            public void destroy() {
+                process.destroy();
+            }
+
+            @Override
+            public void destroyForcibly() {
+                process.destroyForcibly();
+            }
+
+            @Override
+            public boolean isAlive() {
+                return process.isAlive();
+            }
+        };
+    }
+
     /**
      * 启动一个后台线程把流读到 EOF。stdout 与 stderr 必须并发排空，否则当子进程
      * 写满 stderr 管道（缓冲区通常仅 4–64KB）时会阻塞在写端，而父进程仍阻塞在

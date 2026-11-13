@@ -3,10 +3,6 @@ package io.xac.systemd.exec;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.ThrowingSupplier;
 
-import java.io.File;
-import java.net.URISyntaxException;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
@@ -18,15 +14,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ProcessRunnerTest {
 
-    private static String javaExe() {
-        Path java = Paths.get(System.getProperty("java.home"), "bin", "java");
-        return java.toString();
-    }
-
     @Test
     void runsCommandAndCapturesStderr() {
         CommandRunner runner = new ProcessRunner();
-        ExecResult result = runner.run(Arrays.asList(javaExe(), "-version"));
+        ExecResult result = runner.run(Arrays.asList(ExecFixtures.javaExe(), "-version"));
         assertTrue(result.ok(), "exit=" + result.exitCode);
         assertTrue(result.stderr.contains("version"), result.stderr);
     }
@@ -34,7 +25,7 @@ class ProcessRunnerTest {
     @Test
     void reportsNonZeroExitCode() {
         CommandRunner runner = new ProcessRunner();
-        ExecResult result = runner.run(Arrays.asList(javaExe(), "-XX:+NoSuchFlagForXac"));
+        ExecResult result = runner.run(Arrays.asList(ExecFixtures.javaExe(), "-XX:+NoSuchFlagForXac"));
         assertFalse(result.ok());
         assertTrue(result.exitCode > 0);
     }
@@ -67,34 +58,11 @@ class ProcessRunnerTest {
     @Test
     void drainsLargeStderrWithoutDeadlock() {
         final CommandRunner runner = new ProcessRunner();
-        final List<String> argv = Arrays.asList(javaExe(), "-cp", fixtureClasspath(),
-                "io.xac.systemd.exec.StderrFlood");
+        final List<String> argv = ExecFixtures.java(StderrFlood.class.getName());
         ThrowingSupplier<ExecResult> call = () -> runner.run(argv);
         ExecResult result = assertTimeoutPreemptively(Duration.ofSeconds(20), call);
         assertEquals(0, result.exitCode, result.stderr);
         assertTrue(result.stdout.contains("done"), result.stdout);
         assertTrue(result.stderr.length() >= 300_000, "stderr bytes=" + result.stderr.length());
-    }
-
-    /**
-     * surefire 默认以 manifest-only booter jar 启动 fork，此时 {@code java.class.path}
-     * 只剩 booter jar，子进程无法加载测试类；因此优先用测试类自身的 code source
-     * （target/test-classes）并附带 java.class.path。
-     */
-    private static String fixtureClasspath() {
-        String codeSource = null;
-        try {
-            java.net.URL location = ProcessRunnerTest.class.getProtectionDomain().getCodeSource().getLocation();
-            if (location != null && "file".equals(location.getProtocol())) {
-                codeSource = Paths.get(location.toURI()).toString();
-            }
-        } catch (URISyntaxException e) {
-            codeSource = null;
-        }
-        String javaClassPath = System.getProperty("java.class.path");
-        if (codeSource == null) {
-            return javaClassPath;
-        }
-        return codeSource + File.pathSeparator + javaClassPath;
     }
 }

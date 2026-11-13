@@ -8,17 +8,17 @@
 - Maven 3.9+
 - Docker（只有 e2e 需要；镜像是 Ubuntu 24.04 + systemd 255 + JRE 21）
 
-运行时依赖只有 picocli 4.7.6 与 snakeyaml 2.2；测试用 JUnit 5.10.2 与 Testcontainers 1.19.8；
-打包用 maven-shade-plugin 与 maven-assembly-plugin，e2e 用 maven-failsafe-plugin。
-不新增依赖，不追大版本。
+运行时依赖只有 picocli 4.7.6、snakeyaml 2.2 与 Lanterna 3.1.5（`tui` 命令使用）；测试用
+JUnit 5.10.2 与 Testcontainers 1.19.8；打包用 maven-shade-plugin 与 maven-assembly-plugin，
+e2e 用 maven-failsafe-plugin。不新增依赖，不追大版本。
 
 ## 构建
 
 ```bash
 mvn -f java-systemd-service-as-code/pom.xml -DskipTests package
-# → java-systemd-service-as-code/target/java-systemd-service-cli-0.1.3.jar
-# → java-systemd-service-as-code/target/java-systemd-service-cli-0.1.3.tar.gz
-#    解压后：java-systemd-service-cli-0.1.3/{bin/java-systemd-service-cli, libs/java-systemd-service-cli-0.1.3.jar}
+# → java-systemd-service-as-code/target/java-systemd-service-cli-0.2.0.jar
+# → java-systemd-service-as-code/target/java-systemd-service-cli-0.2.0.tar.gz
+#    解压后：java-systemd-service-cli-0.2.0/{bin/java-systemd-service-cli, libs/java-systemd-service-cli-0.2.0.jar}
 ```
 
 `bin/java-systemd-service-cli` 是 POSIX `sh` 启动脚本：先按 `XAC_JAVA` → `$JAVA_HOME/bin/java` → `PATH`
@@ -30,16 +30,16 @@ launcher 段。脚本按自身真实路径定位 jar，所以可以软链到 `/u
 ## 测试
 
 ```bash
-# 单元 + 集成测试：180 个，不需要 root / systemd / Docker
+# 单元 + 集成测试：507 个，不需要 root / systemd / Docker
 mvn -f java-systemd-service-as-code/pom.xml test
 
-# 真 systemd 端到端：10 个用例，需要 Docker
+# 真 systemd 端到端：13 个用例，需要 Docker
 mvn -f java-systemd-service-as-code/pom.xml -Pe2e verify
 ```
 
 e2e 用 Testcontainers 起一个 `--privileged` 的 Ubuntu 24.04 容器，`systemd` 作为 PID 1，覆盖
 apply/status/logs/destroy、幂等重跑、path-links 拒绝、影子 unit 拒绝、`SuccessExitStatus=143`、
-以及 `logs.file` 从文件读日志等场景。
+`logs.file` 从文件读日志，以及 `tui` 在非 TTY 下退 2、真实 PTY 里渲染/按 `?`/按 `q` 退出，以及从 TUI 里按键触发 apply 等场景。
 镜像缺失时先构建：
 
 ```bash
@@ -52,6 +52,17 @@ e2e 的细节（容器参数、产物怎么进去、`degraded` 状态的容忍�
 
 Windows 上跑 `mvn -Pe2e verify` 需要 Docker Desktop（WSL2 后端），且 `docker version` 可用。
 
+TUI 分两层测：
+
+- 视图层不启动终端：`TuiApp` / `EditScreen` / `StatusView` 等通过 `Display`、`KeySource` 抽象注入
+  `RecordingDisplay` / `ScriptedKeySource`，纯 JUnit 断言；Lanterna 适配层用
+  `LanternaDisplayTest`（动态代理 + `RecordingScreen`）与 `LanternaKeySourceTest`（匿名 `InputProvider`）验证。
+- 真实终端层进 e2e：`SmokeIT#tuiRendersInARealPtyAndQuits` 用 `script -qec` 分配 PTY、`stty` 设成
+  100×30，`TerminalCapture` 把 ANSI 流回放成字符网格；按键不是定时塞进去的，而是轮询屏幕直到出现
+  预期文本再写下一个键（FIFO 灌 stdin，detached exec 让 TUI 活过 `execInContainer` 调用），所以慢机器
+  也不会和渲染赛跑。`SmokeIT#tuiApplyRunsTheRealLifecycle` 用同样方式送 `a`→`y` 触发 apply，再断言
+  unit/env 真被写回、服务真在跑。另有 `SmokeIT#tuiRefusesToStartWithoutATty` 覆盖非 TTY 退 2。
+
 ## 目录
 
 ```
@@ -62,16 +73,23 @@ java-systemd-service-as-code/
 ├── docs/service-yaml-spec.md     立项时的原始参考稿，只读，不随实现改动
 ├── e2e/                          Dockerfile 与 e2e 说明
 └── src/main/java/io/xac/systemd/
-    ├── cli/                      picocli 命令（apply/status/logs/destroy/init）与 Main
-    ├── spec/                     xac.yaml 模型、schema 表、加载与静态校验
+    ├── cli/                      picocli 命令（apply/status/logs/destroy/init/tui）与 Main
+    ├── tui/                      Lanterna 主屏、键位、视图模型与编辑屏
+    ├── core/                     ServicePackage 门面（入口层唯一依赖）
+    ├── spec/                     xac.yaml 模型、schema 表、加载、校验与 yaml 文本
     ├── systemd/                  unit/env 渲染、命名与目标路径
     ├── apply/                    apply 与 destroy 的动作、预检、文件写入
     ├── exec/                     进程执行（CommandRunner）
     ├── status/                   systemctl show 解析与漂移判定
-    └── logs/                     journalctl 调用
+    └── logs/                     日志流（journalctl / 文件）
 ```
 
-分层纪律：`exec` 包不出现 systemd 语义，`spec` 包不做进程执行；渲染是纯函数、确定性输出。
+分层纪律：`tui` 只依赖 `core`，不得 import `cli`（可读 `spec` / `status` 等低层的不可变结果
+类型，如 `StatusResult`，但 systemd 动作编排只经 `core` / `apply`）；`cli` 仅允许在
+`RootCommand` 注册 `tui` 子命令处 import `tui`。`core` 只依赖
+`spec` / `systemd` / `exec` / `apply` / `status` / `logs`，不出现 `System.out`、退出码或用户文案；
+`spec` / `systemd` / `exec` 不反向依赖上层。`exec` 包不出现 systemd 语义，`spec` 包不做进程执行；
+渲染是纯函数、确定性输出。完整约定见 [`AGENTS.md`](AGENTS.md)。
 
 ## 代码约束
 
@@ -110,6 +128,6 @@ $env:GITCODE_TOKEN = '<token>'
 git push --prune "https://foreach1991:$env:GITCODE_TOKEN@gitcode.com/foreach1991/x-as-code.git" `
   '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'
 pwsh -NoProfile -File .github/scripts/sync-gitcode-release.ps1 `
-  -Owner foreach1991 -Repo x-as-code -Tag v0.1.3 `
-  -Asset java-systemd-service-as-code/target/java-systemd-service-cli-0.1.3.tar.gz
+  -Owner foreach1991 -Repo x-as-code -Tag v0.2.0 `
+  -Asset java-systemd-service-as-code/target/java-systemd-service-cli-0.2.0.tar.gz
 ```

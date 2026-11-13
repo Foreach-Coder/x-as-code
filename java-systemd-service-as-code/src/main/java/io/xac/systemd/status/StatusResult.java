@@ -64,18 +64,19 @@ public final class StatusResult {
             }
         }
         if (queryOk) {
-            String loadState = show.get("LoadState");
-            String activeState = show.get("ActiveState");
-            if ("not-found".equals(loadState) && unitInstalled) {
+            if (serviceNotFound()) {
                 // unit 文件在，systemd 却没有加载它——通常是忘了 daemon-reload。
                 drift.add("service: not-found");
-            } else if (activeState != null && !activeState.isEmpty()
-                    && !"active".equals(activeState)) {
-                String sub = show.get("SubState");
-                drift.add("service: " + activeState
-                        + (sub == null || sub.isEmpty() ? "" : " (" + sub + ")"));
+            } else {
+                String activeState = show.get("ActiveState");
+                if (activeState != null && !activeState.isEmpty()
+                        && !"active".equals(activeState)) {
+                    String sub = show.get("SubState");
+                    drift.add("service: " + activeState
+                            + (sub == null || sub.isEmpty() ? "" : " (" + sub + ")"));
+                }
             }
-            if (enabled != wantEnabled) {
+            if (autoStartMismatch()) {
                 drift.add(wantEnabled ? "auto-start disabled" : "auto-start enabled");
             }
         } else if (unitInstalled) {
@@ -86,52 +87,32 @@ public final class StatusResult {
         return drift;
     }
 
+    /** unit 文件存在但 systemd 的 LoadState 是 not-found，需要 daemon-reload。 */
+    public boolean serviceNotFound() {
+        return queryOk && unitInstalled && "not-found".equals(show.get("LoadState"));
+    }
+
+    /**
+     * 期望自启状态与 systemd 实际 UnitFileState 不一致。
+     * 查询失败时无法判断，返回 false，由 process 行统一标记 unknown。
+     */
+    public boolean autoStartMismatch() {
+        if (!queryOk) {
+            return false;
+        }
+        return actualAutoStartEnabled() != wantEnabled;
+    }
+
+    /** UnitFileState 优先；缺失时退回 StatusRunner 已经解析好的 enabled。 */
+    public boolean actualAutoStartEnabled() {
+        String state = show.get("UnitFileState");
+        if (state == null || state.isEmpty()) {
+            return enabled;
+        }
+        return "enabled".equals(state);
+    }
+
     public boolean healthy() {
         return drift().isEmpty();
-    }
-
-    public String format() {
-        StringBuilder out = new StringBuilder();
-        out.append("service: ").append(service).append('\n');
-        out.append("package: ").append(packageDir).append('\n');
-        out.append("unit: ").append(unitPath).append(unitState()).append('\n');
-        if (!envConfigured) {
-            out.append("env: (not configured)\n");
-        } else if (!envReadable) {
-            out.append("env: (cannot verify: root required)\n");
-        } else {
-            out.append("env: ").append(envPath)
-                    .append(envInSync ? " (in sync)" : " (out of sync)").append('\n');
-        }
-        out.append("active: ").append(value("ActiveState", "unknown"));
-        String sub = show.get("SubState");
-        if (sub != null && !sub.isEmpty()) {
-            out.append(" (").append(sub).append(')');
-        }
-        String since = show.get("ActiveEnterTimestamp");
-        if (since != null && !since.isEmpty()) {
-            out.append(" since ").append(since);
-        }
-        out.append('\n');
-        out.append("pid: ").append(value("MainPID", "unknown")).append('\n');
-        out.append("auto-start: ")
-                .append(queryOk ? (enabled ? "enabled" : "disabled") : "unknown")
-                .append('\n');
-        for (String line : drift()) {
-            out.append("drift: ").append(line).append('\n');
-        }
-        return out.toString();
-    }
-
-    private String unitState() {
-        if (unitInSync) {
-            return " (in sync)";
-        }
-        return unitInstalled ? " (out of sync)" : " (missing)";
-    }
-
-    private String value(String key, String fallback) {
-        String value = show.get(key);
-        return value == null || value.isEmpty() ? fallback : value;
     }
 }

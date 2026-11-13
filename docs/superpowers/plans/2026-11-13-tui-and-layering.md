@@ -40,15 +40,14 @@ java-systemd-service-as-code/src/main/java/io/xac/systemd/
   core/ServicePackage.java            新增：唯一门面
   core/InvalidSpecException.java      新增：带 violations 的受检异常
   core/StatusReport.java              新增：StatusResult + drift + healthy
-  core/LogSourceException.java        新增：日志来源不可用
   logs/LogSink.java                   新增：一行回调
   logs/LogStream.java                 新增：start/close
+  logs/LogSourceException.java        新增：日志来源不可用
   logs/FileLogStream.java             新增：FileTail 的流实现
   logs/JournaldLogStream.java         新增：journalctl --follow 的流实现
   logs/LogsRunner.java                删除（能力搬进 core + LogStream）
-  spec/SpecWriter.java                新增：模型 → 规范 YAML 文本
-  spec/SpecSaver.java                 新增：原子写文件
-  spec/YamlCommentScanner.java        新增：注释扫描与挂回路径
+  spec/SpecWriter.java                新增：模型 → 规范 YAML 文本 + 原子落盘
+  spec/YamlCommentScanner.java        新增：注释扫描，并在 render 输出上合并注释
   spec/Comments.java                  新增：line → inline、path → leading 的表
   spec/LineDiff.java                  新增：逐行 diff 文本
   tui/TuiCommand.java                 新增：picocli 子命令
@@ -261,7 +260,7 @@ public ApplyOutcome run(ApplyContext ctx);   // 不再接受 PrintStream
 @Test void stopsAtFirstFailure() { /* RestartAction 抛 ActionFailure → steps 以失败步结尾，failed.message 含原因 */ }
 ```
 
-`CliTest` 保留现有对 stdout 的断言（`would …`、`failed: …`），确保命令层输出不变。
+`ApplyCommandTest` 补三条全文断言（dry-run 7 行、正常 7 行、失败 6 行），确保命令层输出不变。
 
 - [ ] **Step 2: 跑失败**
 
@@ -356,12 +355,15 @@ if (plan.willRemove.isEmpty()) out.println("  (none)");
 out.println("keep: " + String.join(", ", plan.willKeep));   // Java 8 有 String.join
 // 确认后
 DestroyOutcome outcome = runner.run(ctx);
-for (StepResult step : outcome.steps) out.println(ctx.dryRun ? "would " + step.plan.description : step.plan.description);
+for (StepResult step : outcome.steps) {
+    if (step.plan == null) continue;   // warning-only 步骤：只有 message，没有动作描述
+    out.println(ctx.dryRun ? "would " + step.plan.description : step.plan.description);
+}
 for (String w : outcome.warnings) out.println("warning: " + w);
 return outcome.failed == null ? 0 : 1;
 ```
 
-注意：原实现把 warning 打在**该步描述之后**、下一步之前。新实现用 `StepResult.message` 承载：`ok=false` 时是失败原因；`ok=true` 且 `message != null` 时是“完成但有话要说”，CLI 在该行后打印 `warning: <message>`。`DestroyOutcome.warnings` 只保留汇总视图（供 TUI 面板与最终摘要），不再单独驱动 CLI 打印。
+注意：原实现把 warning 打在**该步描述之后**、下一步之前。新实现用 `StepResult.message` 承载：`ok=false` 时是失败原因；`ok=true` 且 `message != null` 时是“完成但有话要说”，CLI 在该行后打印 `warning: <message>`。`DestroyOutcome.warnings` 只保留汇总视图（供 TUI 面板与最终摘要），不再单独驱动 CLI 打印。warning-only 步骤的 `plan` 为 `null`（destroy 用它保留循环前 warning 的位置），消费方必须判空。
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -379,7 +381,7 @@ git add -A && git commit -m "refactor: DestroyRunner 返回结构化的 DestroyO
 
 **Files:**
 - Create: `core/ServicePackage.java`、`core/InvalidSpecException.java`、`core/StatusReport.java`
-- Modify: `cli/ApplyCommand.java`、`cli/StatusCommand.java`、`cli/DestroyCommand.java`、`cli/SpecCommands.java`（删除）
+- Modify: `cli/ApplyCommand.java`、`cli/StatusCommand.java`、`cli/DestroyCommand.java`、`cli/LogsCommand.java`（改走 `ServicePackage.open`，仍调用旧 `LogsRunner`）、`cli/SpecCommands.java`（删除）
 - Create: `src/test/java/io/xac/systemd/core/ServicePackageTest.java`
 - Modify: `cli/CliTest.java`（断言不变，若内部夹具引用 `SpecCommands` 则改为 facade）
 
@@ -467,7 +469,7 @@ public DestroyOutcome destroy(boolean dryRun) throws InvalidSpecException {
 }
 ```
 
-CLI 三个命令改为：`ServicePackage pkg = ServicePackage.open(dir);`，捕获 `InvalidSpecException` → 逐条 `System.err.println(v)` → 返回 2。删除 `cli/SpecCommands.java`；`cli/LogsCommand` 先保留原实现（Task 6 再改）。
+CLI 四个命令改为：`ServicePackage pkg = ServicePackage.open(dir);`，捕获 `InvalidSpecException` → 逐条 `System.err.println(v)` → 返回 2。`LogsCommand` 只把加载换成 `open`，日志读取仍用旧 `LogsRunner`（Task 6 再改成 `LogStream`）。删除 `cli/SpecCommands.java`。
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -484,7 +486,7 @@ git add -A && git commit -m "refactor: 新增 core.ServicePackage，CLI 改为�
 ### Task 6: 日志改为 LogStream，CLI logs 迁移
 
 **Files:**
-- Create: `logs/LogSink.java`、`logs/LogStream.java`、`logs/FileLogStream.java`、`logs/JournaldLogStream.java`、`core/LogSourceException.java`
+- Create: `logs/LogSink.java`、`logs/LogStream.java`、`logs/FileLogStream.java`、`logs/JournaldLogStream.java`、`logs/LogSourceException.java`
 - Modify: `core/ServicePackage.java`（新增 `logs(int)`）、`cli/LogsCommand.java`
 - Delete: `logs/LogsRunner.java`
 - Create: `src/test/java/io/xac/systemd/logs/FileLogStreamTest.java`、`JournaldLogStreamTest.java`
@@ -499,6 +501,7 @@ public interface LogStream extends AutoCloseable {
     void close();                          // 幂等，可从任意线程调用
 }
 
+// logs/LogSourceException.java
 public final class LogSourceException extends RuntimeException {
     public LogSourceException(String message);
 }
@@ -560,15 +563,20 @@ git add -A && git commit -m "refactor: 日志改为 core.LogStream，CLI 经门�
 **Interfaces:**
 ```java
 public final class Canvas {
+    public static final char PLACEHOLDER = '\0';        // 宽字符占用的第二格
     public Canvas(int width, int height);
     public int width(); public int height();
     public void clear();
-    public void text(int x, int y, String s);           // 超宽截断，不换行
+    public void text(int x, int y, String s);           // 按显示列写；超宽截断，不换行
     public void hline(int y, char c);
-    public String line(int y);                          // 测试断言用
+    public String line(int y);                          // 测试断言用（含 PLACEHOLDER）
 }
 
-public interface Display { void draw(Canvas canvas); }
+public interface Display extends Closeable {
+    void show(Canvas canvas);
+    Size size();                                        // 嵌套类 Size { int width; int height; }
+    void close();
+}
 
 public interface KeySource { KeyEvent next(long timeoutMillis) throws IOException; }  // 超时返回 null
 
@@ -578,10 +586,10 @@ public enum NavKey {
 }
 public final class KeyEvent { public final NavKey key; public final char ch; }
 
-public final class TuiApp implements Runnable {
+public final class TuiApp {
     TuiApp(ServicePackage pkg, Display display, KeySource keys);
-    public void run();          // 主循环
-    void tick();                // 测试用：处理一个事件 + 渲染
+    public int run();           // 主循环；正常退出 0，终端读写故障 1
+    public boolean tick();      // 测试用：处理一个事件 + 渲染；返回是否继续
     boolean running();
     String statusNote();
 }
@@ -593,7 +601,8 @@ public final class TuiApp implements Runnable {
 @Test void drawsTitleStatusAndKeyBar() {
     TuiApp app = newApp(80, 24, new KeyEvent(QUIT, '\0'));
     app.tick();
-    assertEquals("┌ xac.demo " + repeat('─', 60) + " running · auto-start on · root ┐", display.line(0));
+    // 80 列 - 11（"┌ xac.demo "）- 33（" running · auto-start on · root ┐"）= 36
+    assertEquals("┌ xac.demo " + repeat('─', 36) + " running · auto-start on · root ┐", display.line(0));
     assertTrue(display.line(23).contains("q quit"));
 }
 
@@ -610,12 +619,12 @@ Expected: COMPILATION ERROR —— `io.xac.systemd.tui` 不存在。
 - [ ] **Step 3: 最小实现**
 
 - `pom.xml` 加 `com.googlecode.lanterna:lanterna:3.1.5`（compile）。
-- `Canvas`：`char[][] cells`，`text` 逐字符写入，越界跳过；空单元格为 `' '`。
-- `LanternaDisplay`：`Terminal` + `Screen`，`draw` 时 `screen.clear()`，按行列 `setCharacter`，最后 `refresh()`；`TuiCommand` 用 `DefaultTerminalFactory().createTerminal()`，`try/finally` 关闭。
-- `LanternaKeySource`：`terminal.pollInput(timeout)` → `KeyEvent`（`KeyType.ArrowUp` → UP 等；`Character` → CHAR）。
-- `TuiApp`：状态机字段 `running`、`overlay`、`status`；`tick` 取一个事件（测试用注入的 `ScriptedKeySource`），`QUIT`/`ESC` 停；渲染 → `display.draw(canvas)`。
-- `TuiCommand`：非 TTY（`System.console() == null`）→ stderr `tui requires an interactive terminal` + 退 2；`ServicePackage.open` 失败 → 打印 violations + 退 2；正常 `new TuiApp(...).run()` 退 0。
-- e2e：`SmokeIT` 新增 `tuiRequiresTerminal`，容器内 `java -jar xac.jar tui /opt/demo`（无 TTY）断言退出 2 且 stderr 含该行。
+- `Canvas`：`char[][] cells`，坐标按**显示列**；CJK/全角/代理对占 2 列，第二格写 `PLACEHOLDER`（`'\0'`），`text`/`put` 写前先清掉被覆盖的旧字形（含半格宽字），越界时整个字形丢弃、不写半格；空单元格为 `' '`。
+- `LanternaDisplay`：`Terminal` + `Screen`，`show` 时 `screen.clear()`、按行列 `setCharacter`、最后 `refresh()`；遇到 `PLACEHOLDER` 跳过（宽字形的第二列由终端自己推进），代理对拼成完整字符串再 `TextCharacter.fromString(...)`；`close()` 吞掉 `screen.close()` 的 `IOException`（`terminal.close()` 同样吞），避免 `finally` 覆盖退出码；`TuiCommand` 用 `DefaultTerminalFactory().createTerminal()`，`try/finally` 关闭。
+- `LanternaKeySource`：Lanterna 3.1.5 的 `InputProvider` 没有带超时的读，用 `pollInput()` + 10ms 轮询实现 `next(timeoutMillis)`（超时返回 null），`KeyStroke` → `KeyEvent`（`KeyType.ArrowUp` → UP 等；`Character` → CHAR）。
+- `TuiApp`：状态机字段 `running`、`failed`、`notice`；`tick` 取一个事件（测试用注入的 `ScriptedKeySource`），`QUIT`/`ESC` 停；渲染 → `display.show(canvas)`。`run()` 用 try 包住「读事件 + 渲染」：`IOException` → `input error: ...`；任意 `RuntimeException`（含 `UncheckedIOException`）→ `tui failed: ...`、停循环、返回 1；正常退出 0。
+- `TuiCommand`：非 TTY 判定 = 已附加 console 且 `TERM` 非空、trim+lowercase 后不是 `dumb`/`unknown` → 否则 stderr `tui requires an interactive terminal` + 退 2；`ServicePackage.open` 失败 → 打印 violations + 退 2；正常返回 `TuiApp.run()` 的退出码（故障时把 `statusNote()` 打到 stderr）。
+- e2e：`SmokeIT` 新增 `tuiRefusesToStartWithoutATty`，容器内 `java -jar xac.jar tui /opt/demo`（无 TTY）断言退出 2 且 stderr 含该行。
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -721,7 +730,7 @@ Expected: COMPILATION ERROR。
 
 - [ ] **Step 3: 最小实现**
 
-- `TuiApp` 状态：`overlay` 增加 `ACTION` + `ActionOverlay` 实例；`a/r/d` 创建覆盖层（`a` 调 `pkg.plan()`；`d` 调 `pkg.destroy(true)` 取计划——dry-run 不落盘）。
+- `TuiApp` 状态：`overlay` 增加 `ACTION` + `ActionOverlay` 实例；`a/r/d` 创建覆盖层（`a` 调 `pkg.plan()`；`d` 调 `pkg.destroyPlan()` 取计划——纯读计划，不落盘）。
 - 执行：apply → `pkg.apply(false)`；restart → 新增的 `pkg.restart()`（`Preflight.check` + `RestartAction.run`，结果包装成单个 `StepResult`）；destroy → `pkg.destroy(false)`。结果面板显示 `ok/failed` 与 warnings；失败停在该步。
 - `ServicePackage.restart()`：
 ```java
@@ -761,8 +770,8 @@ git add -A && git commit -m "feat: TUI 动作面板（apply 预览/restart/destr
 **Interfaces:**
 ```java
 public final class SpecWriter {
-    public static String write(ServiceSpec spec);                     // 无注释，纯结构
-    public static String write(ServiceSpec spec, Comments comments);  // 带保留注释
+    public static String render(ServiceSpec spec);                     // 纯结构，不含注释
+    public static void save(Path file, String yaml) throws IOException; // 原子落盘：软链跟随、0644
 }
 ```
 
@@ -770,7 +779,7 @@ public final class SpecWriter {
 
 ```java
 @Test void writesKeysInFixedOrderAndEndsWithSingleNewline() {
-    String yaml = SpecWriter.write(spec);
+    String yaml = SpecWriter.render(spec);
     assertTrue(yaml.startsWith("name: demo\n"));
     assertTrue(yaml.endsWith("\n") && !yaml.endsWith("\n\n"));
     assertTrue(yaml.indexOf("\nartifact:") < yaml.indexOf("\nruntime:"));
@@ -788,11 +797,11 @@ Expected: COMPILATION ERROR。
 
 - [ ] **Step 3: 最小实现**
 
-按模板顺序输出：`name`、`description`（非 null）、`artifact.jar`、`runtime.java` + `opts`（非空）、`env`（非空，按插入序）、`properties`（非空）、`workdir`（非 null）、`path-links`（非空）、`logs.file`（非 null）、`lifecycle` 四键（恒写，使用 `OrDefault()`）。标量引用规则：含 `: `、` #`、以空格开头/结尾、为空 → `"` 包裹并把 `"`→`\"`、`\`→`\\`；否则原样。列表项 `- <scalar>`；map 键值同规则。
+按模板顺序输出：`name`、`description`（非 null）、`artifact.jar`、`runtime.java` + `opts`（非空）、`env`（非空，键按自然序）、`properties`（非空，键按自然序）、`workdir`（非 null，与包目录同一目录时写 `.`）、`path-links`（非空，保序）、`logs.file`（非 null，原样）、`lifecycle` 四键（恒写，使用 `OrDefault()`）。标量引用规则：含 `: `、` #`、以空格开头/结尾、为空、形似布尔/数字/日期、以 YAML 指示符或 `<<` 开头、含控制字符 → `"` 包裹；C0/DEL/C1 写成 `\xNN`，U+2028/U+2029 写成 `\uNNNN`；列表项 `- <scalar>`，map 键值同规则。`save`：同目录临时文件 → 0644 → `ATOMIC_MOVE`；目标是软链时写到 `toRealPath()` 目标；文件系统不支持原子移动时抛 `IOException`，不回退到普通 move。
 
 - [ ] **Step 4: 跑测试确认通过**
 
-Run: `MVN test -Dtest=SpecWriterTest` → Expected: 4 tests, 0 failures。
+Run: `MVN test -Dtest=SpecWriterTest` → Expected: 29 tests, 0 failures。
 
 - [ ] **Step 5: 提交**
 
@@ -805,8 +814,7 @@ git add -A && git commit -m "feat: SpecWriter 规范化输出 xac.yaml"
 ### Task 11: 注释扫描与挂回
 
 **Files:**
-- Create: `spec/Comments.java`、`spec/YamlCommentScanner.java`
-- Modify: `spec/SpecWriter.java`（消费 `Comments`）
+- Create: `spec/Comments.java`、`spec/YamlCommentScanner.java`（`scan` 与 `apply`）
 - Create: `src/test/java/io/xac/systemd/spec/YamlCommentScannerTest.java`
 
 **Interfaces:**
@@ -818,7 +826,14 @@ public final class Comments {
 }
 
 public final class YamlCommentScanner {
-    public static Comments scan(String text);
+    public static Comments scan(String yaml);
+    static Comments scanTemplate();                // 包内测试用；读取模板原文
+    public static Comments scanTemplate(String name);     // 写盘用；替换注释里的 {{name}}
+    public static Comments merge(Comments base, Comments override);
+    public static ApplyResult apply(String rendered, Comments comments);
+    public static ApplyResult apply(String rendered, Comments source, Comments template);
+    public static final class ApplyResult { public final String text; public final int kept;
+                                            public final int dropped; }
 }
 ```
 
@@ -830,7 +845,7 @@ public final class YamlCommentScanner {
 @Test void keepsListValueComment() { /* "- ./conf:/opt/conf  # 配置" → inline["path-links[./conf:/opt/conf]"] */ }
 @Test void ignoresHashInsideQuotes() { /* description: "a # b" 不产生注释 */ }
 @Test void reportsOrphans() { /* 文件末尾游离注释进 orphans */ }
-@Test void writerReplaysComments() { /* write(spec, comments) 输出含注释且再 scan 一致 */ }
+@Test void writerReplaysComments() { /* YamlCommentScanner.apply(SpecWriter.render(spec), comments) 输出含注释且再 scan 一致 */ }
 ```
 
 - [ ] **Step 2: 跑失败**
@@ -840,11 +855,11 @@ Expected: COMPILATION ERROR。
 
 - [ ] **Step 3: 最小实现**
 
-逐行扫描：维护 `Deque<IndentNode>`（缩进 → 路径段）；空行清空“待挂”注释块；行内 `#` 只有在引号外且前面是空白时才算注释；`- ` 开头按值生成 `key[value]` 段。`SpecWriter` 在每行前输出 `leading`，行尾输出 ` # inline`。
+逐行扫描：维护 `Deque<IndentNode>`（缩进 → 路径段）；空行把“待挂”注释块冲进 `orphans`；行内 `#` 只有在引号外且前面是空白时才算注释；`- ` 开头按值生成 `key[value]` 段；重复值按路径出现次数判定（inline 与 leading 合并看待），保留第一次出现的元素、其余进 `orphans`。`apply(String rendered, Comments comments)` 在 `SpecWriter.render(spec)` 的输出上插入前置注释行、追加行尾注释，返回 `ApplyResult{text, kept, dropped}`；三参重载用 `scanTemplate(name)` 打底、用户注释覆盖，用户文件里逐字等于模板原文的注释、以及 `key:` 开头的被注释字段示例不计入 `dropped`；模板示例行只作锚点，不重新写出。`SpecWriter` 本身不消费 `Comments`；注释文本做换行转义。
 
 - [ ] **Step 4: 跑测试确认通过**
 
-Run: `MVN test -Dtest=YamlCommentScannerTest` → Expected: 6 tests, 0 failures。
+Run: `MVN test -Dtest=YamlCommentScannerTest` → Expected: 35 tests, 0 failures。
 
 - [ ] **Step 5: 提交**
 
@@ -914,7 +929,7 @@ git add -A && git commit -m "feat: 编辑器字段树与草稿模型"
 ### Task 13: 编辑表单 UI 与保存流程
 
 **Files:**
-- Create: `tui/edit/EditScreen.java`、`tui/edit/EditorView.java`、`tui/edit/SaveFlow.java`、`spec/SpecSaver.java`、`spec/LineDiff.java`
+- Create: `tui/edit/EditScreen.java`、`tui/edit/EditorView.java`、`tui/edit/SaveFlow.java`、`spec/LineDiff.java`
 - Modify: `tui/TuiApp.java`（`e` 打开，`ESC` 返回）
 - Create: `src/test/java/io/xac/systemd/tui/edit/EditScreenTest.java`、`SaveFlowTest.java`、`spec/LineDiffTest.java`
 
@@ -922,9 +937,6 @@ git add -A && git commit -m "feat: 编辑器字段树与草稿模型"
 ```java
 public final class LineDiff {
     public static List<String> diff(String oldText, String newText);   // "  x" / "- x" / "+ x"
-}
-public final class SpecSaver {
-    public static void save(Path file, String text) throws IOException; // 同目录临时文件 + 0644 + ATOMIC_MOVE
 }
 public final class SaveFlow {
     public static Result prepare(EditorModel model, Path yamlFile);
@@ -961,7 +973,7 @@ Expected: COMPILATION ERROR。
 
 - `EditorView`：渲染字段行（path 左、值右，截断），底部两行提示 `enter edit  s save  u undo  q cancel`，错误行标红（Canvas 不带颜色时用 `!` 前缀）。
 - `EditScreen`：`focus` 整数、`mode {BROWSE, EDIT_SCALAR, EDIT_LINES}`；标量编辑复用一个 `StringBuilder` 缓冲（`CHAR` 追加、`BACKSPACE` 删、`ENTER` 提交、`ESC` 取消）；列表/map 进入 `EDIT_LINES`：`↑↓` 选行、`a` 追加空行、`x` 删行、`ENTER` 编辑该行为标量、`ESC` 返回。
-- `SaveFlow.prepare`：`model.validate()` → 错误直接返回；否则 `SpecWriter.write(model.toSpec(), comments)` → `LineDiff.diff(old, new)` → 比较 `mtime+size` 生成提示；`commit` 调 `SpecSaver.save`。
+- `SaveFlow.prepare`：`model.validate()` → 错误直接返回；否则 `YamlCommentScanner.apply(SpecWriter.render(model.toSpec()), comments, YamlCommentScanner.scanTemplate())` 产出最终文本（`ApplyResult.dropped` 与 `Comments.orphans` 条数都进保存前提示）→ `LineDiff.diff(old, new)` → 比较 `mtime+size` 生成提示；`commit` 调 `SpecWriter.save(yamlFile, text)`。
 - `TuiApp`：`e` 进入编辑（先 `ServicePackage.open` 已持有 spec；同时读原文件文本与注释），编辑中暂停状态轮询；保存成功 → 重新 `ServicePackage.open` 重建状态与日志（`LogStream` 重建）；`q` 脏数据二次确认（`y` 放弃）。
 
 - [ ] **Step 4: 跑测试确认通过**
@@ -981,20 +993,33 @@ git add -A && git commit -m "feat: TUI 结构化编辑与规范化保存"
 **Files:**
 - Modify: `pom.xml`（版本 `0.2.0`）、`cli/RootCommand.java`（`version = "0.2.0"`）、`pom.xml` 的 shade 配置注释
 - Modify: `README.md`、`AGENTS.md`、`CONTRIBUTING.md`、`docs/superpowers/specs/2026-11-13-tui-and-layering-design.md`（补「实现落点」小节）
-- Create: `e2e/` 无新增；`SmokeIT` 加 terminfo 冒烟
+- Create: `e2e/` 无新增；`SmokeIT` 加真实 PTY 冒烟
 
 - [ ] **Step 1: 写失败测试**
 
-`SmokeIT` 新增 `tuiLoadsLanternaTerminfo()`：容器内 `java -jar xac.jar tui /opt/demo`（非 TTY）→ 退 2 且 stderr 是 `tui requires an interactive terminal`（若 terminfo 缺失，Lanterna 会在创建终端时抛异常并打印堆栈，此断言即失败）。
+`SmokeIT` 新增 `tuiRunsInARealPty()`：用 `script` 给容器内命令分配真实 pty，喂 `q` 后退出，断言退出码 0、首帧含服务名与状态行、且没有走非 TTY 分支：
 
-- [ ] **Step 2: 跑失败**
+```java
+ExecResult r = container.execInContainer("sh", "-c",
+        "printf 'q' | TERM=xterm script -qec 'java -jar /opt/xac/xac.jar tui /opt/demo' /dev/null");
+assertEquals(0, r.getExitCode(), r.getStderr());
+assertTrue(r.getStdout().contains("demo"));
+assertTrue(r.getStdout().contains("unit"));
+assertFalse(r.getStdout().contains("tui requires an interactive terminal"));
+```
 
-Run: `MVN -Pe2e verify -Dtest=SmokeIT#tuiLoadsLanternaTerminfo`
-Expected: 若 shade 过滤了 terminfo，FAILED 且 stderr 含 `NoSuchFileException` 或 `terminfo`。
+命令必须显式带 `TERM=xterm`：Testcontainers 的 `execInContainer` 没有 TTY、也不设置 `TERM`，`script` 只分配 pty 不补环境变量；`TERM` 为空时 `TuiCommand` 会按非 TTY 退 2，`assertEquals(0)` 必然失败。
+
+理由：Lanterna 3.1.5 的 Linux 终端走 `UnixTerminal`/`stty`，fat jar 内没有 `terminfo/` 资源（见设计文档 §9），所以「jar 里有没有 terminfo」这个前提本身不成立；而且原来的非 TTY 用例在 `System.console() == null` 处就返回 2，根本走不到终端初始化，永远通过、证明不了打包正确。真实 pty 才覆盖「创建终端 → 画首帧 → 读键 → 退出」整条链。
+
+- [ ] **Step 2: 跑冒烟（预期 PASS）**
+
+Run: `MVN -Pe2e verify -Dtest=SmokeIT#tuiRunsInARealPty`
+Expected: PASS。本用例是回归冒烟，没有「先红」状态；若 FAILED，看 stderr 是否 `NoSuchFileException`/`stty`/`Cannot run program`——那是打包或终端工厂的问题，按提示修，不要降低断言。
 
 - [ ] **Step 3: 实现**
 
-- `pom.xml`：版本 `0.2.0`；shade 的 `filters` 里**不得**出现排除 `**/terminfo/**`（当前无 filters，保持无）；`ManifestResourceTransformer` 不变。
+- `pom.xml`：版本 `0.2.0`；shade **不声明任何资源 `filters`/`includes`**（当前没有，保持通用；Lanterna 3.1.5 的 Linux 终端不读 jar 内 terminfo）；`ManifestResourceTransformer` 不变。
 - 全仓替换版本号 `0.1.3` → `0.2.0`（`cli/RootCommand.java`、`README.md`、`AGENTS.md`、`CONTRIBUTING.md`、`.github/workflows/publish.yml`、`.github/scripts/sync-gitcode-release.ps1`）；历史计划/设计文档不改。
 - `AGENTS.md`：分层纪律（`cli → core`、`tui → core`、`spec/systemd/exec` 不反向依赖）；依赖白名单加 Lanterna；命令段加 `tui`；「TUI 仅 Linux/SSH」。
 - `README.md`：新增「TUI」一节（启动、键位表、截图式块、非 TTY 说明、编辑与保存的安全行为）。
@@ -1005,7 +1030,7 @@ Expected: 若 shade 过滤了 terminfo，FAILED 且 stderr 含 `NoSuchFileExcept
 
 ```bash
 MVN clean test          # Expected: 约 230 tests, 0 failures（16 skipped 允许）
-MVN -Pe2e verify        # Expected: 230 + 11 e2e，BUILD SUCCESS
+MVN -Pe2e verify        # Expected: 230 + 12 e2e，BUILD SUCCESS
 MVN -DskipTests package # Expected: target/java-systemd-service-cli-0.2.0.tar.gz
 ```
 
@@ -1037,7 +1062,7 @@ git add -A && git commit -m "build: 发布 0.2.0（TUI 与三层分层）"
 | §6.6 动作 | Task 9（apply 预览、destroy 仅 y、restart 确认） |
 | §7 编辑 | Task 10/11/12/13 |
 | §8 测试 | 每个 Task 的测试步骤；Task 14 e2e |
-| §9 交付 | Task 14（版本、terminfo、文档） |
+| §9 交付 | Task 14（版本、真实 PTY 冒烟、文档） |
 
 **2. 占位符扫描**：本文件不含 `TBD`/`TODO`/`implement later`；所有代码块给出可直接编译的签名或方法体片段。
 
